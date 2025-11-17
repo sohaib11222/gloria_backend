@@ -1,0 +1,35 @@
+syntax = "proto3";
+package core.booking;
+
+// OTA XML field naming conventions for car rental booking
+message CreateRequest {
+  string agent_id = 1;           // AgentId
+  string source_id = 2;          // SourceId (REQUIRED to route to the supplier)
+  string agreement_ref = 3;      // AgreementRef
+  string supplier_offer_ref = 4; // SupplierOfferRef
+  string idempotency_key = 5;    // IdempotencyKey
+  string agent_booking_ref = 6;  // AgentBookingRef (optional)
+}
+
+// OTA XML field naming conventions for car rental booking response
+message Booking {
+  string supplier_booking_ref = 1; // SupplierBookingRef
+  string status = 2;               // BookingStatus (REQUESTED|CONFIRMED|CANCELLED|FAILED)
+  string agreement_ref = 3;        // AgreementRef
+  string source_id = 4;            // SourceId
+}
+
+message ModifyRequest { string supplier_booking_ref = 1; string source_id = 2; }
+message CancelRequest { string supplier_booking_ref = 1; string source_id = 2; }
+message CheckRequest  { string supplier_booking_ref = 1; string source_id = 2; }
+
+service BookingService {
+  rpc Create(CreateRequest) returns (Booking);
+  rpc Modify(ModifyRequest) returns (Booking);
+  rpc Cancel(CancelRequest) returns (Booking);
+  rpc Check(CheckRequest)  returns (Booking);
+}
+
+
+
+

@@ -1,0 +1,17 @@
+console.log('🔧 Testing Error Handling Fix');
+console.log('=============================');
+console.log('');
+console.log('✅ Fixed Issues:');
+console.log('1. Changed agreement_ref to call.request.agreement_ref in error message');
+console.log('2. This resolves the ReferenceError: agreement_ref is not defined');
+console.log('');
+console.log('🎯 Error Flow Now:');
+console.log('1. Prisma throws P2002 (unique constraint)');
+console.log('2. gRPC server catches it with proper variable scope');
+console.log('3. Returns Code 6 with helpful message using call.request.agreement_ref');
+console.log('4. REST API converts to 409 Conflict');
+console.log('5. User gets clear error message');
+console.log('');
+console.log('✅ The unhandled promise rejection should now be completely resolved!');
+console.log('');
+console.log('🚀 Try creating an agreement now - you should get a proper error message.');

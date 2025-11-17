@@ -1,0 +1,41 @@
+syntax = "proto3";
+package core.availability;
+
+// OTA XML field naming conventions for car rental availability
+message SearchCriteria {
+  string pickup_unlocode = 1;      // PickupLocation (UN/LOCODE)
+  string dropoff_unlocode = 2;     // DropoffLocation (UN/LOCODE)
+  string pickup_iso = 3;           // PickupDateTime (ISO 8601)
+  string dropoff_iso = 4;          // DropoffDateTime (ISO 8601)
+  uint32 driver_age = 5;           // DriverAge
+  string residency_country = 6;    // ResidencyCountry (ISO 3166-1 alpha-2)
+  repeated string vehicle_classes = 7;  // VehicleClass (OTA codes: ECMN, CDMR, etc.)
+  repeated string agreement_refs = 8;   // AgreementRef
+}
+
+message SubmitRequest { SearchCriteria criteria = 1; string agent_id = 2; string request_id = 3; }
+message SubmitResponse { string request_id = 1; uint32 expected_sources = 2; uint32 recommended_poll_ms = 3; }
+
+message PollRequest { string request_id = 1; uint64 since_seq = 2; uint32 wait_ms = 3; }
+// OTA XML field naming conventions for car rental offers
+message Offer {
+  string source_id = 1;            // SourceId
+  string agreement_ref = 2;        // AgreementRef
+  string vehicle_class = 3;        // VehicleClass (OTA codes: ECMN, CDMR, etc.)
+  string vehicle_make_model = 4;   // VehicleMakeModel
+  string rate_plan_code = 5;       // RatePlanCode (BAR, MEMBER, PREPAY, etc.)
+  string currency = 6;             // Currency (ISO 4217)
+  double total_price = 7;          // TotalPrice
+  string supplier_offer_ref = 8;   // SupplierOfferRef
+  string availability_status = 9;  // AvailabilityStatus (AVAILABLE, ON_REQUEST, etc.)
+}
+message PollResponse { bool complete = 1; uint64 last_seq = 2; repeated Offer offers = 3; }
+
+service AvailabilityService {
+  rpc Submit(SubmitRequest) returns (SubmitResponse);
+  rpc Poll(PollRequest) returns (PollResponse);
+}
+
+
+
+

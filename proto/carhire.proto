@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package carhire;
+
+// Car Hire Service Definition
+service CarHireService {
+  // Get available cars
+  rpc GetAvailableCars(GetAvailableCarsRequest) returns (GetAvailableCarsResponse);
+  
+  // Book a car
+  rpc BookCar(BookCarRequest) returns (BookCarResponse);
+  
+  // Cancel a booking
+  rpc CancelBooking(CancelBookingRequest) returns (CancelBookingResponse);
+  
+  // Get booking status
+  rpc GetBookingStatus(GetBookingStatusRequest) returns (GetBookingStatusResponse);
+  
+  // Health check
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// Request/Response Messages
+message GetAvailableCarsRequest {
+  string location = 1;
+  string start_date = 2;
+  string end_date = 3;
+  string car_type = 4;
+}
+
+message GetAvailableCarsResponse {
+  repeated Car cars = 1;
+  string status = 2;
+  string message = 3;
+}
+
+message BookCarRequest {
+  string car_id = 1;
+  string customer_id = 2;
+  string start_date = 3;
+  string end_date = 4;
+  string pickup_location = 5;
+  string dropoff_location = 6;
+}
+
+message BookCarResponse {
+  string booking_id = 1;
+  string status = 2;
+  string message = 3;
+  double total_cost = 4;
+}
+
+message CancelBookingRequest {
+  string booking_id = 1;
+  string reason = 2;
+}
+
+message CancelBookingResponse {
+  string status = 1;
+  string message = 2;
+  double refund_amount = 3;
+}
+
+message GetBookingStatusRequest {
+  string booking_id = 1;
+}
+
+message GetBookingStatusResponse {
+  string booking_id = 1;
+  string status = 2;
+  Car car = 3;
+  string start_date = 4;
+  string end_date = 5;
+  double total_cost = 6;
+}
+
+message HealthCheckRequest {
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  string status = 1;
+  string message = 2;
+  string timestamp = 3;
+}
+
+message Car {
+  string id = 1;
+  string make = 2;
+  string model = 3;
+  string year = 4;
+  string type = 5;
+  double daily_rate = 6;
+  string location = 7;
+  bool available = 8;
+}

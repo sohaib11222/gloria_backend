@@ -1,0 +1,37 @@
+syntax = "proto3";
+package core.agreement;
+
+message Agreement {
+  string id = 1;
+  string agent_id = 2;
+  string source_id = 3;
+  string agreement_ref = 4;
+  string status = 5;
+  string valid_from = 6;
+  string valid_to = 7;
+}
+
+message CreateDraftRequest { string agent_id = 1; string source_id = 2; string agreement_ref = 3; string valid_from = 4; string valid_to = 5; }
+message OfferRequest { string agreement_id = 1; }
+message AcceptRequest { string agreement_id = 1; }
+message SetStatusRequest { string agreement_id = 1; string status = 2; }
+
+message ListByAgentRequest { string agent_id = 1; string status = 2; }
+message ListBySourceRequest { string source_id = 1; string status = 2; }
+message GetRequest { string agreement_id = 1; }
+
+message Agreements { repeated Agreement items = 1; }
+
+service AgreementService {
+  rpc CreateDraft(CreateDraftRequest) returns (Agreement);
+  rpc Offer(OfferRequest) returns (Agreement);
+  rpc Accept(AcceptRequest) returns (Agreement);
+  rpc SetStatus(SetStatusRequest) returns (Agreement);
+  rpc ListByAgent(ListByAgentRequest) returns (Agreements);
+  rpc ListBySource(ListBySourceRequest) returns (Agreements);
+  rpc Get(GetRequest) returns (Agreement);
+}
+
+
+
+

@@ -1,0 +1,33 @@
+syntax = "proto3";
+package core.verification;
+
+message RunSourceReq {
+  string source_id = 1;
+  string test_agreement_ref = 2; // supplier's sandbox agreement ref
+}
+message RunAgentReq {
+  string agent_id = 1;
+  string source_id = 2;          // optional for mock; required in real env
+  string test_agreement_ref = 3; // optional for mock adapter
+}
+message StatusReq { string company_id = 1; }
+
+message StepResult {
+  string name = 1;
+  bool passed = 2;
+  string detail = 3;
+}
+
+message Report {
+  string company_id = 1;
+  string kind = 2;        // "AGENT" | "SOURCE"
+  bool passed = 3;
+  repeated StepResult steps = 4;
+  string created_at = 5;  // ISO
+}
+
+service VerificationService {
+  rpc RunSourceVerification (RunSourceReq) returns (Report);
+  rpc RunAgentVerification  (RunAgentReq)  returns (Report);
+  rpc GetVerificationStatus (StatusReq)    returns (Report);
+}

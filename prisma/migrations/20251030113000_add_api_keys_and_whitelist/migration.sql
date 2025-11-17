@@ -1,0 +1,2 @@
+-- This is an empty migration.
+-- Tables ApiKey and WhitelistedIp were already created in migration 20251030111500_api_keys_whitelist

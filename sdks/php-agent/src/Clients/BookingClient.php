@@ -1,0 +1,47 @@
+<?php
+declare(strict_types=1);
+
+namespace HMS\CarHire\Clients;
+
+use HMS\CarHire\Config;
+use HMS\CarHire\DTO\BookingCreate;
+use HMS\CarHire\Transport\TransportInterface;
+use InvalidArgumentException;
+
+final class BookingClient
+{
+    public function __construct(private TransportInterface $t, private Config $c) {}
+
+    public function create(BookingCreate $dto, ?string $idempotencyKey = null): array
+    {
+        $payload = $dto->toArray();
+        if (empty($payload['agreement_ref'])) throw new InvalidArgumentException('agreement_ref required');
+        if (empty($payload['supplier_id']))   throw new InvalidArgumentException('supplier_id required');
+        return $this->t->bookingCreate($payload, $idempotencyKey);
+    }
+
+    public function modify(string $supplierBookingRef, array $fields, string $agreementRef, string $sourceId): array
+    {
+        return $this->t->bookingModify([
+            'supplier_booking_ref' => $supplierBookingRef,
+            'agreement_ref' => $agreementRef,
+            'source_id' => $sourceId,
+            'fields' => $fields
+        ]);
+    }
+
+    public function cancel(string $supplierBookingRef, string $agreementRef, string $sourceId): array
+    {
+        return $this->t->bookingCancel([
+            'supplier_booking_ref' => $supplierBookingRef,
+            'agreement_ref' => $agreementRef,
+            'source_id' => $sourceId
+        ]);
+    }
+
+    public function check(string $supplierBookingRef, string $agreementRef, string $sourceId): array
+    {
+        return $this->t->bookingCheck($supplierBookingRef, $agreementRef, $sourceId);
+    }
+}
+

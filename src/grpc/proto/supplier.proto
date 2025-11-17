@@ -1,0 +1,68 @@
+syntax = "proto3";
+package supplier;
+
+// Supplier-side API the middleware calls via adapter.
+
+message Empty {}
+
+message LocationsRes { repeated string unlocodes = 1; }
+
+message AvailabilityReq {
+  string pickup_unlocode = 1;
+  string dropoff_unlocode = 2;
+  string pickup_iso = 3;
+  string dropoff_iso = 4;
+  int32  driver_age = 5;
+  string residency_country = 6;
+  repeated string vehicle_classes = 7;
+  string agreement_ref = 8;
+}
+
+message Offer {
+  string source_id = 1;
+  string agreement_ref = 2;
+  string vehicle_class = 3;
+  string vehicle_make_model = 4;
+  string rate_plan_code = 5;
+  string currency = 6;
+  double total_price = 7;
+  string supplier_offer_ref = 8;
+}
+
+message AvailabilityRes { repeated Offer offers = 1; }
+
+message CreateReq {
+  string agreement_ref = 1;
+  string supplier_offer_ref = 2;
+  string agent_booking_ref = 3;
+}
+message ModifyReq { 
+  string supplier_booking_ref = 1;
+  string agreement_ref = 2; // REQUIRED: must be sent on every call
+}
+message CancelReq { 
+  string supplier_booking_ref = 1;
+  string agreement_ref = 2; // REQUIRED: must be sent on every call
+}
+message CheckReq { 
+  string supplier_booking_ref = 1;
+  string agreement_ref = 2; // REQUIRED: must be sent on every call
+}
+
+message BookingRes {
+  string supplier_booking_ref = 1;
+  string status = 2;           // REQUESTED|CONFIRMED|CANCELLED|FAILED
+  string agreement_ref = 3;
+  string source_id = 4;
+}
+
+service SupplierService {
+  rpc Locations (Empty) returns (LocationsRes);
+  rpc Availability (AvailabilityReq) returns (AvailabilityRes);
+  rpc CreateBooking (CreateReq) returns (BookingRes);
+  rpc ModifyBooking (ModifyReq) returns (BookingRes);
+  rpc CancelBooking (CancelReq) returns (BookingRes);
+  rpc CheckBooking  (CheckReq)  returns (BookingRes);
+}
+
+

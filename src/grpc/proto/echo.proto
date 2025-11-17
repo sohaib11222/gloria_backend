@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package middleware;
+
+message Pos {
+  string agent_id = 1;
+  string agreement_ref = 2;
+}
+
+message EchoPayload {
+  string message = 1;
+  map<string, string> attrs = 2;
+}
+
+message EchoRequest {
+  string request_ref = 1;
+  Pos pos = 2;
+  EchoPayload payload = 3;
+}
+
+message SubmitEchoResponse {
+  string request_id = 1;
+  int32 total_expected = 2;
+  int64 expires_unix_ms = 3;
+  int32 recommended_poll_ms = 4;
+}
+
+message GetEchoResultsRequest {
+  string request_id = 1;
+  int64 since_seq = 2;
+  int32 wait_ms = 3;
+}
+
+message EchoItem {
+  string echoed_message = 1;
+  map<string, string> echoed_attrs = 2;
+}
+
+message GetEchoResultsResponse {
+  string request_id = 1;
+  enum Status {
+    IN_PROGRESS = 0;
+    COMPLETE = 1;
+  }
+  Status status = 2;
+  repeated EchoItem new_items = 3;
+  int64 last_seq = 4;
+  int32 responses_received = 5;
+  int32 total_expected = 6;
+  int32 timed_out_sources = 7;
+  string aggregate_etag = 8;
+}
+
+message WatchEchoResultsRequest {
+  string request_id = 1;
+}
+
+message EchoAggregate {
+  repeated EchoItem items = 1;
+}
+
+message ProgressMeta {
+  int64 started_unix_ms = 1;
+  int64 last_update_unix_ms = 2;
+  int32 timed_out_sources = 3;
+}
+
+message EchoResponse {
+  string request_id = 1;
+  enum Status {
+    IN_PROGRESS = 0;
+    COMPLETE = 1;
+  }
+  Status status = 2;
+  int32 responses_received = 3;
+  int32 total_expected = 4;
+  EchoAggregate aggregate = 5;
+  ProgressMeta progress = 6;
+}
+
+service MiddlewareService {
+  rpc SubmitEcho(EchoRequest) returns (SubmitEchoResponse);
+  rpc GetEchoResults(GetEchoResultsRequest) returns (GetEchoResultsResponse);
+  rpc WatchEchoResults(WatchEchoResultsRequest) returns (stream EchoResponse);
+}
+

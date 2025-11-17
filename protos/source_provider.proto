@@ -1,0 +1,69 @@
+syntax = "proto3";
+package source_provider;
+
+// Health
+message Empty {}
+message HealthResponse { 
+  bool ok    = 1; 
+  string note = 2; 
+}
+
+// Locations (base coverage from Source; per-agreement overrides live in Middleware DB)
+message Location { 
+  string unlocode = 1;
+  string name     = 2; 
+}
+message LocationsResponse {
+  repeated Location locations = 1;
+}
+
+// Availability
+message AvailabilityRequest {
+  string agreement_ref      = 1;
+  string pickup_unlocode    = 2;
+  string dropoff_unlocode   = 3;
+  string pickup_iso         = 4;
+  string dropoff_iso        = 5;
+  int32  driver_age         = 6;
+  string residency_country  = 7;
+  repeated string vehicle_classes = 8;
+}
+message VehicleOffer {
+  string supplier_offer_ref = 1;
+  string vehicle_class      = 2;
+  string make_model         = 3;
+  string currency           = 4;
+  double total_price        = 5;
+  string availability_status = 6; // AVAILABLE/ON_REQUEST/SOLD_OUT
+}
+message AvailabilityResponse { 
+  repeated VehicleOffer vehicles = 1; 
+}
+
+// Bookings (single-supplier)
+message BookingCreateRequest { 
+  string agreement_ref      = 1; 
+  string supplier_offer_ref = 2; 
+  string agent_booking_ref  = 3; // optional
+  string idempotency_key    = 4; // required for safety on supplier side too
+}
+message BookingRef { 
+  string agreement_ref        = 1; 
+  string supplier_booking_ref = 2; 
+}
+message BookingResponse { 
+  string supplier_booking_ref = 1; 
+  string status               = 2; 
+}
+
+service SourceProviderService {
+  rpc GetHealth (Empty) returns (HealthResponse);
+  rpc GetLocations (Empty) returns (LocationsResponse);
+
+  rpc GetAvailability (AvailabilityRequest) returns (AvailabilityResponse);
+
+  rpc CreateBooking (BookingCreateRequest) returns (BookingResponse);
+  rpc ModifyBooking (BookingRef) returns (BookingResponse);
+  rpc CancelBooking (BookingRef) returns (BookingResponse);
+  rpc CheckBooking  (BookingRef) returns (BookingResponse);
+}

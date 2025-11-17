@@ -1,0 +1,383 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum CompanyType {
+  AGENT
+  SOURCE
+}
+
+enum CompanyStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum EchoJobStatus {
+  IN_PROGRESS
+  COMPLETE
+}
+
+enum Role {
+  ADMIN
+  AGENT_USER
+  SOURCE_USER
+}
+
+enum AgreementStatus {
+  DRAFT
+  OFFERED
+  ACCEPTED
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+}
+
+enum BookingStatus {
+  REQUESTED
+  CONFIRMED
+  CANCELLED
+  FAILED
+}
+
+model Company {
+  id           String       @id @default(cuid())
+  companyName  String
+  type         CompanyType
+  email        String       @unique
+  passwordHash String
+  status       CompanyStatus @default(PENDING_VERIFICATION)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  // Email verification fields
+  emailVerified    Boolean   @default(false)
+  emailOtp        String?
+  emailOtpExpires  DateTime?
+
+  // Company code (CMP00023 format) - required for Sources
+  companyCode      String?   @unique
+
+  // Approval status for admin review
+  approvalStatus   ApprovalStatus @default(PENDING)
+
+  // Whitelist configuration
+  whitelistedDomains String?  @db.Text // Comma-separated domains/IPs
+
+  // Adapter configuration for Sources
+  adapterType  String       @default("mock") // "mock" | "grpc" (or future "http")
+  grpcEndpoint String?
+  httpEndpoint String?      // Optional HTTP endpoint for JSON fallback/test
+
+  // TLS/mTLS configuration for gRPC (JSON)
+  tlsProfile   Json?
+
+  // Vendor metadata (JSON)
+  vendorMetadata Json?
+
+  users        User[]
+  agentAgreements  Agreement[] @relation("AgentAgreements")
+  sourceAgreements Agreement[] @relation("SourceAgreements")
+  sourceLocations SourceLocation[]
+  branches     Branch[]
+  echoJobs     EchoJob[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  companyId    String
+  email        String   @unique
+  passwordHash String
+  role         Role
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
+
+model Agreement {
+  id            String          @id @default(cuid())
+  agentId       String
+  sourceId      String
+  agreementRef  String
+  status        AgreementStatus @default(DRAFT)
+  validFrom     DateTime?
+  validTo       DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  agent         Company         @relation("AgentAgreements", fields: [agentId], references: [id], onDelete: Cascade)
+  source        Company         @relation("SourceAgreements", fields: [sourceId], references: [id], onDelete: Cascade)
+  locationOverrides AgreementLocationOverride[]
+
+  @@unique([sourceId, agreementRef])
+  @@index([agentId, status, createdAt])
+  @@index([sourceId, status, createdAt])
+}
+
+model UNLocode {
+  unlocode   String  @id
+  country    String
+  place      String
+  iataCode   String?
+  latitude   Float?
+  longitude  Float?
+  
+  sourceLocations SourceLocation[]
+  agreementLocationOverrides AgreementLocationOverride[]
+
+  @@index([country])
+  @@index([place])
+}
+
+model SourceLocation {
+  id        String   @id @default(cuid())
+  sourceId  String
+  unlocode  String
+
+  source    Company  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  loc       UNLocode @relation(fields: [unlocode], references: [unlocode], onDelete: Cascade)
+
+  @@unique([sourceId, unlocode])
+  @@index([sourceId])
+}
+
+model AgreementLocationOverride {
+  id          String   @id @default(cuid())
+  agreementId String
+  unlocode    String
+  allowed     Boolean  @default(true)
+
+  agreement   Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  loc         UNLocode  @relation(fields: [unlocode], references: [unlocode], onDelete: Cascade)
+
+  @@unique([agreementId, unlocode])
+}
+
+model AvailabilityJob {
+  id               String   @id @default(cuid())
+  agentId          String
+  criteriaJson     Json
+  status           String   @default("RUNNING")
+  expectedSources  Int      @default(0)
+  createdAt        DateTime @default(now())
+  
+  results          AvailabilityResult[]
+
+  @@index([agentId])
+  @@index([createdAt])
+}
+
+model AvailabilityResult {
+  id         String   @id @default(cuid())
+  jobId      String
+  seq        Int
+  sourceId   String
+  offerJson  Json
+  createdAt  DateTime @default(now())
+
+  job        AvailabilityJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, seq])
+  @@index([jobId, seq])
+}
+
+model Booking {
+  id                   String        @id @default(cuid())
+  agentId              String
+  sourceId             String
+  agreementRef         String
+  supplierBookingRef   String?
+  agentBookingRef      String?
+  idempotencyKey       String?
+  status               BookingStatus @default(REQUESTED)
+  payloadJson          Json?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@unique([agentId, idempotencyKey])
+  @@index([agentId, agreementRef, createdAt])
+  @@index([sourceId, supplierBookingRef])
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  companyId  String?
+  userId     String?
+  type       String
+  title      String
+  message    String
+  readAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([companyId, createdAt])
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  direction     String   // IN|OUT
+  endpoint      String?
+  requestId     String?
+  companyId       String?
+  sourceId     String?
+  agreementRef String?  // [AUTO-AUDIT] Added to log explicit agreement reference
+  httpStatus   Int?
+  grpcStatus   Int?
+  maskedRequest String? @db.Text
+  maskedResponse String? @db.Text
+  durationMs   Int?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([companyId, createdAt])
+  @@index([sourceId, createdAt])
+  @@index([endpoint, createdAt])
+  @@index([requestId])
+  @@index([agreementRef, createdAt])
+}
+
+model VerificationReport {
+  id         String   @id @default(cuid())
+  companyId  String
+  kind       String   // AGENT|SOURCE
+  passed     Boolean
+  reportJson Json
+  createdAt  DateTime @default(now())
+}
+
+// [AUTO-AUDIT] API key storage for SDK and service authentication
+model ApiKey {
+  id          String   @id @default(cuid())
+  name        String
+  ownerType   String   // agent|source|admin
+  ownerId     String
+  keyHash     String   // hashed key (bcrypt/sha512)
+  permissions Json     // array of strings
+  status      String   // active|revoked
+  createdAt   DateTime @default(now())
+
+  @@index([ownerType, ownerId])
+  @@index([status, createdAt])
+}
+
+// [AUTO-AUDIT] IP whitelist for ingress control
+model WhitelistedIp {
+  id        String   @id @default(cuid())
+  ip        String
+  type      String   // agent|source|admin
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([ip, type])
+  @@index([enabled])
+}
+
+//
+
+model IdempotencyKey {
+  id        String  @id @default(cuid())
+  agentId   String
+  scope     String
+  key       String
+  responseHash String?
+  createdAt DateTime @default(now())
+
+  @@unique([agentId, scope, key], map: "agent_scope_key_unique")
+}
+
+model SourceHealth {
+  id            String    @id @default(cuid())
+  sourceId      String    @unique
+  slowCount     Int       @default(0)
+  sampleCount   Int       @default(0)
+  slowRate      Float     @default(0.0)
+  backoffLevel  Int       @default(0)
+  excludedUntil DateTime?
+  lastResetBy   String?   // Admin user ID who reset
+  lastResetAt   DateTime?
+  updatedAt     DateTime  @updatedAt
+
+  @@index([sourceId])
+  @@index([excludedUntil])
+}
+
+// Branch/Location model for supplier branches
+model Branch {
+  id            String   @id @default(cuid())
+  sourceId      String
+  agreementId   String?  // Optional: if availability differs by agreement
+  branchCode    String
+  name          String
+  status        String?
+  locationType  String?
+  collectionType String?
+  email         String?
+  phone         String?
+  latitude      Float?
+  longitude     Float?
+  addressLine   String?  @db.Text
+  city          String?
+  postalCode    String?
+  country       String?
+  countryCode   String?
+  natoLocode    String?  // Maps to NATO LOCODES
+  rawJson       Json?    // Full branch sub-JSON from supplier
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  source        Company  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, branchCode])
+  @@index([sourceId])
+  @@index([agreementId])
+  @@index([natoLocode])
+}
+
+// Echo PoC models for Submit+Poll pattern
+model EchoJob {
+  id                String        @id @default(cuid())
+  requestId         String        @unique // UUIDv4
+  agentId           String
+  agreementId       String?
+  status            EchoJobStatus @default(IN_PROGRESS)
+  startedAt         DateTime      @default(now())
+  expiresAt         DateTime
+  totalExpected     Int           @default(0)
+  responsesReceived Int           @default(0)
+  timedOutSources   Int           @default(0)
+  lastSeq           BigInt        @default(0)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  agent             Company       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  items             EchoItem[]
+
+  @@index([agentId, status, createdAt])
+  @@index([requestId])
+  @@index([expiresAt])
+}
+
+model EchoItem {
+  id              String   @id @default(cuid())
+  requestId       String
+  seq             BigInt
+  echoedMessage   String   @db.Text
+  echoedAttrs     Json?    // map<string,string>
+  createdAt       DateTime @default(now())
+
+  job             EchoJob  @relation(fields: [requestId], references: [requestId], onDelete: Cascade)
+
+  @@unique([requestId, seq])
+  @@index([requestId, seq])
+}

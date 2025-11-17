@@ -1,0 +1,75 @@
+syntax = "proto3";
+package carhire.middleware.v1;
+
+// ---- Availability (OTA-aligned names in snake_case) ----
+message AvailabilitySubmitRequest {
+  string pickup_unlocode   = 1; // OTA: PickupLocation (UN/LOCODE)
+  string dropoff_unlocode  = 2; // OTA: DropOffLocation (UN/LOCODE)
+  string pickup_iso        = 3; // OTA: PickupDateTime ISO-8601
+  string dropoff_iso       = 4; // OTA: ReturnDateTime ISO-8601
+  int32  driver_age        = 5; // OTA: DriverType/Age
+  string residency_country = 6; // ISO-3166 alpha-2
+  repeated string vehicle_classes = 7; // OTA VehicleClass codes
+  repeated string agreement_refs  = 8; // Limit fan-out to specific agreements
+}
+
+message AvailabilitySubmitResponse {
+  string request_id        = 1;
+  int32  expected_sources  = 2;
+  int32  recommended_poll_ms = 3;
+}
+
+message AvailabilityPollRequest {
+  string request_id = 1;
+  int32  since_seq  = 2;
+  int32  wait_ms    = 3;
+}
+
+message VehicleOffer {
+  string source_id          = 1;
+  string agreement_ref      = 2;
+  string supplier_offer_ref = 3;
+  string vehicle_class      = 4;
+  string make_model         = 5;
+  string currency           = 6;
+  double total_price        = 7;
+  string availability_status = 8; // AVAILABLE/ON_REQUEST/SOLD_OUT
+}
+
+message AvailabilityPollResponse {
+  string request_id = 1;
+  int32  last_seq   = 2;
+  bool   complete   = 3;
+  repeated VehicleOffer vehicles = 4;
+}
+
+// ---- Bookings (pass-through to a single Source) ----
+message BookingCreateRequest {
+  string source_id          = 1;
+  string agreement_ref      = 2;
+  string supplier_offer_ref = 3;
+  string agent_booking_ref  = 4; // optional external ref
+  string idempotency_key    = 5; // required for safety
+}
+message BookingRef {
+  string source_id            = 1;
+  string supplier_booking_ref = 2;
+  string agreement_ref        = 3;
+}
+message BookingResponse {
+  string supplier_booking_ref = 1;
+  string status               = 2; // CONFIRMED/CANCELLED/MODIFIED
+  string agreement_ref        = 3;
+  string source_id            = 4;
+}
+
+// ---- Public service for agents (gRPC) ----
+service PublicService {
+  rpc SubmitAvailability (AvailabilitySubmitRequest) returns (AvailabilitySubmitResponse);
+  rpc GetAvailabilityResults (AvailabilityPollRequest) returns (AvailabilityPollResponse);
+
+  rpc CreateBooking (BookingCreateRequest) returns (BookingResponse);
+  rpc ModifyBooking (BookingRef) returns (BookingResponse);
+  rpc CancelBooking (BookingRef) returns (BookingResponse);
+  rpc CheckBooking  (BookingRef) returns (BookingResponse);
+}

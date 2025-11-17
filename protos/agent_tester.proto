@@ -1,0 +1,36 @@
+syntax = "proto3";
+package carhire.agent.v1;
+
+message Empty {}
+message HealthResponse { 
+  bool ok = 1; 
+  string note = 2; 
+  bool tokenConfigured = 3; 
+  string middleware = 4; 
+}
+
+message AvailabilityRequest {
+  string pickup_unlocode = 1;
+  string dropoff_unlocode = 2;
+  string pickup_iso = 3;
+  string dropoff_iso = 4;
+}
+message SubmitResponse { 
+  string request_id = 1; 
+}
+message BookRequest {
+  string agreement_ref = 1;
+  string pickup_unlocode = 2;
+  string dropoff_unlocode = 3;
+  string vehicle_class = 4;
+}
+message BookResponse { 
+  string booking_id = 1; 
+  string status = 2; 
+}
+
+service AgentTesterService {
+  rpc GetHealth (Empty) returns (HealthResponse);
+  rpc RunSearch (AvailabilityRequest) returns (SubmitResponse);
+  rpc RunBook (BookRequest) returns (BookResponse);
+}

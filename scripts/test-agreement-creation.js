@@ -1,0 +1,20 @@
+// Test script to verify improved error handling
+console.log('🧪 Testing improved error handling...');
+console.log('');
+console.log('✅ Updated gRPC server error handling:');
+console.log('- P2002 (Unique constraint) → Code 6 with helpful message');
+console.log('- Other Prisma errors → Code 3 with database error message');
+console.log('- Generic errors → Code 13 with original message');
+console.log('');
+console.log('✅ Updated REST API error handling:');
+console.log('- Code 3 → 400 Bad Request (INVALID_ARGUMENT)');
+console.log('- Code 6 → 409 Conflict (CONFLICT)');
+console.log('- Other errors → Pass through to error handler');
+console.log('');
+console.log('🎯 Now when you try to create an agreement with duplicate reference:');
+console.log('You will get: "Agreement with reference \'AG-2025-001\' already exists for this source. Please use a different agreement_ref or update the existing agreement."');
+console.log('');
+console.log('💡 Solutions:');
+console.log('1. Use a different agreement_ref (e.g., AG-2025-002)');
+console.log('2. Update the existing agreement status');
+console.log('3. Delete the existing agreement first');

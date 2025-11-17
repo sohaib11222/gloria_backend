@@ -1,0 +1,39 @@
+syntax = "proto3";
+package core.location;
+
+message ListUNReq {
+  string query = 1;   // search in unlocode/country/place/iata
+  uint32 limit = 2;   // default 25
+  string cursor = 3;  // use last unlocode as cursor
+}
+message UNLocode {
+  string unlocode = 1;
+  string country = 2;
+  string place = 3;
+  string iata_code = 4;
+  double latitude = 5;
+  double longitude = 6;
+}
+message ListUNResp {
+  repeated UNLocode items = 1;
+  string next_cursor = 2;
+}
+
+message SyncSourceCoverageReq { string source_id = 1; }
+message SyncSourceCoverageResp { uint32 added = 1; uint32 removed = 2; uint32 total = 3; }
+
+message ListCoverageByAgreementReq { string agreement_id = 1; }
+message CoverageItem { string unlocode = 1; bool allowed = 2; }
+message ListCoverageByAgreementResp { repeated CoverageItem items = 1; }
+
+message UpsertOverrideReq { string agreement_id = 1; string unlocode = 2; bool allowed = 3; }
+message RemoveOverrideReq { string agreement_id = 1; string unlocode = 2; }
+message Ok { bool ok = 1; }
+
+service LocationService {
+  rpc ListUNLocodes (ListUNReq) returns (ListUNResp);
+  rpc SyncSourceCoverage (SyncSourceCoverageReq) returns (SyncSourceCoverageResp);
+  rpc ListCoverageByAgreement (ListCoverageByAgreementReq) returns (ListCoverageByAgreementResp);
+  rpc UpsertAgreementOverride (UpsertOverrideReq) returns (Ok);
+  rpc RemoveAgreementOverride (RemoveOverrideReq) returns (Ok);
+}
