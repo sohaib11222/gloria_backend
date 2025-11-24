@@ -70,6 +70,14 @@ endpointsRouter.get(
   requireAuth(),
   async (req: any, res, next) => {
     try {
+      // Validate that user has companyId
+      if (!req.user?.companyId) {
+        return res.status(401).json({
+          error: "AUTH_ERROR",
+          message: "Invalid authentication: companyId not found in token",
+        });
+      }
+
       const company = await prisma.company.findUnique({
         where: { id: req.user.companyId },
         select: {
@@ -79,7 +87,11 @@ endpointsRouter.get(
           status: true,
           adapterType: true,
           grpcEndpoint: true,
+          httpEndpoint: true,
           updatedAt: true,
+          lastGrpcTestResult: true,
+          lastGrpcTestAt: true,
+          lastLocationSyncAt: true,
         },
       });
 
@@ -89,12 +101,12 @@ endpointsRouter.get(
           .json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
       }
 
-      // For HTTP endpoint, we'll construct it based on company type and default ports
-      // Using ports that don't conflict with the main API server (8080) and gRPC servers (50051, 50052)
+      // Use configured httpEndpoint or fallback to default based on company type
       const httpEndpoint =
-        company.type === "AGENT"
+        company.httpEndpoint ||
+        (company.type === "AGENT"
           ? `http://localhost:9091` // Agent HTTP port
-          : `http://localhost:9090`; // Source HTTP port
+          : `http://localhost:9090`); // Source HTTP port
 
       res.json({
         companyId: company.id,
@@ -108,8 +120,21 @@ endpointsRouter.get(
         } ${company.type.toLowerCase()} endpoints`,
         status: company.status,
         updatedAt: company.updatedAt,
+        lastGrpcTestResult: company.lastGrpcTestResult,
+        lastGrpcTestAt: company.lastGrpcTestAt,
+        lastLocationSyncAt: company.lastLocationSyncAt,
       });
-    } catch (e) {
+    } catch (e: any) {
+      // Log the error for debugging
+      console.error("Error in GET /endpoints/config:", e);
+      console.error("Request user:", req.user);
+      // Return a more informative error
+      if (e.code === "P2002" || e.code === "P2025") {
+        return res.status(400).json({
+          error: "DATABASE_ERROR",
+          message: "Database query failed",
+        });
+      }
       next(e);
     }
   }
@@ -224,6 +249,7 @@ endpointsRouter.put(
         data: {
           adapterType: body.adapterType,
           grpcEndpoint: body.grpcEndpoint,
+          httpEndpoint: body.httpEndpoint,
           updatedAt: new Date(),
         },
         select: {
@@ -232,6 +258,7 @@ endpointsRouter.put(
           type: true,
           adapterType: true,
           grpcEndpoint: true,
+          httpEndpoint: true,
           updatedAt: true,
         },
       });
@@ -240,7 +267,7 @@ endpointsRouter.put(
         message: "Endpoint configuration updated successfully",
         companyId: updatedCompany.id,
         httpEndpoint:
-          body.httpEndpoint ||
+          updatedCompany.httpEndpoint ||
           (updatedCompany.type === "AGENT"
             ? "http://localhost:9091"
             : "http://localhost:9090"),
@@ -768,3 +795,101 @@ endpointsRouter.post("/settings/whitelist", requireAuth(), async (req: any, res,
     next(e);
   }
 });
+
+/**
+ * @openapi
+ * /endpoints/setup-status:
+ *   get:
+ *     tags: [Endpoints]
+ *     summary: Get agent setup completion status
+ *     description: Check which setup steps have been completed (endpoints, booking test, agreements)
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Setup status information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 endpointsConfigured:
+ *                   type: boolean
+ *                   description: Whether HTTP and gRPC endpoints are configured
+ *                 bookingTestCompleted:
+ *                   type: boolean
+ *                   description: Whether booking test has been completed
+ *                 agreementAccepted:
+ *                   type: boolean
+ *                   description: Whether at least one agreement has been accepted
+ *                 allComplete:
+ *                   type: boolean
+ *                   description: Whether all setup steps are complete
+ */
+endpointsRouter.get(
+  "/endpoints/setup-status",
+  requireAuth(),
+  async (req: any, res, next) => {
+    try {
+      const company = await prisma.company.findUnique({
+        where: { id: req.user.companyId },
+        select: {
+          id: true,
+          type: true,
+          httpEndpoint: true,
+          grpcEndpoint: true,
+        },
+      });
+
+      if (!company) {
+        return res
+          .status(404)
+          .json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
+      }
+
+      // Check endpoint configuration
+      const endpointsConfigured = !!(company.httpEndpoint && company.grpcEndpoint);
+
+      // Check booking test completion (check verification status)
+      let bookingTestCompleted = false;
+      try {
+        const verification = await prisma.verificationReport.findFirst({
+          where: {
+            companyId: company.id,
+            kind: "AGENT",
+            passed: true,
+          },
+          orderBy: { createdAt: "desc" },
+        });
+        bookingTestCompleted = !!verification;
+      } catch (e) {
+        console.error("Failed to check verification status:", e);
+      }
+
+      // Check agreement acceptance
+      let agreementAccepted = false;
+      try {
+        const acceptedAgreement = await prisma.agreement.findFirst({
+          where: {
+            agentId: company.id,
+            status: "ACCEPTED",
+          },
+        });
+        agreementAccepted = !!acceptedAgreement;
+      } catch (e) {
+        console.error("Failed to check agreement status:", e);
+      }
+
+      const allComplete = endpointsConfigured && bookingTestCompleted && agreementAccepted;
+
+      res.json({
+        endpointsConfigured,
+        bookingTestCompleted,
+        agreementAccepted,
+        allComplete,
+      });
+    } catch (e) {
+      next(e);
+    }
+  }
+);

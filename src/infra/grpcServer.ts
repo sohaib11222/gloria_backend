@@ -48,7 +48,7 @@ export function createHealthService(): HealthService {
   };
 }
 
-function createServerCredentials(): grpc.ServerCredentials {
+export function createServerCredentials(): grpc.ServerCredentials {
   const tlsEnabled = process.env.GRPC_TLS_ENABLED === 'true';
   
   if (!tlsEnabled) {
@@ -178,6 +178,8 @@ export function createGrpcHealthCheck(addr: string): Promise<{ status: number; s
         return;
       }
       
+      // mTLS infrastructure available but disabled by default
+      // To enable: set GRPC_TLS_ENABLED=true and use createClientCredentials()
       const client = new healthPkg.Health(addr, grpc.credentials.createInsecure());
       const deadline = new Date();
       deadline.setMilliseconds(deadline.getMilliseconds() + 3000);

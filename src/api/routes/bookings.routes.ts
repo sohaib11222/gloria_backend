@@ -25,7 +25,8 @@ bookingsRouter.get("/", requireAuth(), async (req: any, res, next) => {
       orderBy: { createdAt: "desc" },
       take: limit,
     });
-    res.json({ items: rows });
+    // Return format expected by frontend Dashboard
+    res.json({ data: rows, items: rows });
   } catch (e) { next(e); }
 });
 

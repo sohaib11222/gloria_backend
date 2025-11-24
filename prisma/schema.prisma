@@ -52,46 +52,54 @@ enum BookingStatus {
 }
 
 model Company {
-  id           String       @id @default(cuid())
+  id           String        @id @default(cuid())
   companyName  String
   type         CompanyType
-  email        String       @unique
+  email        String        @unique
   passwordHash String
   status       CompanyStatus @default(PENDING_VERIFICATION)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   // Email verification fields
-  emailVerified    Boolean   @default(false)
+  emailVerified   Boolean   @default(false)
   emailOtp        String?
-  emailOtpExpires  DateTime?
+  emailOtpExpires DateTime?
 
   // Company code (CMP00023 format) - required for Sources
-  companyCode      String?   @unique
+  companyCode String? @unique
 
   // Approval status for admin review
-  approvalStatus   ApprovalStatus @default(PENDING)
+  approvalStatus ApprovalStatus @default(PENDING)
 
   // Whitelist configuration
-  whitelistedDomains String?  @db.Text // Comma-separated domains/IPs
+  whitelistedDomains String? @db.Text // Comma-separated domains/IPs
 
   // Adapter configuration for Sources
-  adapterType  String       @default("mock") // "mock" | "grpc" (or future "http")
+  adapterType  String  @default("mock") // "mock" | "grpc" (or future "http")
   grpcEndpoint String?
-  httpEndpoint String?      // Optional HTTP endpoint for JSON fallback/test
+  httpEndpoint String? // Optional HTTP endpoint for JSON fallback/test
 
   // TLS/mTLS configuration for gRPC (JSON)
-  tlsProfile   Json?
+  tlsProfile Json?
 
   // Vendor metadata (JSON)
   vendorMetadata Json?
 
-  users        User[]
-  agentAgreements  Agreement[] @relation("AgentAgreements")
-  sourceAgreements Agreement[] @relation("SourceAgreements")
-  sourceLocations SourceLocation[]
-  branches     Branch[]
-  echoJobs     EchoJob[]
+  // gRPC test result tracking
+  lastGrpcTestResult Json? // Stores the full test result
+  lastGrpcTestAt     DateTime? // When the test was performed
+
+  // Location sync tracking
+  lastLocationSyncAt DateTime? // When locations were last synced
+
+  users            User[]
+  agentAgreements  Agreement[]       @relation("AgentAgreements")
+  sourceAgreements Agreement[]       @relation("SourceAgreements")
+  sourceLocations  SourceLocation[]
+  branches         Branch[]
+  echoJobs         EchoJob[]
+  locationRequests LocationRequest[]
 }
 
 model User {
@@ -103,22 +111,22 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 }
 
 model Agreement {
-  id            String          @id @default(cuid())
-  agentId       String
-  sourceId      String
-  agreementRef  String
-  status        AgreementStatus @default(DRAFT)
-  validFrom     DateTime?
-  validTo       DateTime?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  id           String          @id @default(cuid())
+  agentId      String
+  sourceId     String
+  agreementRef String
+  status       AgreementStatus @default(DRAFT)
+  validFrom    DateTime?
+  validTo      DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
-  agent         Company         @relation("AgentAgreements", fields: [agentId], references: [id], onDelete: Cascade)
-  source        Company         @relation("SourceAgreements", fields: [sourceId], references: [id], onDelete: Cascade)
+  agent             Company                     @relation("AgentAgreements", fields: [agentId], references: [id], onDelete: Cascade)
+  source            Company                     @relation("SourceAgreements", fields: [sourceId], references: [id], onDelete: Cascade)
   locationOverrides AgreementLocationOverride[]
 
   @@unique([sourceId, agreementRef])
@@ -127,14 +135,14 @@ model Agreement {
 }
 
 model UNLocode {
-  unlocode   String  @id
-  country    String
-  place      String
-  iataCode   String?
-  latitude   Float?
-  longitude  Float?
-  
-  sourceLocations SourceLocation[]
+  unlocode  String  @id
+  country   String
+  place     String
+  iataCode  String?
+  latitude  Float?
+  longitude Float?
+
+  sourceLocations            SourceLocation[]
   agreementLocationOverrides AgreementLocationOverride[]
 
   @@index([country])
@@ -142,69 +150,69 @@ model UNLocode {
 }
 
 model SourceLocation {
-  id        String   @id @default(cuid())
-  sourceId  String
-  unlocode  String
+  id       String @id @default(cuid())
+  sourceId String
+  unlocode String
 
-  source    Company  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
-  loc       UNLocode @relation(fields: [unlocode], references: [unlocode], onDelete: Cascade)
+  source Company  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  loc    UNLocode @relation(fields: [unlocode], references: [unlocode], onDelete: Cascade)
 
   @@unique([sourceId, unlocode])
   @@index([sourceId])
 }
 
 model AgreementLocationOverride {
-  id          String   @id @default(cuid())
+  id          String  @id @default(cuid())
   agreementId String
   unlocode    String
-  allowed     Boolean  @default(true)
+  allowed     Boolean @default(true)
 
-  agreement   Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
-  loc         UNLocode  @relation(fields: [unlocode], references: [unlocode], onDelete: Cascade)
+  agreement Agreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+  loc       UNLocode  @relation(fields: [unlocode], references: [unlocode], onDelete: Cascade)
 
   @@unique([agreementId, unlocode])
 }
 
 model AvailabilityJob {
-  id               String   @id @default(cuid())
-  agentId          String
-  criteriaJson     Json
-  status           String   @default("RUNNING")
-  expectedSources  Int      @default(0)
-  createdAt        DateTime @default(now())
-  
-  results          AvailabilityResult[]
+  id              String   @id @default(cuid())
+  agentId         String
+  criteriaJson    Json
+  status          String   @default("RUNNING")
+  expectedSources Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  results AvailabilityResult[]
 
   @@index([agentId])
   @@index([createdAt])
 }
 
 model AvailabilityResult {
-  id         String   @id @default(cuid())
-  jobId      String
-  seq        Int
-  sourceId   String
-  offerJson  Json
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  jobId     String
+  seq       Int
+  sourceId  String
+  offerJson Json
+  createdAt DateTime @default(now())
 
-  job        AvailabilityJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job AvailabilityJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@unique([jobId, seq])
   @@index([jobId, seq])
 }
 
 model Booking {
-  id                   String        @id @default(cuid())
-  agentId              String
-  sourceId             String
-  agreementRef         String
-  supplierBookingRef   String?
-  agentBookingRef      String?
-  idempotencyKey       String?
-  status               BookingStatus @default(REQUESTED)
-  payloadJson          Json?
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  id                 String        @id @default(cuid())
+  agentId            String
+  sourceId           String
+  agreementRef       String
+  supplierBookingRef String?
+  agentBookingRef    String?
+  idempotencyKey     String?
+  status             BookingStatus @default(REQUESTED)
+  payloadJson        Json?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, agreementRef, createdAt])
@@ -212,32 +220,32 @@ model Booking {
 }
 
 model Notification {
-  id         String   @id @default(cuid())
-  companyId  String?
-  userId     String?
-  type       String
-  title      String
-  message    String
-  readAt     DateTime?
-  createdAt  DateTime  @default(now())
+  id        String    @id @default(cuid())
+  companyId String?
+  userId    String?
+  type      String
+  title     String
+  message   String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
 
   @@index([companyId, createdAt])
 }
 
 model AuditLog {
-  id            String   @id @default(cuid())
-  direction     String   // IN|OUT
-  endpoint      String?
-  requestId     String?
-  companyId       String?
-  sourceId     String?
-  agreementRef String?  // [AUTO-AUDIT] Added to log explicit agreement reference
-  httpStatus   Int?
-  grpcStatus   Int?
-  maskedRequest String? @db.Text
-  maskedResponse String? @db.Text
-  durationMs   Int?
-  createdAt    DateTime @default(now())
+  id             String   @id @default(cuid())
+  direction      String // IN|OUT
+  endpoint       String?
+  requestId      String?
+  companyId      String?
+  sourceId       String?
+  agreementRef   String? // [AUTO-AUDIT] Added to log explicit agreement reference
+  httpStatus     Int?
+  grpcStatus     Int?
+  maskedRequest  String?  @db.Text
+  maskedResponse String?  @db.Text
+  durationMs     Int?
+  createdAt      DateTime @default(now())
 
   @@index([createdAt])
   @@index([companyId, createdAt])
@@ -250,7 +258,7 @@ model AuditLog {
 model VerificationReport {
   id         String   @id @default(cuid())
   companyId  String
-  kind       String   // AGENT|SOURCE
+  kind       String // AGENT|SOURCE
   passed     Boolean
   reportJson Json
   createdAt  DateTime @default(now())
@@ -260,11 +268,11 @@ model VerificationReport {
 model ApiKey {
   id          String   @id @default(cuid())
   name        String
-  ownerType   String   // agent|source|admin
+  ownerType   String // agent|source|admin
   ownerId     String
-  keyHash     String   // hashed key (bcrypt/sha512)
-  permissions Json     // array of strings
-  status      String   // active|revoked
+  keyHash     String // hashed key (bcrypt/sha512)
+  permissions Json // array of strings
+  status      String // active|revoked
   createdAt   DateTime @default(now())
 
   @@index([ownerType, ownerId])
@@ -275,7 +283,7 @@ model ApiKey {
 model WhitelistedIp {
   id        String   @id @default(cuid())
   ip        String
-  type      String   // agent|source|admin
+  type      String // agent|source|admin
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
 
@@ -286,12 +294,12 @@ model WhitelistedIp {
 //
 
 model IdempotencyKey {
-  id        String  @id @default(cuid())
-  agentId   String
-  scope     String
-  key       String
+  id           String   @id @default(cuid())
+  agentId      String
+  scope        String
+  key          String
   responseHash String?
-  createdAt DateTime @default(now())
+  createdAt    DateTime @default(now())
 
   @@unique([agentId, scope, key], map: "agent_scope_key_unique")
 }
@@ -304,7 +312,7 @@ model SourceHealth {
   slowRate      Float     @default(0.0)
   backoffLevel  Int       @default(0)
   excludedUntil DateTime?
-  lastResetBy   String?   // Admin user ID who reset
+  lastResetBy   String? // Admin user ID who reset
   lastResetAt   DateTime?
   updatedAt     DateTime  @updatedAt
 
@@ -314,29 +322,29 @@ model SourceHealth {
 
 // Branch/Location model for supplier branches
 model Branch {
-  id            String   @id @default(cuid())
-  sourceId      String
-  agreementId   String?  // Optional: if availability differs by agreement
-  branchCode    String
-  name          String
-  status        String?
-  locationType  String?
+  id             String   @id @default(cuid())
+  sourceId       String
+  agreementId    String? // Optional: if availability differs by agreement
+  branchCode     String
+  name           String
+  status         String?
+  locationType   String?
   collectionType String?
-  email         String?
-  phone         String?
-  latitude      Float?
-  longitude     Float?
-  addressLine   String?  @db.Text
-  city          String?
-  postalCode    String?
-  country       String?
-  countryCode   String?
-  natoLocode    String?  // Maps to NATO LOCODES
-  rawJson       Json?    // Full branch sub-JSON from supplier
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  email          String?
+  phone          String?
+  latitude       Float?
+  longitude      Float?
+  addressLine    String?  @db.Text
+  city           String?
+  postalCode     String?
+  country        String?
+  countryCode    String?
+  natoLocode     String? // Maps to NATO LOCODES
+  rawJson        Json? // Full branch sub-JSON from supplier
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  source        Company  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  source Company @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 
   @@unique([sourceId, branchCode])
   @@index([sourceId])
@@ -360,8 +368,8 @@ model EchoJob {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
-  agent             Company       @relation(fields: [agentId], references: [id], onDelete: Cascade)
-  items             EchoItem[]
+  agent Company    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  items EchoItem[]
 
   @@index([agentId, status, createdAt])
   @@index([requestId])
@@ -369,15 +377,55 @@ model EchoJob {
 }
 
 model EchoItem {
-  id              String   @id @default(cuid())
-  requestId       String
-  seq             BigInt
-  echoedMessage   String   @db.Text
-  echoedAttrs     Json?    // map<string,string>
-  createdAt       DateTime @default(now())
+  id            String   @id @default(cuid())
+  requestId     String
+  seq           BigInt
+  echoedMessage String   @db.Text
+  echoedAttrs   Json? // map<string,string>
+  createdAt     DateTime @default(now())
 
-  job             EchoJob  @relation(fields: [requestId], references: [requestId], onDelete: Cascade)
+  job EchoJob @relation(fields: [requestId], references: [requestId], onDelete: Cascade)
 
   @@unique([requestId, seq])
   @@index([requestId, seq])
+}
+
+// Location Request model for sources to request new locations
+model LocationRequest {
+  id           String    @id @default(cuid())
+  sourceId     String
+  source       Company   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  locationName String
+  country      String
+  city         String?
+  address      String?   @db.Text
+  iataCode     String?
+  reason       String?   @db.Text
+  status       String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  adminNotes   String?   @db.Text
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  reviewedBy   String? // User ID of admin who reviewed
+  reviewedAt   DateTime?
+
+  @@index([sourceId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model SmtpConfig {
+  id        String   @id @default(cuid())
+  host      String
+  port      Int      @default(587)
+  secure    Boolean  @default(false) // true for TLS/SSL (port 465), false for STARTTLS (port 587)
+  user      String
+  password  String   // Encrypted or plain (admin's choice)
+  fromEmail String   @default("no-reply@carhire.local")
+  fromName  String?  @default("Car Hire Middleware")
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  updatedBy String? // User ID of admin who last updated
+
+  @@unique([id])
 }

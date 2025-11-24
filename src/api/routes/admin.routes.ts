@@ -11,6 +11,8 @@ import { metaFromReq } from "../../grpc/meta.js";
 import { notifyAgreementDrafted } from "../../services/notifications.js";
 import { enforceWhitelist } from "../../infra/whitelistEnforcement.js";
 import { validateLocationArray } from "../../services/locationValidation.js";
+import { auditLog } from "../../services/audit.js";
+import { invalidateMailerCache } from "../../infra/mailer.js";
 
 export const adminRouter = Router();
 
@@ -118,8 +120,13 @@ adminRouter.get("/admin/api-keys", requireAuth(), requireRole("ADMIN"), async (_
 
 adminRouter.delete("/admin/api-keys/:id", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
   try {
-    await prisma.apiKey.update({ where: { id: String(req.params.id) }, data: { status: 'revoked' } });
-    res.json({ ok: true });
+    const id = String(req.params.id);
+    const existing = await prisma.apiKey.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'API_KEY_NOT_FOUND', message: 'API key not found' });
+    }
+    await prisma.apiKey.update({ where: { id }, data: { status: 'revoked' } });
+    res.json({ ok: true, message: 'API key revoked successfully' });
   } catch (e) { next(e); }
 });
 
@@ -135,9 +142,17 @@ adminRouter.get("/admin/ip-whitelist", requireAuth(), requireRole("ADMIN"), asyn
 
 adminRouter.post("/admin/whitelist", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
   try {
-    const schema = z.object({ ip: z.string(), type: z.enum(["agent","source","admin"]), enabled: z.boolean().default(true) });
+    const schema = z.object({ 
+      ip: z.string().min(1, 'IP address or domain is required'), 
+      type: z.enum(["agent","source","admin"]), 
+      enabled: z.boolean().default(true) 
+    });
     const body = schema.parse(req.body);
-    const row = await prisma.whitelistedIp.upsert({ where: { ip_type: { ip: body.ip, type: body.type } as any }, update: { enabled: body.enabled }, create: { ip: body.ip, type: body.type, enabled: body.enabled } });
+    const row = await prisma.whitelistedIp.upsert({ 
+      where: { ip_type: { ip: body.ip.trim(), type: body.type } as any }, 
+      update: { enabled: body.enabled }, 
+      create: { ip: body.ip.trim(), type: body.type, enabled: body.enabled } 
+    });
     res.json(row);
   } catch (e) { next(e); }
 });
@@ -152,11 +167,202 @@ adminRouter.post("/admin/ip-whitelist", requireAuth(), requireRole("ADMIN"), asy
 });
 
 adminRouter.delete("/admin/whitelist/:id", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
-  try { await prisma.whitelistedIp.delete({ where: { id: String(req.params.id) } }); res.json({ ok: true }); } catch (e) { next(e); }
+  try {
+    const id = String(req.params.id);
+    const existing = await prisma.whitelistedIp.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'WHITELIST_ENTRY_NOT_FOUND', message: 'Whitelist entry not found' });
+    }
+    await prisma.whitelistedIp.delete({ where: { id } });
+    res.json({ ok: true, message: 'Whitelist entry removed successfully' });
+  } catch (e) { next(e); }
 });
 
 adminRouter.delete("/admin/ip-whitelist/:id", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
-  try { await prisma.whitelistedIp.delete({ where: { id: String(req.params.id) } }); res.json({ ok: true }); } catch (e) { next(e); }
+  try {
+    const id = String(req.params.id);
+    const existing = await prisma.whitelistedIp.findUnique({ where: { id } });
+    if (!existing) {
+      return res.status(404).json({ error: 'WHITELIST_ENTRY_NOT_FOUND', message: 'Whitelist entry not found' });
+    }
+    await prisma.whitelistedIp.delete({ where: { id } });
+    res.json({ ok: true, message: 'Whitelist entry removed successfully' });
+  } catch (e) { next(e); }
+});
+
+/**
+ * @openapi
+ * /admin/whitelist/test:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Test whitelist access for a company
+ *     description: Tests whether a company's configured endpoints are accessible based on their whitelisted domains
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [companyId]
+ *             properties:
+ *               companyId:
+ *                 type: string
+ *                 description: Company ID to test whitelist for
+ *     responses:
+ *       200:
+ *         description: Whitelist test results
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   ip:
+ *                     type: string
+ *                     description: IP address or domain tested
+ *                   accessible:
+ *                     type: boolean
+ *                     description: Whether the IP/domain is accessible
+ *                   responseTime:
+ *                     type: number
+ *                     description: Response time in milliseconds (if tested)
+ *                   error:
+ *                     type: string
+ *                     description: Error message if test failed
+ *       404:
+ *         description: Company not found
+ */
+adminRouter.post("/admin/whitelist/test", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const { companyId } = req.body;
+    
+    if (!companyId) {
+      return res.status(400).json({
+        error: "BAD_REQUEST",
+        message: "companyId is required"
+      });
+    }
+
+    // Get company details
+    const company = await prisma.company.findUnique({
+      where: { id: companyId },
+      select: {
+        id: true,
+        companyName: true,
+        type: true,
+        httpEndpoint: true,
+        grpcEndpoint: true,
+        whitelistedDomains: true,
+      }
+    });
+
+    if (!company) {
+      return res.status(404).json({
+        error: "COMPANY_NOT_FOUND",
+        message: "Company not found"
+      });
+    }
+
+    const results: Array<{
+      ip: string;
+      accessible: boolean;
+      responseTime?: number;
+      error?: string;
+    }> = [];
+
+    // Test company's whitelisted domains against their endpoints
+    const endpointsToTest: string[] = [];
+    
+    if (company.httpEndpoint) {
+      try {
+        const url = new URL(company.httpEndpoint);
+        endpointsToTest.push(url.hostname);
+      } catch {
+        endpointsToTest.push(company.httpEndpoint);
+      }
+    }
+    
+    if (company.grpcEndpoint) {
+      // Extract hostname from gRPC endpoint (format: host:port)
+      const grpcHost = company.grpcEndpoint.split(':')[0];
+      if (grpcHost) {
+        endpointsToTest.push(grpcHost);
+      }
+    }
+
+    // If no endpoints configured, return empty results
+    if (endpointsToTest.length === 0) {
+      return res.json([{
+        ip: 'No endpoints configured',
+        accessible: false,
+        error: 'Company has no httpEndpoint or grpcEndpoint configured'
+      }]);
+    }
+
+    // Import whitelist enforcement function
+    const { isWhitelisted } = await import("../../infra/whitelistEnforcement.js");
+    
+    // If company has whitelisted domains, test those too
+    if (company.whitelistedDomains) {
+      const domains = company.whitelistedDomains.split(',').map(d => d.trim()).filter(Boolean);
+      for (const domain of domains) {
+        if (!endpointsToTest.includes(domain)) {
+          endpointsToTest.push(domain);
+        }
+      }
+    }
+
+    // Test each endpoint
+    for (const endpoint of endpointsToTest) {
+      const startTime = Date.now();
+      try {
+        // Test if endpoint is whitelisted
+        const check = await isWhitelisted(companyId, endpoint);
+        const responseTime = Date.now() - startTime;
+        
+        results.push({
+          ip: endpoint,
+          accessible: check.allowed,
+          responseTime,
+          error: check.allowed ? undefined : check.reason
+        });
+      } catch (error: any) {
+        results.push({
+          ip: endpoint,
+          accessible: false,
+          responseTime: Date.now() - startTime,
+          error: error.message || 'Whitelist check failed'
+        });
+      }
+    }
+
+    // Also test global IP whitelist entries for this company type
+    const globalWhitelistEntries = await prisma.whitelistedIp.findMany({
+      where: {
+        type: company.type === 'SOURCE' ? 'source' : company.type === 'AGENT' ? 'agent' : 'admin',
+        enabled: true
+      },
+      select: { ip: true }
+    });
+
+    for (const entry of globalWhitelistEntries) {
+      // Check if this IP is already tested
+      if (!results.some(r => r.ip === entry.ip)) {
+        results.push({
+          ip: entry.ip,
+          accessible: true,
+          responseTime: 0,
+        });
+      }
+    }
+
+    res.json(results);
+  } catch (e) {
+    next(e);
+  }
 });
 
 // [AUTO-AUDIT] Simple overview dashboard metrics
@@ -324,8 +530,10 @@ adminRouter.patch("/admin/companies/:id/status", requireAuth(), requireRole("ADM
  *         required: true
  *         schema: { type: string }
  */
-adminRouter.post("/admin/companies/:id/approve", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+adminRouter.post("/admin/companies/:id/approve", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
   try {
+    const startTime = Date.now();
+    const requestId = (req as any).requestId;
     const { id } = req.params;
     const adminId = (req as any).user?.id;
     
@@ -336,10 +544,34 @@ adminRouter.post("/admin/companies/:id/approve", requireAuth(), requireRole("ADM
     });
     
     if (!company) {
+      // Log failed approval
+      await auditLog({
+        direction: "IN",
+        endpoint: "admin.companies.approve",
+        requestId,
+        companyId: id,
+        httpStatus: 404,
+        request: { companyId: id },
+        response: { error: "COMPANY_NOT_FOUND", message: "Company not found" },
+        durationMs: Date.now() - startTime,
+      });
+      
       return res.status(404).json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
     }
 
     if (!company.emailVerified) {
+      // Log failed approval (email not verified)
+      await auditLog({
+        direction: "IN",
+        endpoint: "admin.companies.approve",
+        requestId,
+        companyId: id,
+        httpStatus: 400,
+        request: { companyId: id },
+        response: { error: "EMAIL_NOT_VERIFIED", message: "Company email must be verified before approval" },
+        durationMs: Date.now() - startTime,
+      });
+      
       return res.status(400).json({
         error: "EMAIL_NOT_VERIFIED",
         message: "Company email must be verified before approval"
@@ -356,6 +588,20 @@ adminRouter.post("/admin/companies/:id/approve", requireAuth(), requireRole("ADM
         sourceAgreements: true,
         sourceLocations: true
       }
+    });
+    
+    const duration = Date.now() - startTime;
+    
+    // Log successful approval
+    await auditLog({
+      direction: "IN",
+      endpoint: "admin.companies.approve",
+      requestId,
+      companyId: id,
+      httpStatus: 200,
+      request: { companyId: id },
+      response: { message: "Company approved successfully", companyId: id, companyName: company.companyName },
+      durationMs: duration,
     });
     
     res.json({
@@ -389,8 +635,10 @@ adminRouter.post("/admin/companies/:id/approve", requireAuth(), requireRole("ADM
  *                 type: string
  *                 description: Optional rejection reason
  */
-adminRouter.post("/admin/companies/:id/reject", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+adminRouter.post("/admin/companies/:id/reject", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
   try {
+    const startTime = Date.now();
+    const requestId = (req as any).requestId;
     const { id } = req.params;
     const { reason } = req.body || {};
     
@@ -401,6 +649,18 @@ adminRouter.post("/admin/companies/:id/reject", requireAuth(), requireRole("ADMI
     });
     
     if (!company) {
+      // Log failed rejection
+      await auditLog({
+        direction: "IN",
+        endpoint: "admin.companies.reject",
+        requestId,
+        companyId: id,
+        httpStatus: 404,
+        request: { companyId: id, reason },
+        response: { error: "COMPANY_NOT_FOUND", message: "Company not found" },
+        durationMs: Date.now() - startTime,
+      });
+      
       return res.status(404).json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
     }
     
@@ -414,6 +674,20 @@ adminRouter.post("/admin/companies/:id/reject", requireAuth(), requireRole("ADMI
         sourceAgreements: true,
         sourceLocations: true
       }
+    });
+    
+    const duration = Date.now() - startTime;
+    
+    // Log successful rejection
+    await auditLog({
+      direction: "IN",
+      endpoint: "admin.companies.reject",
+      requestId,
+      companyId: id,
+      httpStatus: 200,
+      request: { companyId: id, reason },
+      response: { message: "Company rejected", companyId: id, companyName: company.companyName, reason },
+      durationMs: duration,
     });
     
     res.json({
@@ -806,6 +1080,18 @@ adminRouter.get("/admin/logs", requireAuth(), requireRole("ADMIN"), async (req, 
       ...(p.cursor ? { cursor: { id: p.cursor }, skip: 1 } : {}),
       take
     });
+    
+    // Fetch company names for better display
+    const companyIds = [...new Set(rows.map(r => r.companyId).filter((id): id is string => Boolean(id)))];
+    const sourceIds = [...new Set(rows.map(r => r.sourceId).filter((id): id is string => Boolean(id)))];
+    const allCompanyIds = [...new Set([...companyIds, ...sourceIds])];
+    
+    const companies = await prisma.company.findMany({
+      where: { id: { in: allCompanyIds } },
+      select: { id: true, companyName: true, type: true, companyCode: true }
+    });
+    const companyMap = new Map(companies.map(c => [c.id, c]));
+    
     const hasMore = rows.length > p.limit;
     const items = rows.slice(0, p.limit).map(item => {
       // Safely parse JSON strings for better readability
@@ -823,6 +1109,9 @@ adminRouter.get("/admin/logs", requireAuth(), requireRole("ADMIN"), async (req, 
       } catch (e) {
         parsedResponse = item.maskedResponse; // Return as string if parsing fails
       }
+      
+      const company = item.companyId ? companyMap.get(item.companyId) : null;
+      const source = item.sourceId ? companyMap.get(item.sourceId) : null;
       
       return {
         ...item,
@@ -842,14 +1131,133 @@ adminRouter.get("/admin/logs", requireAuth(), requireRole("ADMIN"), async (req, 
         responseSize: item.maskedResponse ? item.maskedResponse.length : 0,
         // Add raw data for complete traceability
         rawRequest: item.maskedRequest,
-        rawResponse: item.maskedResponse
+        rawResponse: item.maskedResponse,
+        // Add company information
+        companyName: company?.companyName || null,
+        companyType: company?.type || null,
+        companyCode: company?.companyCode || null,
+        sourceName: source?.companyName || null,
+        sourceType: source?.type || null,
+        sourceCode: source?.companyCode || null,
       };
     });
     const nextCursor = hasMore ? items[items.length-1].id : "";
+    
+    // Helper function to determine actor type from endpoint and company type
+    const getActor = (endpoint: string | null, companyType: string | null, sourceType: string | null): 'agent' | 'source' | 'admin' | 'system' => {
+      if (!endpoint) return 'system';
+      if (endpoint.startsWith('admin.')) return 'admin';
+      if (companyType === 'AGENT') return 'agent';
+      if (companyType === 'SOURCE' || sourceType === 'SOURCE') return 'source';
+      return 'system';
+    };
+    
+    // Helper function to extract action from endpoint
+    const getAction = (endpoint: string | null): string => {
+      if (!endpoint) return 'Unknown action';
+      const parts = endpoint.split('.');
+      if (parts.length >= 2) {
+        const action = parts[parts.length - 1];
+        return action.charAt(0).toUpperCase() + action.slice(1) + ' ' + parts[0];
+      }
+      return endpoint.replace(/\./g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+    };
+    
+    // Helper function to get resource name
+    const getResource = (item: any): string => {
+      if (item.agreementRef) return `Agreement ${item.agreementRef}`;
+      if (item.requestId) return `Request ${item.requestId.slice(0, 16)}...`;
+      if (item.companyName) return item.companyName;
+      if (item.sourceName) return item.sourceName;
+      if (item.endpoint) {
+        if (item.endpoint.includes('booking')) return 'Booking operation';
+        if (item.endpoint.includes('availability')) return 'Availability request';
+        if (item.endpoint.includes('agreement')) return 'Agreement';
+        if (item.endpoint.includes('health')) return 'Health check';
+        if (item.endpoint.includes('location')) return 'Location sync';
+      }
+      return 'System resource';
+    };
+    
+    // Helper function to determine result
+    const getResult = (httpStatus: number | null, grpcStatus: number | null): 'success' | 'error' | 'warning' => {
+      if (httpStatus) {
+        if (httpStatus >= 400) return 'error';
+        if (httpStatus >= 300) return 'warning';
+        return 'success';
+      }
+      if (grpcStatus) {
+        if (grpcStatus !== 0) return 'error';
+        return 'success';
+      }
+      return 'success';
+    };
+    
+    // Transform to match frontend expected format (for Logs page)
+    const transformedItems = items.map(item => ({
+      id: item.id,
+      timestamp: item.createdAt,
+      level: item.httpStatus && item.httpStatus >= 400 ? 'ERROR' : 
+             item.httpStatus && item.httpStatus >= 300 ? 'WARN' : 'INFO',
+      message: item.endpoint || 'Request',
+      requestId: item.requestId,
+      companyId: item.companyId,
+      companyName: item.companyName,
+      companyType: item.companyType,
+      companyCode: item.companyCode,
+      sourceId: item.sourceId,
+      sourceName: item.sourceName,
+      sourceType: item.sourceType,
+      sourceCode: item.sourceCode,
+      agreementRef: item.agreementRef,
+      endpoint: item.endpoint,
+      http_status: item.httpStatus,
+      grpc_status: item.grpcStatus,
+      maskedRequest: item.maskedRequest,
+      maskedResponse: item.maskedResponse,
+      duration_ms: item.durationMs,
+    }));
+    
+    // Transform to Activity format (for Activity page)
+    const activityItems = items.map(item => {
+      const actor = getActor(item.endpoint, item.companyType, item.sourceType);
+      const action = getAction(item.endpoint);
+      const resource = getResource(item);
+      const result = getResult(item.httpStatus, item.grpcStatus);
+      
+      // Build details string
+      let details: string | undefined = undefined;
+      if (item.durationMs) {
+        details = `Duration: ${item.durationMs}ms`;
+      }
+      if (item.httpStatus && item.httpStatus >= 400) {
+        details = details ? `${details}, HTTP ${item.httpStatus}` : `HTTP ${item.httpStatus}`;
+      }
+      if (item.grpcStatus && item.grpcStatus !== 0) {
+        details = details ? `${details}, gRPC ${item.grpcStatus}` : `gRPC ${item.grpcStatus}`;
+      }
+      
+      return {
+        id: item.id,
+        timestamp: item.createdAt,
+        actor,
+        action,
+        resource,
+        result,
+        details,
+      };
+    });
+    
     res.json({ 
+      data: transformedItems,
+      total: transformedItems.length,
+      page: 1,
+      limit: p.limit,
+      // Keep backward compatibility
       items, 
+      // Activity format for Activity page
+      activities: activityItems,
       nextCursor,
-      total: items.length,
       hasMore
     });
   } catch (e) { next(e); }
@@ -881,6 +1289,173 @@ adminRouter.get("/admin/metrics/summary", requireAuth(), requireRole("ADMIN"), a
       generatedAt: new Date().toISOString()
     });
   } catch (e) { next(e); }
+});
+
+/**
+ * @openapi
+ * /admin/system-status:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get system status (gRPC services, job queue, location sync)
+ *     description: Retrieve overall system status including gRPC services health, job queue status, and location sync information
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: System status information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 grpcServices:
+ *                   type: object
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                       enum: [operational, degraded, down]
+ *                     message:
+ *                       type: string
+ *                     agentService:
+ *                       type: boolean
+ *                     sourceService:
+ *                       type: boolean
+ *                 jobQueue:
+ *                   type: object
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                       enum: [idle, processing, busy]
+ *                     message:
+ *                       type: string
+ *                     pendingJobs:
+ *                       type: number
+ *                     processingJobs:
+ *                       type: number
+ *                     jobsLast24h:
+ *                       type: number
+ *                 locationSync:
+ *                   type: object
+ *                   properties:
+ *                     lastSync:
+ *                       type: string
+ *                       format: date-time
+ *                       nullable: true
+ *                     message:
+ *                       type: string
+ *                     sourcesWithSync:
+ *                       type: number
+ */
+adminRouter.get("/admin/system-status", requireAuth(), requireRole("ADMIN"), async (_req, res, next) => {
+  try {
+    // Check gRPC services
+    const { checkAgentHealth } = await import("../../grpc/clients/agent-grpc.client.js");
+    const { checkSourceHealth } = await import("../../grpc/clients/source-grpc.client.js");
+    
+    const [agentHealthy, sourceHealthy] = await Promise.all([
+      checkAgentHealth().catch(() => false),
+      checkSourceHealth().catch(() => false),
+    ]);
+
+    let grpcStatus = "operational";
+    let grpcMessage = "All services operational";
+    if (!agentHealthy && !sourceHealthy) {
+      grpcStatus = "down";
+      grpcMessage = "All gRPC services down";
+    } else if (!agentHealthy) {
+      grpcStatus = "degraded";
+      grpcMessage = "Agent service unavailable";
+    } else if (!sourceHealthy) {
+      grpcStatus = "degraded";
+      grpcMessage = "Source service unavailable";
+    }
+
+    // Check job queue status
+    const [pendingJobs, processingJobs, jobsLast24h] = await Promise.all([
+      prisma.availabilityJob.count({ where: { status: "PENDING" } }),
+      prisma.availabilityJob.count({ where: { status: "PROCESSING" } }),
+      prisma.availabilityJob.count({ where: { createdAt: { gte: new Date(Date.now() - 24 * 3600 * 1000) } } }),
+    ]);
+
+    let queueStatus = "idle";
+    let queueMessage = "No active jobs";
+    if (processingJobs > 0) {
+      queueStatus = "processing";
+      queueMessage = `Processing ${processingJobs} availability request${processingJobs !== 1 ? "s" : ""}`;
+    } else if (pendingJobs > 0) {
+      queueStatus = "busy";
+      queueMessage = `${pendingJobs} job${pendingJobs !== 1 ? "s" : ""} pending`;
+    }
+
+    // Check location sync status
+    const sourcesWithSync = await prisma.company.findMany({
+      where: {
+        type: "SOURCE",
+        lastLocationSyncAt: { not: null },
+      },
+      select: {
+        lastLocationSyncAt: true,
+      },
+      orderBy: {
+        lastLocationSyncAt: "desc",
+      },
+      take: 1,
+    });
+
+    const lastSync = sourcesWithSync.length > 0 && sourcesWithSync[0].lastLocationSyncAt
+      ? sourcesWithSync[0].lastLocationSyncAt
+      : null;
+
+    const allSources = await prisma.company.count({
+      where: { type: "SOURCE" },
+    });
+
+    const sourcesWithSyncCount = await prisma.company.count({
+      where: {
+        type: "SOURCE",
+        lastLocationSyncAt: { not: null },
+      },
+    });
+
+    let syncMessage = "No location syncs recorded";
+    if (lastSync) {
+      const hoursAgo = Math.floor((Date.now() - new Date(lastSync).getTime()) / (1000 * 60 * 60));
+      const minutesAgo = Math.floor((Date.now() - new Date(lastSync).getTime()) / (1000 * 60));
+      
+      if (hoursAgo < 1) {
+        syncMessage = `Last sync: ${minutesAgo} minute${minutesAgo !== 1 ? "s" : ""} ago`;
+      } else if (hoursAgo < 24) {
+        syncMessage = `Last sync: ${hoursAgo} hour${hoursAgo !== 1 ? "s" : ""} ago`;
+      } else {
+        const daysAgo = Math.floor(hoursAgo / 24);
+        syncMessage = `Last sync: ${daysAgo} day${daysAgo !== 1 ? "s" : ""} ago`;
+      }
+    }
+
+    res.json({
+      grpcServices: {
+        status: grpcStatus,
+        message: grpcMessage,
+        agentService: agentHealthy,
+        sourceService: sourceHealthy,
+      },
+      jobQueue: {
+        status: queueStatus,
+        message: queueMessage,
+        pendingJobs,
+        processingJobs,
+        jobsLast24h,
+      },
+      locationSync: {
+        lastSync: lastSync ? lastSync.toISOString() : null,
+        message: syncMessage,
+        sourcesWithSync: sourcesWithSyncCount,
+        totalSources: allSources,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
 });
 
 /**
@@ -932,7 +1507,8 @@ adminRouter.get("/admin/metrics/summary", requireAuth(), requireRole("ADMIN"), a
 adminRouter.get("/admin/health/sources", requireAuth(), requireRole("ADMIN"), async (_req, res, next) => {
   try {
     const healthStatuses = await SourceHealthService.getAllSourceHealth();
-    res.json({ sources: healthStatuses });
+    // Return array directly to match frontend expectation
+    res.json(healthStatuses);
   } catch (e) { next(e); }
 });
 
@@ -992,6 +1568,106 @@ adminRouter.get("/admin/health/sources/:sourceId", requireAuth(), requireRole("A
 
 /**
  * @openapi
+ * /admin/health/check/{companyId}:
+ *   post:
+ *     tags: [Admin Health]
+ *     summary: Run health check for a specific source
+ *     description: Manually trigger a health check for a source company and return current health status
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: companyId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Source company ID
+ *     responses:
+ *       200:
+ *         description: Health check result
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sourceId:
+ *                   type: string
+ *                 healthy:
+ *                   type: boolean
+ *                 slowRate:
+ *                   type: number
+ *                 sampleCount:
+ *                   type: integer
+ *                 backoffLevel:
+ *                   type: integer
+ *                 excludedUntil:
+ *                   type: string
+ *                   format: date-time
+ *                   nullable: true
+ *                 updatedAt:
+ *                   type: string
+ *                   format: date-time
+ *                   nullable: true
+ *       404:
+ *         description: Source not found or invalid type
+ */
+adminRouter.post("/admin/health/check/:companyId", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
+  try {
+    const startTime = Date.now();
+    const requestId = (req as any).requestId;
+    const { companyId } = req.params;
+    
+    // Verify company exists and is a SOURCE
+    const company = await prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true, type: true, companyName: true }
+    });
+    
+    if (!company || company.type !== "SOURCE") {
+      // Log failed health check
+      await auditLog({
+        direction: "IN",
+        endpoint: "admin.health.check",
+        requestId,
+        companyId: companyId,
+        sourceId: companyId,
+        httpStatus: 404,
+        request: { companyId },
+        response: { error: "SOURCE_NOT_FOUND", message: "Source not found or invalid type" },
+        durationMs: Date.now() - startTime,
+      });
+      
+      return res.status(404).json({ 
+        error: "SOURCE_NOT_FOUND", 
+        message: "Source not found or invalid type" 
+      });
+    }
+    
+    // Get current health status
+    const healthStatus = await SourceHealthService.getSourceHealth(companyId);
+    const duration = Date.now() - startTime;
+    
+    // Log successful health check
+    await auditLog({
+      direction: "IN",
+      endpoint: "admin.health.check",
+      requestId,
+      companyId: companyId,
+      sourceId: companyId,
+      httpStatus: 200,
+      request: { companyId },
+      response: healthStatus,
+      durationMs: duration,
+    });
+    
+    res.json(healthStatus);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
  * /admin/health/reset/{sourceId}:
  *   post:
  *     tags: [Admin Health]
@@ -1034,22 +1710,52 @@ adminRouter.get("/admin/health/sources/:sourceId", requireAuth(), requireRole("A
  *                   type: string
  *                   example: Source not found or invalid type
  */
-adminRouter.post("/admin/health/reset/:sourceId", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+adminRouter.post("/admin/health/reset/:sourceId", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
   try {
+    const startTime = Date.now();
+    const requestId = (req as any).requestId;
     const { sourceId } = req.params;
     const adminId = (req as any).user?.id;
     
     // Verify source exists
     const source = await prisma.company.findUnique({
       where: { id: sourceId },
-      select: { id: true, type: true }
+      select: { id: true, type: true, companyName: true }
     });
     
     if (!source || source.type !== "SOURCE") {
+      // Log failed health reset
+      await auditLog({
+        direction: "IN",
+        endpoint: "admin.health.reset",
+        requestId,
+        companyId: sourceId,
+        sourceId: sourceId,
+        httpStatus: 404,
+        request: { sourceId },
+        response: { error: "SOURCE_NOT_FOUND", message: "Source not found or invalid type" },
+        durationMs: Date.now() - startTime,
+      });
+      
       return res.status(404).json({ error: "SOURCE_NOT_FOUND", message: "Source not found or invalid type" });
     }
     
     await SourceHealthService.resetSourceHealth(sourceId, adminId);
+    const duration = Date.now() - startTime;
+    
+    // Log successful health reset
+    await auditLog({
+      direction: "IN",
+      endpoint: "admin.health.reset",
+      requestId,
+      companyId: sourceId,
+      sourceId: sourceId,
+      httpStatus: 200,
+      request: { sourceId },
+      response: { message: "Source health reset successfully", sourceId, sourceName: source.companyName },
+      durationMs: duration,
+    });
+    
     res.json({ message: "Source health reset successfully", sourceId });
   } catch (e) { next(e); }
 });
@@ -1078,20 +1784,35 @@ adminRouter.post("/admin/health/reset/:sourceId", requireAuth(), requireRole("AD
  *                   type: integer
  *                   description: Number of sources that were reset
  */
-adminRouter.post("/admin/health/reset", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+adminRouter.post("/admin/health/reset", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
   try {
+    const startTime = Date.now();
+    const requestId = (req as any).requestId;
     const adminId = (req as any).user?.id;
     
     // Get all SOURCE companies
     const sources = await prisma.company.findMany({
       where: { type: "SOURCE" },
-      select: { id: true }
+      select: { id: true, companyName: true }
     });
     
     // Reset health for all sources
     await Promise.all(
       sources.map(source => SourceHealthService.resetSourceHealth(source.id, adminId))
     );
+    
+    const duration = Date.now() - startTime;
+    
+    // Log bulk health reset
+    await auditLog({
+      direction: "IN",
+      endpoint: "admin.health.reset.all",
+      requestId,
+      httpStatus: 200,
+      request: { resetAll: true },
+      response: { message: "All source health reset successfully", resetCount: sources.length },
+      durationMs: duration,
+    });
     
     res.json({ 
       message: "All source health reset successfully", 
@@ -1570,7 +2291,7 @@ adminRouter.post("/admin/sources/:sourceId/import-branches", requireAuth(), requ
         });
       }
 
-      const data = await response.json();
+      const data = await response.json() as any;
 
       // Validate CompanyCode
       if (data.CompanyCode !== source.companyCode) {
@@ -1665,6 +2386,1594 @@ adminRouter.post("/admin/sources/:sourceId/import-branches", requireAuth(), requ
       }
       throw fetchError;
     }
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ============================================================================
+// Branch Management Endpoints
+// ============================================================================
+
+/**
+ * @openapi
+ * /admin/branches:
+ *   get:
+ *     tags: [Admin]
+ *     summary: List all branches with pagination and filters
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: sourceId
+ *         schema: { type: string }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string }
+ *       - in: query
+ *         name: locationType
+ *         schema: { type: string }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 25 }
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer, default: 0 }
+ */
+adminRouter.get("/admin/branches", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const sourceId = req.query.sourceId as string | undefined;
+    const status = req.query.status as string | undefined;
+    const locationType = req.query.locationType as string | undefined;
+    const search = req.query.search as string | undefined;
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+    const offset = Math.max(0, Number(req.query.offset || 0));
+
+    const where: any = {};
+    
+    if (sourceId) {
+      where.sourceId = sourceId;
+    }
+    
+    if (status) {
+      where.status = status;
+    }
+    
+    if (locationType) {
+      where.locationType = locationType;
+    }
+    
+    if (search) {
+      where.OR = [
+        { branchCode: { contains: search } },
+        { name: { contains: search } },
+        { city: { contains: search } },
+      ];
+    }
+
+    const [branches, total] = await Promise.all([
+      prisma.branch.findMany({
+        where,
+        include: {
+          source: {
+            select: {
+              id: true,
+              companyName: true,
+              companyCode: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.branch.count({ where }),
+    ]);
+
+    res.json({
+      items: branches,
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/branches/stats:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get branch statistics
+ *     security:
+ *       - bearerAuth: []
+ */
+adminRouter.get("/admin/branches/stats", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const sourceId = req.query.sourceId as string | undefined;
+    
+    const where: any = {};
+    if (sourceId) {
+      where.sourceId = sourceId;
+    }
+
+    const [total, unmapped, bySource, byStatus] = await Promise.all([
+      prisma.branch.count({ where }),
+      prisma.branch.count({ where: { ...where, natoLocode: null } }),
+      prisma.branch.groupBy({
+        by: ["sourceId"],
+        where,
+        _count: true,
+      }),
+      prisma.branch.groupBy({
+        by: ["status"],
+        where,
+        _count: true,
+      }),
+    ]);
+
+    // Get source names for bySource
+    const sourceIds = bySource.map((s) => s.sourceId);
+    const sources = await prisma.company.findMany({
+      where: { id: { in: sourceIds } },
+      select: { id: true, companyName: true },
+    });
+    
+    const bySourceWithNames = bySource.map((item) => ({
+      sourceId: item.sourceId,
+      sourceName: sources.find((s) => s.id === item.sourceId)?.companyName || "Unknown",
+      count: item._count,
+    }));
+
+    res.json({
+      total,
+      unmapped,
+      bySource: bySourceWithNames,
+      byStatus: byStatus.map((item) => ({
+        status: item.status || "null",
+        count: item._count,
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/branches/unmapped:
+ *   get:
+ *     tags: [Admin]
+ *     summary: List branches without natoLocode
+ *     security:
+ *       - bearerAuth: []
+ */
+adminRouter.get("/admin/branches/unmapped", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const sourceId = req.query.sourceId as string | undefined;
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+    const offset = Math.max(0, Number(req.query.offset || 0));
+
+    const where: any = {
+      natoLocode: null,
+    };
+    
+    if (sourceId) {
+      where.sourceId = sourceId;
+    }
+
+    const [branches, total] = await Promise.all([
+      prisma.branch.findMany({
+        where,
+        include: {
+          source: {
+            select: {
+              id: true,
+              companyName: true,
+              companyCode: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.branch.count({ where }),
+    ]);
+
+    res.json({
+      items: branches,
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/branches/:id:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get branch details
+ *     security:
+ *       - bearerAuth: []
+ */
+adminRouter.get("/admin/branches/:id", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    const branch = await prisma.branch.findUnique({
+      where: { id },
+      include: {
+        source: {
+          select: {
+            id: true,
+            companyName: true,
+            companyCode: true,
+          },
+        },
+      },
+    });
+
+    if (!branch) {
+      return res.status(404).json({ error: "BRANCH_NOT_FOUND", message: "Branch not found" });
+    }
+
+    res.json(branch);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/branches/:id:
+ *   patch:
+ *     tags: [Admin]
+ *     summary: Update branch
+ *     security:
+ *       - bearerAuth: []
+ */
+const updateBranchSchema = z.object({
+  name: z.string().optional(),
+  status: z.string().optional(),
+  locationType: z.string().optional(),
+  collectionType: z.string().optional(),
+  email: z.string().email().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  latitude: z.number().optional().nullable(),
+  longitude: z.number().optional().nullable(),
+  addressLine: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  postalCode: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  countryCode: z.string().optional().nullable(),
+  natoLocode: z.string().optional().nullable(),
+});
+
+adminRouter.patch("/admin/branches/:id", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const body = updateBranchSchema.parse(req.body);
+
+    // Validate natoLocode if provided
+    if (body.natoLocode) {
+      const locode = await prisma.uNLocode.findUnique({
+        where: { unlocode: body.natoLocode },
+      });
+      if (!locode) {
+        return res.status(400).json({
+          error: "INVALID_UNLOCODE",
+          message: `UN/LOCODE ${body.natoLocode} not found`,
+        });
+      }
+    }
+
+    const branch = await prisma.branch.update({
+      where: { id },
+      data: body,
+      include: {
+        source: {
+          select: {
+            id: true,
+            companyName: true,
+            companyCode: true,
+          },
+        },
+      },
+    });
+
+    res.json(branch);
+  } catch (e: any) {
+    if (e.code === "P2025") {
+      return res.status(404).json({ error: "BRANCH_NOT_FOUND", message: "Branch not found" });
+    }
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/branches/:id:
+ *   delete:
+ *     tags: [Admin]
+ *     summary: Delete branch
+ *     security:
+ *       - bearerAuth: []
+ */
+adminRouter.delete("/admin/branches/:id", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    await prisma.branch.delete({
+      where: { id },
+    });
+
+    res.json({ message: "Branch deleted successfully" });
+  } catch (e: any) {
+    if (e.code === "P2025") {
+      return res.status(404).json({ error: "BRANCH_NOT_FOUND", message: "Branch not found" });
+    }
+    next(e);
+  }
+});
+
+
+// ============================================================================
+// UN/LOCODE Management Endpoints
+// ============================================================================
+
+/**
+ * @openapi
+ * /admin/unlocodes:
+ *   get:
+ *     tags: [Admin]
+ *     summary: List/search UN/LOCODEs
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: query
+ *         schema: { type: string }
+ *         description: Search by unlocode, country, place, or iataCode
+ *       - in: query
+ *         name: country
+ *         schema: { type: string }
+ *         description: Filter by country code
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 25 }
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer, default: 0 }
+ */
+adminRouter.get("/admin/unlocodes", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const query = req.query.query as string | undefined;
+    const country = req.query.country as string | undefined;
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+    const offset = Math.max(0, Number(req.query.offset || 0));
+
+    const where: any = {};
+    
+    if (query) {
+      where.OR = [
+        { unlocode: { contains: query } },
+        { country: { contains: query } },
+        { place: { contains: query } },
+        { iataCode: { contains: query } },
+      ];
+    }
+    
+    if (country) {
+      where.country = country;
+    }
+
+    const [unlocodes, total] = await Promise.all([
+      prisma.uNLocode.findMany({
+        where,
+        orderBy: { unlocode: "asc" },
+        take: limit,
+        skip: offset,
+        include: {
+          _count: {
+            select: {
+              sourceLocations: true,
+              agreementLocationOverrides: true,
+            },
+          },
+        },
+      }),
+      prisma.uNLocode.count({ where }),
+    ]);
+
+    res.json({
+      items: unlocodes.map((loc) => ({
+        unlocode: loc.unlocode,
+        country: loc.country,
+        place: loc.place,
+        iataCode: loc.iataCode,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        usageCount: loc._count.sourceLocations + loc._count.agreementLocationOverrides,
+      })),
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/unlocodes:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Add new UN/LOCODE
+ *     security:
+ *       - bearerAuth: []
+ */
+const createUNLocodeSchema = z.object({
+  unlocode: z.string().min(2).max(10),
+  country: z.string().min(2).max(2),
+  place: z.string().min(1),
+  iataCode: z.string().optional().nullable(),
+  latitude: z.number().optional().nullable(),
+  longitude: z.number().optional().nullable(),
+});
+
+adminRouter.post("/admin/unlocodes", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const body = createUNLocodeSchema.parse(req.body);
+
+    // Check if already exists
+    const existing = await prisma.uNLocode.findUnique({
+      where: { unlocode: body.unlocode },
+    });
+
+    if (existing) {
+      return res.status(409).json({
+        error: "UNLOCODE_EXISTS",
+        message: `UN/LOCODE ${body.unlocode} already exists`,
+      });
+    }
+
+    const unlocode = await prisma.uNLocode.create({
+      data: {
+        unlocode: body.unlocode.toUpperCase(),
+        country: body.country.toUpperCase(),
+        place: body.place,
+        iataCode: body.iataCode?.toUpperCase() || null,
+        latitude: body.latitude || null,
+        longitude: body.longitude || null,
+      },
+    });
+
+    res.status(201).json(unlocode);
+  } catch (e: any) {
+    if (e.name === "ZodError") {
+      return res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Invalid request data",
+        details: e.errors,
+      });
+    }
+    if (e.code === "P2002") {
+      return res.status(409).json({
+        error: "UNLOCODE_EXISTS",
+        message: `UN/LOCODE already exists`,
+      });
+    }
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/unlocodes/:unlocode:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get UN/LOCODE details
+ *     security:
+ *       - bearerAuth: []
+ */
+adminRouter.get("/admin/unlocodes/:unlocode", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const { unlocode } = req.params;
+
+    const locode = await prisma.uNLocode.findUnique({
+      where: { unlocode: unlocode.toUpperCase() },
+      include: {
+        sourceLocations: {
+          include: {
+            source: {
+              select: {
+                id: true,
+                companyName: true,
+                companyCode: true,
+              },
+            },
+          },
+          take: 10,
+        },
+        agreementLocationOverrides: {
+          include: {
+            agreement: {
+              select: {
+                id: true,
+                agreementRef: true,
+                agent: {
+                  select: {
+                    companyName: true,
+                  },
+                },
+                source: {
+                  select: {
+                    companyName: true,
+                  },
+                },
+              },
+            },
+          },
+          take: 10,
+        },
+        _count: {
+          select: {
+            sourceLocations: true,
+            agreementLocationOverrides: true,
+          },
+        },
+      },
+    });
+
+    if (!locode) {
+      return res.status(404).json({
+        error: "UNLOCODE_NOT_FOUND",
+        message: `UN/LOCODE ${unlocode} not found`,
+      });
+    }
+
+    res.json(locode);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/unlocodes/:unlocode:
+ *   patch:
+ *     tags: [Admin]
+ *     summary: Update UN/LOCODE
+ *     security:
+ *       - bearerAuth: []
+ */
+const updateUNLocodeSchema = z.object({
+  country: z.string().min(2).max(2).optional(),
+  place: z.string().min(1).optional(),
+  iataCode: z.string().optional().nullable(),
+  latitude: z.number().optional().nullable(),
+  longitude: z.number().optional().nullable(),
+});
+
+adminRouter.patch("/admin/unlocodes/:unlocode", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const { unlocode } = req.params;
+    const body = updateUNLocodeSchema.parse(req.body);
+
+    const updateData: any = {};
+    if (body.country) updateData.country = body.country.toUpperCase();
+    if (body.place) updateData.place = body.place;
+    if (body.iataCode !== undefined) updateData.iataCode = body.iataCode?.toUpperCase() || null;
+    if (body.latitude !== undefined) updateData.latitude = body.latitude;
+    if (body.longitude !== undefined) updateData.longitude = body.longitude;
+
+    const updated = await prisma.uNLocode.update({
+      where: { unlocode: unlocode.toUpperCase() },
+      data: updateData,
+    });
+
+    res.json(updated);
+  } catch (e: any) {
+    if (e.name === "ZodError") {
+      return res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Invalid request data",
+        details: e.errors,
+      });
+    }
+    if (e.code === "P2025") {
+      return res.status(404).json({
+        error: "UNLOCODE_NOT_FOUND",
+        message: `UN/LOCODE ${req.params.unlocode} not found`,
+      });
+    }
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/unlocodes/:unlocode:
+ *   delete:
+ *     tags: [Admin]
+ *     summary: Delete UN/LOCODE
+ *     security:
+ *       - bearerAuth: []
+ *     description: |
+ *       Deletes a UN/LOCODE. Will fail if the UN/LOCODE is in use by any sources or agreements.
+ */
+adminRouter.delete("/admin/unlocodes/:unlocode", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const { unlocode } = req.params;
+
+    // Check if in use
+    const [sourceCount, agreementCount] = await Promise.all([
+      prisma.sourceLocation.count({
+        where: { unlocode: unlocode.toUpperCase() },
+      }),
+      prisma.agreementLocationOverride.count({
+        where: { unlocode: unlocode.toUpperCase() },
+      }),
+    ]);
+
+    if (sourceCount > 0 || agreementCount > 0) {
+      return res.status(409).json({
+        error: "UNLOCODE_IN_USE",
+        message: `Cannot delete UN/LOCODE ${unlocode} - it is in use by ${sourceCount} source(s) and ${agreementCount} agreement(s)`,
+        usage: {
+          sources: sourceCount,
+          agreements: agreementCount,
+        },
+      });
+    }
+
+    await prisma.uNLocode.delete({
+      where: { unlocode: unlocode.toUpperCase() },
+    });
+
+    res.json({ message: `UN/LOCODE ${unlocode} deleted successfully` });
+  } catch (e: any) {
+    if (e.code === "P2025") {
+      return res.status(404).json({
+        error: "UNLOCODE_NOT_FOUND",
+        message: `UN/LOCODE ${req.params.unlocode} not found`,
+      });
+    }
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/unlocodes/import:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Bulk import UN/LOCODEs from CSV
+ *     security:
+ *       - bearerAuth: []
+ *     description: |
+ *       Imports UN/LOCODEs from CSV format.
+ *       CSV format: unlocode,country,place,iataCode,latitude,longitude
+ *       Example: GBMAN,GB,Manchester,MAN,53.36,-2.27
+ */
+const importUNLocodeSchema = z.object({
+  csv: z.string().min(1),
+});
+
+adminRouter.post("/admin/unlocodes/import", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const body = importUNLocodeSchema.parse(req.body);
+    const lines = body.csv.split(/\r?\n/).filter(Boolean);
+    
+    let imported = 0;
+    let updated = 0;
+    let errors: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const [unlocode, country, place, iataCode, lat, lon] = line.split(",").map(s => s.trim());
+      
+      if (!unlocode || !country || !place) {
+        errors.push(`Line ${i + 1}: Missing required fields (unlocode, country, place)`);
+        continue;
+      }
+
+      try {
+        const data = {
+          unlocode: unlocode.toUpperCase(),
+          country: country.toUpperCase(),
+          place: place,
+          iataCode: iataCode?.toUpperCase() || null,
+          latitude: lat ? parseFloat(lat) : null,
+          longitude: lon ? parseFloat(lon) : null,
+        };
+
+        const existing = await prisma.uNLocode.findUnique({
+          where: { unlocode: data.unlocode },
+        });
+
+        if (existing) {
+          await prisma.uNLocode.update({
+            where: { unlocode: data.unlocode },
+            data: {
+              country: data.country,
+              place: data.place,
+              iataCode: data.iataCode,
+              latitude: data.latitude,
+              longitude: data.longitude,
+            },
+          });
+          updated++;
+        } else {
+          await prisma.uNLocode.create({ data });
+          imported++;
+        }
+      } catch (e: any) {
+        errors.push(`Line ${i + 1}: ${e.message || "Unknown error"}`);
+      }
+    }
+
+    res.json({
+      message: "Import completed",
+      imported,
+      updated,
+      total: lines.length,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+  } catch (e: any) {
+    if (e.name === "ZodError") {
+      return res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Invalid request data",
+        details: e.errors,
+      });
+    }
+    next(e);
+  }
+});
+
+// ============================================================================
+// Booking Logs Endpoint
+// ============================================================================
+
+/**
+ * @openapi
+ * /admin/booking-logs:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get booking operation logs
+ *     description: Retrieve audit logs for booking operations (create, modify, cancel, check) with filtering. Returns logs with company names, source names, and agreement references for better display.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: request_id
+ *         schema: { type: string }
+ *         description: Filter by request ID
+ *       - in: query
+ *         name: company_id
+ *         schema: { type: string }
+ *         description: Filter by agent company ID
+ *       - in: query
+ *         name: source_id
+ *         schema: { type: string }
+ *         description: Filter by source company ID
+ *       - in: query
+ *         name: agreement_ref
+ *         schema: { type: string }
+ *         description: Filter by agreement reference
+ *       - in: query
+ *         name: operation
+ *         schema: { type: string, enum: [create, modify, cancel, check] }
+ *         description: Filter by booking operation type
+ *       - in: query
+ *         name: from_date
+ *         schema: { type: string, format: date-time }
+ *         description: Filter logs from this date (ISO 8601 format)
+ *       - in: query
+ *         name: to_date
+ *         schema: { type: string, format: date-time }
+ *         description: Filter logs until this date (ISO 8601 format)
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 200, minimum: 1, maximum: 500 }
+ *         description: Maximum number of results
+ *     responses:
+ *       200:
+ *         description: List of booking logs with company names and agreement references
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 items:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       createdAt:
+ *                         type: string
+ *                         format: date-time
+ *                       requestId:
+ *                         type: string
+ *                       companyId:
+ *                         type: string
+ *                       companyName:
+ *                         type: string
+ *                         nullable: true
+ *                       companyCode:
+ *                         type: string
+ *                         nullable: true
+ *                       companyType:
+ *                         type: string
+ *                         nullable: true
+ *                       sourceId:
+ *                         type: string
+ *                         nullable: true
+ *                       sourceName:
+ *                         type: string
+ *                         nullable: true
+ *                       sourceCode:
+ *                         type: string
+ *                         nullable: true
+ *                       sourceType:
+ *                         type: string
+ *                         nullable: true
+ *                       agreementRef:
+ *                         type: string
+ *                         nullable: true
+ *                       operation:
+ *                         type: string
+ *                         enum: [create, modify, cancel, check]
+ *                       httpStatus:
+ *                         type: integer
+ *                         nullable: true
+ *                       grpcStatus:
+ *                         type: integer
+ *                         nullable: true
+ *                       request:
+ *                         type: object
+ *                       response:
+ *                         type: object
+ *                       durationMs:
+ *                         type: integer
+ *                         nullable: true
+ *                 total:
+ *                   type: integer
+ */
+adminRouter.get("/admin/booking-logs", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const requestId = String(req.query.request_id || "").trim();
+    const companyId = String(req.query.company_id || "").trim();
+    const sourceId = String(req.query.source_id || "").trim();
+    const agreementRef = String(req.query.agreement_ref || "").trim();
+    const operation = String(req.query.operation || "").trim().toLowerCase();
+    const fromDate = req.query.from_date ? new Date(String(req.query.from_date)) : null;
+    const toDate = req.query.to_date ? new Date(String(req.query.to_date)) : null;
+    const limit = Math.max(1, Math.min(500, Number(req.query.limit || 100)));
+
+    // Build where clause - filter by booking endpoints
+    const bookingEndpoints = ["booking.create", "booking.modify", "booking.cancel", "booking.check"];
+    const where: any = {
+      endpoint: { in: bookingEndpoints },
+    };
+
+    if (requestId) {
+      where.requestId = requestId;
+    }
+
+    if (companyId) {
+      where.companyId = companyId;
+    }
+
+    if (sourceId) {
+      where.sourceId = sourceId;
+    }
+
+    if (agreementRef) {
+      where.agreementRef = agreementRef;
+    }
+
+    // Filter by operation if provided
+    if (operation && ["create", "modify", "cancel", "check"].includes(operation)) {
+      where.endpoint = `booking.${operation}`;
+    }
+
+    // Date range filtering
+    if (fromDate || toDate) {
+      where.createdAt = {};
+      if (fromDate) {
+        where.createdAt.gte = fromDate;
+      }
+      if (toDate) {
+        where.createdAt.lte = toDate;
+      }
+    }
+
+    const logs = await prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
+
+    // Fetch company names for better display
+    const companyIds = [...new Set(logs.map(r => r.companyId).filter((id): id is string => Boolean(id)))];
+    const sourceIds = [...new Set(logs.map(r => r.sourceId).filter((id): id is string => Boolean(id)))];
+    const allCompanyIds = [...new Set([...companyIds, ...sourceIds])];
+    
+    const companies = await prisma.company.findMany({
+      where: { id: { in: allCompanyIds } },
+      select: { id: true, companyName: true, type: true, companyCode: true }
+    });
+    const companyMap = new Map(companies.map(c => [c.id, c]));
+
+    // Transform logs to match Admin UI expectations
+    const items = logs.map((log) => {
+      // Extract operation from endpoint (e.g., "booking.create" -> "create")
+      const operation = log.endpoint?.replace("booking.", "") || "create";
+      
+      // Parse request and response from masked strings
+      let request: any = {};
+      let response: any = {};
+      
+      try {
+        if (log.maskedRequest) {
+          request = JSON.parse(log.maskedRequest);
+        }
+      } catch (e) {
+        // If parsing fails, use the raw string
+        request = { raw: log.maskedRequest };
+      }
+      
+      try {
+        if (log.maskedResponse) {
+          response = JSON.parse(log.maskedResponse);
+        }
+      } catch (e) {
+        // If parsing fails, use the raw string
+        response = { raw: log.maskedResponse };
+      }
+
+      const company = log.companyId ? companyMap.get(log.companyId) : null;
+      const source = log.sourceId ? companyMap.get(log.sourceId) : null;
+
+      return {
+        id: log.id,
+        createdAt: log.createdAt.toISOString(),
+        requestId: log.requestId,
+        companyId: log.companyId,
+        companyName: company?.companyName || null,
+        companyType: company?.type || null,
+        companyCode: company?.companyCode || null,
+        sourceId: log.sourceId,
+        sourceName: source?.companyName || null,
+        sourceType: source?.type || null,
+        sourceCode: source?.companyCode || null,
+        agreementRef: log.agreementRef,
+        operation,
+        httpStatus: log.httpStatus,
+        grpcStatus: log.grpcStatus,
+        request,
+        response,
+        durationMs: log.durationMs,
+      };
+    });
+
+    res.json({ items, total: items.length });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/notifications:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get admin notifications
+ *     description: Retrieve notifications for admin users including pending approvals, health issues, and system events
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Maximum number of notifications to return
+ *       - in: query
+ *         name: unreadOnly
+ *         schema:
+ *           type: boolean
+ *           default: false
+ *         description: Return only unread notifications
+ *     responses:
+ *       200:
+ *         description: List of notifications
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 items:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       type:
+ *                         type: string
+ *                         enum: [agreement, health, company, system]
+ *                       title:
+ *                         type: string
+ *                       message:
+ *                         type: string
+ *                       timestamp:
+ *                         type: string
+ *                         format: date-time
+ *                       read:
+ *                         type: boolean
+ *                       actionUrl:
+ *                         type: string
+ *                 total:
+ *                   type: integer
+ */
+adminRouter.get("/admin/notifications", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 50)));
+    const unreadOnly = req.query.unreadOnly === 'true';
+    
+    // Build notifications from various sources
+    const notifications: any[] = [];
+    
+    // 1. Get pending company approvals
+    const pendingCompanies = await prisma.company.findMany({
+      where: {
+        status: 'PENDING_VERIFICATION',
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: {
+        id: true,
+        companyName: true,
+        type: true,
+        email: true,
+        createdAt: true,
+      },
+    });
+    
+    pendingCompanies.forEach(company => {
+      notifications.push({
+        id: `company-pending-${company.id}`,
+        type: 'company',
+        title: 'New company awaiting approval',
+        message: `${company.companyName} (${company.type}) - ${company.email}`,
+        timestamp: company.createdAt.toISOString(),
+        read: false,
+        actionUrl: '/companies',
+      });
+    });
+    
+    // 2. Get pending location requests
+    const pendingLocationRequests = await prisma.locationRequest.findMany({
+      where: {
+        status: 'PENDING',
+      },
+      include: {
+        source: {
+          select: {
+            companyName: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+    
+    pendingLocationRequests.forEach(req => {
+      notifications.push({
+        id: `location-request-${req.id}`,
+        type: 'system',
+        title: 'Location request pending approval',
+        message: `${req.locationName}, ${req.country} - Requested by ${req.source.companyName}`,
+        timestamp: req.createdAt.toISOString(),
+        read: false,
+        actionUrl: '/location-requests',
+      });
+    });
+    
+    // 3. Get excluded sources (health issues)
+    const excludedSources = await prisma.sourceHealth.findMany({
+      where: {
+        excludedUntil: {
+          gt: new Date(),
+        },
+      },
+      orderBy: { excludedUntil: 'desc' },
+      take: 10,
+    });
+    
+    // Fetch company information for excluded sources
+    if (excludedSources.length > 0) {
+      const sourceIds = excludedSources.map(h => h.sourceId);
+      const companies = await prisma.company.findMany({
+        where: { id: { in: sourceIds } },
+        select: { id: true, companyName: true },
+      });
+      const companyMap = new Map(companies.map(c => [c.id, c]));
+      
+      excludedSources.forEach(health => {
+        const company = companyMap.get(health.sourceId);
+        if (company) {
+          notifications.push({
+            id: `health-excluded-${health.sourceId}`,
+            type: 'health',
+            title: 'Source excluded due to health issues',
+            message: `${company.companyName} excluded until ${health.excludedUntil ? new Date(health.excludedUntil).toLocaleString() : 'unknown'}`,
+            timestamp: health.excludedUntil?.toISOString() || health.updatedAt.toISOString(),
+            read: false,
+            actionUrl: '/health',
+          });
+        }
+      });
+    }
+    
+    // 4. Get recent agreements in OFFERED status (awaiting agent acceptance)
+    const offeredAgreements = await prisma.agreement.findMany({
+      where: {
+        status: 'OFFERED',
+      },
+      include: {
+        agent: {
+          select: {
+            companyName: true,
+          },
+        },
+        source: {
+          select: {
+            companyName: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+    
+    offeredAgreements.forEach(agreement => {
+      notifications.push({
+        id: `agreement-offered-${agreement.id}`,
+        type: 'agreement',
+        title: 'Agreement awaiting acceptance',
+        message: `${agreement.source.companyName} → ${agreement.agent.companyName} (${agreement.agreementRef})`,
+        timestamp: agreement.createdAt.toISOString(),
+        read: false,
+        actionUrl: '/agreements-management',
+      });
+    });
+    
+    // 5. Get database notifications (if any exist)
+    const dbNotifications = await prisma.notification.findMany({
+      where: {
+        companyId: null, // Admin notifications have no companyId
+        ...(unreadOnly && { readAt: null }),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    
+    dbNotifications.forEach(notif => {
+      // Map database notification type to frontend type
+      let frontendType: 'agreement' | 'health' | 'company' | 'system' = 'system';
+      if (notif.type.includes('AGREEMENT')) {
+        frontendType = 'agreement';
+      } else if (notif.type.includes('HEALTH') || notif.type.includes('EXCLUDED')) {
+        frontendType = 'health';
+      } else if (notif.type.includes('COMPANY')) {
+        frontendType = 'company';
+      }
+      
+      notifications.push({
+        id: notif.id,
+        type: frontendType,
+        title: notif.title,
+        message: notif.message,
+        timestamp: notif.createdAt.toISOString(),
+        read: !!notif.readAt,
+        actionUrl: frontendType === 'agreement' ? '/agreements-management' :
+                   frontendType === 'health' ? '/health' :
+                   frontendType === 'company' ? '/companies' : '/dashboard',
+      });
+    });
+    
+    // Sort by timestamp (newest first) and limit
+    const sortedNotifications = notifications
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, limit);
+    
+    res.json({
+      items: sortedNotifications,
+      total: sortedNotifications.length,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/notifications/{id}/read:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Mark notification as read
+ *     security:
+ *       - bearerAuth: []
+ */
+adminRouter.post("/admin/notifications/:id/read", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    // If it's a database notification, update it
+    if (id.startsWith('cl')) {
+      await prisma.notification.update({
+        where: { id },
+        data: { readAt: new Date() },
+      });
+    }
+    
+    // For dynamic notifications (company-pending-, location-request-, etc.), 
+    // we don't persist read status, but we can return success
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ==================== SMTP Management ====================
+
+const smtpConfigSchema = z.object({
+  host: z.string().min(1, "SMTP host is required"),
+  port: z.number().int().min(1).max(65535).default(587),
+  secure: z.boolean().default(false), // true for TLS/SSL (465), false for STARTTLS (587)
+  user: z.string().min(1, "SMTP username is required"),
+  password: z.string().min(1, "SMTP password is required"),
+  fromEmail: z.string().email("Invalid from email address").default("no-reply@carhire.local"),
+  fromName: z.string().optional(),
+  enabled: z.boolean().default(true),
+});
+
+const updateSmtpConfigSchema = smtpConfigSchema.partial();
+
+/**
+ * @openapi
+ * /admin/smtp:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get current SMTP configuration
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current SMTP configuration
+ */
+adminRouter.get("/admin/smtp", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
+  try {
+    const smtpConfig = await prisma.smtpConfig.findFirst({
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    if (!smtpConfig) {
+      return res.json({
+        configured: false,
+        usingEnvVars: !!(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS),
+        config: null,
+      });
+    }
+
+    // Don't return password in response
+    const { password, ...configWithoutPassword } = smtpConfig;
+    
+    res.json({
+      configured: true,
+      usingEnvVars: false,
+      config: {
+        ...configWithoutPassword,
+        password: password ? '***' : null, // Mask password
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/smtp:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Create or update SMTP configuration
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [host, port, user, password]
+ *             properties:
+ *               host:
+ *                 type: string
+ *               port:
+ *                 type: number
+ *               secure:
+ *                 type: boolean
+ *               user:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               fromEmail:
+ *                 type: string
+ *               fromName:
+ *                 type: string
+ *               enabled:
+ *                 type: boolean
+ */
+adminRouter.post("/admin/smtp", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
+  try {
+    const body = smtpConfigSchema.parse(req.body);
+    const userId = req.user.id;
+
+    // Check if SMTP config already exists
+    const existing = await prisma.smtpConfig.findFirst({
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    let smtpConfig;
+    if (existing) {
+      // Update existing config
+      // If password is 'KEEP_EXISTING', don't update it
+      const updateData: any = {
+        host: body.host,
+        port: body.port,
+        secure: body.secure,
+        user: body.user,
+        fromEmail: body.fromEmail,
+        fromName: body.fromName,
+        enabled: body.enabled,
+        updatedBy: userId,
+      };
+      
+      // Only update password if it's not 'KEEP_EXISTING' and not empty
+      if (body.password && body.password !== 'KEEP_EXISTING') {
+        updateData.password = body.password;
+      }
+      
+      smtpConfig = await prisma.smtpConfig.update({
+        where: { id: existing.id },
+        data: updateData,
+      });
+    } else {
+      // Create new config - password is required
+      if (!body.password || body.password === 'KEEP_EXISTING') {
+        return res.status(400).json({
+          error: "VALIDATION_ERROR",
+          message: "Password is required when creating a new SMTP configuration",
+        });
+      }
+      
+      smtpConfig = await prisma.smtpConfig.create({
+        data: {
+          ...body,
+          updatedBy: userId,
+        },
+      });
+    }
+
+    // Invalidate mailer cache so new config is used
+    invalidateMailerCache();
+
+    const { password, ...configWithoutPassword } = smtpConfig;
+
+    res.json({
+      success: true,
+      config: {
+        ...configWithoutPassword,
+        password: '***', // Mask password
+      },
+    });
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      return res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Invalid SMTP configuration",
+        fields: e.errors,
+      });
+    }
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/smtp:
+ *   patch:
+ *     tags: [Admin]
+ *     summary: Partially update SMTP configuration
+ *     security:
+ *       - bearerAuth: []
+ */
+adminRouter.patch("/admin/smtp", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
+  try {
+    const body = updateSmtpConfigSchema.parse(req.body);
+    const userId = req.user.id;
+
+    const existing = await prisma.smtpConfig.findFirst({
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        error: "NOT_FOUND",
+        message: "SMTP configuration not found. Use POST to create one.",
+      });
+    }
+
+    const smtpConfig = await prisma.smtpConfig.update({
+      where: { id: existing.id },
+      data: {
+        ...body,
+        updatedBy: userId,
+      },
+    });
+
+    // Invalidate mailer cache
+    invalidateMailerCache();
+
+    const { password, ...configWithoutPassword } = smtpConfig;
+
+    res.json({
+      success: true,
+      config: {
+        ...configWithoutPassword,
+        password: '***', // Mask password
+      },
+    });
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      return res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Invalid SMTP configuration",
+        fields: e.errors,
+      });
+    }
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/smtp/test:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Test SMTP configuration by sending a test email
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [to]
+ *             properties:
+ *               to:
+ *                 type: string
+ *                 format: email
+ */
+adminRouter.post("/admin/smtp/test", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
+  try {
+    const { to } = z.object({ to: z.string().email() }).parse(req.body);
+
+    const { sendMail } = await import("../../infra/mailer.js");
+    
+    await sendMail({
+      to,
+      subject: "SMTP Test Email - Car Hire Middleware",
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>SMTP Test Email</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+          <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #2563eb;">SMTP Configuration Test</h2>
+            <p>This is a test email to verify your SMTP configuration is working correctly.</p>
+            <p><strong>Sent at:</strong> ${new Date().toISOString()}</p>
+            <p>If you received this email, your SMTP settings are configured correctly!</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+            <p style="color: #6b7280; font-size: 12px;">
+              This is an automated test email from the Car Hire Middleware system.
+            </p>
+          </div>
+        </body>
+        </html>
+      `,
+    });
+
+    res.json({
+      success: true,
+      message: `Test email sent successfully to ${to}`,
+    });
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      return res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Invalid email address",
+        fields: e.errors,
+      });
+    }
+    
+    // Handle email sending errors
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    res.status(500).json({
+      error: "EMAIL_SEND_FAILED",
+      message: `Failed to send test email: ${errorMessage}`,
+    });
+  }
+});
+
+/**
+ * @openapi
+ * /admin/smtp:
+ *   delete:
+ *     tags: [Admin]
+ *     summary: Delete SMTP configuration (fallback to env vars)
+ *     security:
+ *       - bearerAuth: []
+ */
+adminRouter.delete("/admin/smtp", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
+  try {
+    const existing = await prisma.smtpConfig.findFirst({
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        error: "NOT_FOUND",
+        message: "SMTP configuration not found",
+      });
+    }
+
+    await prisma.smtpConfig.delete({
+      where: { id: existing.id },
+    });
+
+    // Invalidate mailer cache to use env vars
+    invalidateMailerCache();
+
+    res.json({
+      success: true,
+      message: "SMTP configuration deleted. System will use environment variables.",
+    });
   } catch (e) {
     next(e);
   }

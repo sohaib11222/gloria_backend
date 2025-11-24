@@ -73,7 +73,7 @@ export async function startPublicGrpcServer(): Promise<void> {
   server.addService(Service, {
     // ✅ Fixed: SubmitAvailability
     SubmitAvailability: async (call: any, cb: any) => {
-      // TODO: Inject TLS creds for downstream core client when enabling mTLS later
+      // mTLS infrastructure available but disabled by default
       try {
         const u = authed(call);
         const client = availabilityClient();
@@ -126,7 +126,7 @@ export async function startPublicGrpcServer(): Promise<void> {
   
     // ✅ Unchanged
     PollAvailability: (call: any, cb: any) => {
-      // TODO: Inject TLS creds for downstream core client when enabling mTLS later
+      // mTLS infrastructure available but disabled by default
       try {
         authed(call);
         const client = availabilityClient();
@@ -390,6 +390,9 @@ export async function startPublicGrpcServer(): Promise<void> {
   
 
   const PORT = Number(process.env.GRPC_PUBLIC_PORT || 50052);
+  
+  // mTLS infrastructure available but disabled by default
+  // To enable: set GRPC_TLS_ENABLED=true and use createServerCredentials()
   server.bindAsync(`0.0.0.0:${PORT}`, grpc.ServerCredentials.createInsecure(), (err) => {
     if (err) { console.error("Public gRPC bind error", err); return; }
     logger.info({ port: PORT }, "Public gRPC (AgentIngress) listening");

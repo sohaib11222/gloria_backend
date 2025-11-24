@@ -8,6 +8,7 @@ import {
   createAgentClient,
 } from "../../infra/grpcClients";
 import { config } from "../../infra/config";
+import { prisma } from "../../data/prisma.js";
 import path from "path";
 
 /* global __dirname */
@@ -575,13 +576,33 @@ adminGrpcRouter.post(
         result === null || (result && result.ok === true)
       );
 
-      res.json({
+      const totalMs = Date.now() - t0;
+
+      const testResult = {
         ok: overallOk,
         addr,
-        totalMs: Date.now() - t0,
+        totalMs,
         endpoints: results,
         tested: Object.keys(grpcEndpoints).filter(key => grpcEndpoints[key as keyof typeof grpcEndpoints])
-      });
+      };
+
+      // Save test result to database if user is authenticated and is a source
+      if (req.user?.companyId && req.user?.companyType === 'SOURCE') {
+        try {
+          await prisma.company.update({
+            where: { id: req.user.companyId },
+            data: {
+              lastGrpcTestResult: testResult as any,
+              lastGrpcTestAt: new Date(),
+            },
+          });
+        } catch (error) {
+          console.error('Failed to save gRPC test result to database:', error);
+          // Don't fail the request if saving fails
+        }
+      }
+
+      res.json(testResult);
 
     } catch (error: any) {
       res.status(500).json({

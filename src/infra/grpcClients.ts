@@ -33,7 +33,7 @@ export function createDeadline(timeoutMs: number = 3000): Date {
   return deadline;
 }
 
-function createClientCredentials(): grpc.ChannelCredentials {
+export function createClientCredentials(): grpc.ChannelCredentials {
   const tlsEnabled = process.env.GRPC_TLS_ENABLED === "true";
 
   if (!tlsEnabled) {

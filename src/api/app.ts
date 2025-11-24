@@ -18,6 +18,7 @@ import { logsRouter } from "./routes/logs.routes.js";
 import { adminGrpcRouter } from "./routes/adminGrpc.routes.js";
 import { endpointsRouter } from "./routes/endpoints.routes.js";
 import { locationValidationRouter } from "./routes/locationValidation.routes.js";
+import { sourcesRouter } from "./routes/sources.routes.js";
 import adminTestRoutes from "./routes/adminTest.routes.js";
 import uiRoutes from "./routes/ui.routes.js";
 // import adminGrpcRoutes from "../routes/adminGrpc.js"; // Commented out - file not found
@@ -54,6 +55,7 @@ export function buildApp() {
   app.use(verificationRouter);
   app.use(endpointsRouter);
   app.use(locationValidationRouter);
+  app.use(sourcesRouter);
   app.use(logsRouter);
   app.use(adminRouter);
   app.use(adminGrpcRouter);
@@ -67,11 +69,26 @@ export function buildApp() {
   // Prometheus metrics endpoint
   app.get('/metrics', async (req: any, res: any) => {
     try {
-      res.set('Content-Type', register.contentType);
-      res.end(await register.metrics());
-    } catch (error) {
-      res.status(500).end('Error generating metrics');
+      // Set CORS headers explicitly
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Content-Type', register.contentType);
+      
+      const metrics = await register.metrics();
+      res.end(metrics);
+    } catch (error: any) {
+      logger.error({ error: error.message, stack: error.stack }, 'Error generating metrics');
+      res.status(500).set('Content-Type', 'text/plain').end('Error generating metrics');
     }
+  });
+
+  // Handle OPTIONS preflight for /metrics
+  app.options('/metrics', (req: any, res: any) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.status(204).end();
   });
 
   mountSwagger(app);

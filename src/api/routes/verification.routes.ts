@@ -283,11 +283,56 @@ verificationRouter.get(
   requireAuth(),
   async (req: any, res, next) => {
     try {
+      // For admin users without companyId, return empty status
+      if (!req.user.companyId) {
+        return res.json({
+          status: 'INACTIVE',
+          last_verified: null,
+          report: null
+        });
+      }
+      
       const client = verificationClient();
       client.GetVerificationStatus(
         { company_id: req.user.companyId },
         metaFromReq(req),
-        (err: any, resp: any) => (err ? next(err) : res.json(resp))
+        (err: any, resp: any) => {
+          if (err) return next(err);
+          
+          // Transform gRPC response to match frontend expected format
+          if (!resp || !resp.steps || resp.steps.length === 0) {
+            return res.json({
+              status: 'INACTIVE',
+              last_verified: null,
+              report: null
+            });
+          }
+          
+          // Transform steps to test_results format
+          const test_results = resp.steps.map((step: any) => ({
+            name: step.name || '',
+            description: step.detail || '',
+            status: step.passed ? 'PASSED' : 'FAILED',
+            duration_ms: 0, // Not available in gRPC response
+            error: step.passed ? undefined : (step.detail || 'Test failed')
+          }));
+          
+          const passed_tests = test_results.filter((t: any) => t.status === 'PASSED').length;
+          const failed_tests = test_results.filter((t: any) => t.status === 'FAILED').length;
+          
+          return res.json({
+            status: resp.passed ? 'ACTIVE' : 'INACTIVE',
+            last_verified: resp.created_at || null,
+            report: {
+              total_tests: test_results.length,
+              passed_tests,
+              failed_tests,
+              test_results,
+              errors: test_results.filter((t: any) => t.error).map((t: any) => t.error),
+              duration_ms: 0 // Not available in gRPC response
+            }
+          });
+        }
       );
     } catch (e) {
       next(e);

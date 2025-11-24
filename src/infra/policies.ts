@@ -23,6 +23,13 @@ export function requireCompanyType(...types: string[]) {
 
 export function requireCompanyStatus(status: "ACTIVE" | "PENDING_VERIFICATION" | "SUSPENDED") {
   return async (req: any, res: Response, next: NextFunction) => {
+    const userRole = req.user?.role;
+    
+    // Allow admins to bypass company status check
+    if (userRole === "ADMIN") {
+      return next();
+    }
+    
     const companyId = req.user?.companyId as string | undefined;
     if (!companyId) return res.status(401).json({ error: "AUTH_ERROR" });
     const c = await prisma.company.findUnique({ where: { id: companyId } });

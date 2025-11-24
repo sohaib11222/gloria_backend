@@ -24,11 +24,14 @@ export function validateLocationPayload(
   const invalidDays: string[] = [];
 
   // Check CompanyCode if provided
-  if (companyCode && payload.CompanyCode !== companyCode) {
+  // Only validate CompanyCode if companyCode parameter is provided (for SOURCE companies)
+  // For ADMIN users, companyCode will be undefined, so this check is skipped
+  // Note: If companyCode is an empty string, we also skip validation (treat as optional)
+  if (companyCode !== undefined && companyCode !== null && companyCode !== "" && payload.CompanyCode !== companyCode) {
     return {
       valid: false,
       error: {
-        error: "CompanyCode mismatch",
+        error: `CompanyCode mismatch: expected "${companyCode}", got "${payload.CompanyCode || 'missing'}"`,
         fields: ["CompanyCode"],
       },
     };

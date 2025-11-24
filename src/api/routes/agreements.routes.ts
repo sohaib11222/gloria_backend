@@ -6,6 +6,7 @@ import { agreementClient } from "../../grpc/clients/agreement.client.js";
 import { metaFromReq } from "../../grpc/meta.js";
 import { prisma } from "../../data/prisma.js";
 import { notifyAgreementDrafted, notifyAgreementOffered, notifyAgreementAccepted, notifyAgreementStatus } from "../../services/notifications.js";
+import { auditLog } from "../../services/audit.js";
 
 export const agreementsRouter = Router();
 
@@ -137,17 +138,33 @@ agreementsRouter.post(
           },
         });
       }
+      const startTime = Date.now();
+      const requestId = (req as any).requestId;
       const client = agreementClient();
       client.CreateDraft(body, metaFromReq(req), async (err: any, resp: any) => {
-        console.log("THe body:", body);
+        const duration = Date.now() - startTime;
+        
         if (err) {
+          await auditLog({
+            direction: "IN",
+            endpoint: "agreements.create",
+            requestId,
+            companyId: body.source_id,
+            sourceId: body.source_id,
+            agreementRef: body.agreement_ref,
+            grpcStatus: err.code || 13,
+            request: body,
+            response: { error: err.message },
+            durationMs: duration,
+          });
+          
           if (err.code === 3) {
             return res.status(400).json({
               error: "INVALID_ARGUMENT",
               message: err.message || "Invalid agent or source",
               agent_id: body.agent_id,
               source_id: body.source_id,
-              requestId: (req as any).requestId,
+              requestId,
             });
           }
           if (err.code === 6) {
@@ -157,11 +174,25 @@ agreementsRouter.post(
               agent_id: body.agent_id,
               source_id: body.source_id,
               agreement_ref: body.agreement_ref,
-              requestId: (req as any).requestId,
+              requestId,
             });
           }
           return next(err);
         }
+        
+        // Log successful agreement creation
+        await auditLog({
+          direction: "IN",
+          endpoint: "agreements.create",
+          requestId,
+          companyId: body.source_id,
+          sourceId: body.source_id,
+          agreementRef: body.agreement_ref,
+          httpStatus: 200,
+          request: body,
+          response: resp,
+          durationMs: duration,
+        });
         
         // Send email notification for draft creation
         try {
@@ -181,6 +212,195 @@ agreementsRouter.post(
 
 /**
  * @openapi
+ * /agreements/all:
+ *   get:
+ *     tags: [Agreements]
+ *     summary: Get all agents with their agreements (for sources and admins)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string }
+ *         description: Filter agreements by status
+ *       - in: query
+ *         name: agent_id
+ *         schema: { type: string }
+ *         description: Filter by specific agent ID
+ *       - in: query
+ *         name: source_id
+ *         schema: { type: string }
+ *         description: Filter by specific source ID
+ */
+agreementsRouter.get(
+  "/agreements/all",
+  requireAuth(),
+  async (req: any, res, next) => {
+    try {
+      const status = req.query.status ? String(req.query.status) : "ACTIVE";
+      
+      // If user is a SOURCE, filter agreements by sourceId
+      // If user is ADMIN, show all agents
+      // If user is AGENT, show only their own agreements
+      let where: any = { 
+        type: "AGENT",
+        status: status 
+      };
+      
+      // For sources, only show agents that have agreements with this source
+      let agentAgreementsFilter: any = {};
+      if (req.user.type === "SOURCE" || req.user.role === "ADMIN") {
+        // Show all agents, but filter agreements if source
+        if (req.user.type === "SOURCE" && req.user.companyId) {
+          agentAgreementsFilter = {
+            sourceId: req.user.companyId
+          };
+        }
+      } else if (req.user.type === "AGENT") {
+        // Agents should use /agreements/offers endpoint instead
+        return res.status(403).json({
+          error: "FORBIDDEN",
+          message: "Agents should use /agreements/offers endpoint"
+        });
+      }
+      
+      // Get all agent companies with their agreements
+      const agents = await prisma.company.findMany({
+        where,
+        select: {
+          id: true,
+          companyName: true,
+          email: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          adapterType: true,
+          grpcEndpoint: true,
+          // Include user count and agreements for each agent
+          _count: {
+            select: { 
+              users: true,
+              agentAgreements: true
+            }
+          },
+          // Include actual agreements with their IDs (filtered by source if applicable)
+          agentAgreements: {
+            where: agentAgreementsFilter,
+            select: {
+              id: true,
+              agreementRef: true,
+              status: true,
+              validFrom: true,
+              validTo: true,
+              sourceId: true,
+              source: {
+                select: {
+                  id: true,
+                  companyName: true,
+                  status: true
+                }
+              }
+            },
+            orderBy: { createdAt: "desc" }
+          }
+        },
+        orderBy: { createdAt: "desc" }
+      });
+      
+      res.json({
+        items: agents,
+        total: agents.length,
+        filters: {
+          status: status,
+          type: "AGENT"
+        }
+      });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+/**
+ * @openapi
+ * /agreements/{id}:
+ *   get:
+ *     tags: [Agreements]
+ *     summary: Get agreement details by ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Agreement details
+ *       404:
+ *         description: Agreement not found
+ */
+agreementsRouter.get(
+  "/agreements/:id",
+  requireAuth(),
+  async (req: any, res, next) => {
+    try {
+      const id = String(req.params.id || "").trim();
+      if (!id) {
+        return res.status(400).json({ error: "BAD_REQUEST", message: "Agreement ID is required" });
+      }
+
+      // Check if agreement exists and user has access
+      const agreement = await prisma.agreement.findUnique({
+        where: { id },
+        include: {
+          agent: {
+            select: {
+              id: true,
+              companyName: true,
+              email: true,
+              type: true,
+              status: true,
+              companyCode: true,
+            },
+          },
+          source: {
+            select: {
+              id: true,
+              companyName: true,
+              email: true,
+              type: true,
+              status: true,
+              companyCode: true,
+            },
+          },
+        },
+      });
+
+      if (!agreement) {
+        return res.status(404).json({ error: "NOT_FOUND", message: "Agreement not found" });
+      }
+
+      // Check access: user must be admin, or the agreement's agent, or the agreement's source
+      const hasAccess = 
+        req.user.role === "ADMIN" ||
+        agreement.agentId === req.user.companyId ||
+        agreement.sourceId === req.user.companyId;
+
+      if (!hasAccess) {
+        return res.status(403).json({ error: "FORBIDDEN", message: "Access denied" });
+      }
+
+      res.json(toAgreementCamelCase(agreement));
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+/**
+ * @openapi
  * /agreements/{id}/offer:
  *   post:
  *     tags: [Agreements]
@@ -190,13 +410,39 @@ agreementsRouter.post(
   "/agreements/:id/offer",
   requireAuth(),
   requireCompanyType("SOURCE"),
-  async (req, res, next) => {
+async (req: any, res, next) => {
     try {
+      const startTime = Date.now();
+      const requestId = (req as any).requestId;
+      
+      // Get agreement details for logging
+      const agreement = await prisma.agreement.findUnique({
+        where: { id: req.params.id },
+        select: { id: true, agentId: true, sourceId: true, agreementRef: true }
+      });
+      
       const client = agreementClient();
       client.Offer(
         { agreement_id: req.params.id },
         metaFromReq(req),
         async (err: any, resp: any) => {
+          const duration = Date.now() - startTime;
+          
+          // Log agreement offer
+          await auditLog({
+            direction: "IN",
+            endpoint: "agreements.offer",
+            requestId,
+            companyId: req.user.companyId,
+            sourceId: agreement?.sourceId || req.user.companyId,
+            agreementRef: agreement?.agreementRef,
+            httpStatus: err ? 500 : 200,
+            grpcStatus: err?.code,
+            request: { agreement_id: req.params.id },
+            response: err ? { error: err.message } : resp,
+            durationMs: duration,
+          });
+          
           if (err) return next(err);
           
           // Send email notification for offer
@@ -227,13 +473,39 @@ agreementsRouter.post(
   "/agreements/:id/accept",
   requireAuth(),
   requireCompanyType("AGENT"),
-  async (req, res, next) => {
+  async (req: any, res, next) => {
     try {
+      const startTime = Date.now();
+      const requestId = (req as any).requestId;
+      
+      // Get agreement details for logging
+      const agreement = await prisma.agreement.findUnique({
+        where: { id: req.params.id },
+        select: { id: true, agentId: true, sourceId: true, agreementRef: true }
+      });
+      
       const client = agreementClient();
       client.Accept(
         { agreement_id: req.params.id },
         metaFromReq(req),
         async (err: any, resp: any) => {
+          const duration = Date.now() - startTime;
+          
+          // Log agreement acceptance
+          await auditLog({
+            direction: "IN",
+            endpoint: "agreements.accept",
+            requestId,
+            companyId: req.user.companyId,
+            sourceId: agreement?.sourceId,
+            agreementRef: agreement?.agreementRef,
+            httpStatus: err ? 500 : 200,
+            grpcStatus: err?.code,
+            request: { agreement_id: req.params.id },
+            response: err ? { error: err.message } : resp,
+            durationMs: duration,
+          });
+          
           if (err) return next(err);
           
           // Send email notification for acceptance
@@ -544,95 +816,6 @@ agreementsRouter.get(
   }
 );
 
-/**
- * @openapi
- * /agreements/all:
- *   get:
- *     tags: [Agreements]
- *     summary: Admin gets all agreements in the system
- *     parameters:
- *       - in: query
- *         name: status
- *         schema: { type: string }
- *         description: Filter agreements by status
- *       - in: query
- *         name: agent_id
- *         schema: { type: string }
- *         description: Filter by specific agent ID
- *       - in: query
- *         name: source_id
- *         schema: { type: string }
- *         description: Filter by specific source ID
- */
-agreementsRouter.get(
-  "/agreements/all",
-  requireAuth(),
-  // requireRole("ADMIN"),
-  async (req: any, res, next) => {
-    try {
-      const status = req.query.status ? String(req.query.status) : "ACTIVE";
-      
-      // Build where clause for ACTIVE agents only
-      const where: any = { 
-        type: "AGENT",
-        status: status 
-      };
-      
-      // Get all agent companies with their agreements
-      const agents = await prisma.company.findMany({
-        where,
-        select: {
-          id: true,
-          companyName: true,
-          email: true,
-          status: true,
-          createdAt: true,
-          updatedAt: true,
-          adapterType: true,
-          grpcEndpoint: true,
-          // Include user count and agreements for each agent
-          _count: {
-            select: { 
-              users: true,
-              agentAgreements: true
-            }
-          },
-          // Include actual agreements with their IDs
-          agentAgreements: {
-            select: {
-              id: true,
-              agreementRef: true,
-              status: true,
-              validFrom: true,
-              validTo: true,
-              sourceId: true,
-              source: {
-                select: {
-                  id: true,
-                  companyName: true,
-                  status: true
-                }
-              }
-            },
-            orderBy: { createdAt: "desc" }
-          }
-        },
-        orderBy: { createdAt: "desc" }
-      });
-      
-      res.json({
-        items: agents,
-        total: agents.length,
-        filters: {
-          status: status,
-          type: "AGENT"
-        }
-      });
-    } catch (e) {
-      next(e);
-    }
-  }
-);
 
 /**
  * @openapi

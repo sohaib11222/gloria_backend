@@ -172,16 +172,24 @@ export class SourceHealthService {
           sampleCount: 0,
           backoffLevel: 0,
           excludedUntil: null,
+          updatedAt: null,
         };
       }
 
+      // Check if currently excluded (excludedUntil is in the future)
+      const isCurrentlyExcluded = health.excludedUntil && new Date(health.excludedUntil) > new Date();
+      
+      // Calculate healthy status: slow rate must be below threshold AND not currently excluded
+      const isHealthy = health.slowRate <= this.SLOW_RATE_THRESHOLD && !isCurrentlyExcluded;
+      
       return {
         sourceId,
-        healthy: health.slowRate <= this.SLOW_RATE_THRESHOLD && !health.excludedUntil,
+        healthy: isHealthy,
         slowRate: health.slowRate,
         sampleCount: health.sampleCount,
         backoffLevel: health.backoffLevel,
-        excludedUntil: health.excludedUntil,
+        excludedUntil: health.excludedUntil ? health.excludedUntil.toISOString() : null,
+        updatedAt: health.updatedAt ? health.updatedAt.toISOString() : null,
       };
     } catch (error) {
       logger.error({ error, sourceId }, "Failed to get source health");
@@ -192,6 +200,7 @@ export class SourceHealthService {
         sampleCount: 0,
         backoffLevel: 0,
         excludedUntil: null,
+        updatedAt: null,
       };
     }
   }
@@ -236,15 +245,43 @@ export class SourceHealthService {
         orderBy: { updatedAt: 'desc' },
       });
 
-      return healthRecords.map((health: any) => ({
-        sourceId: health.sourceId,
-        healthy: health.slowRate <= this.SLOW_RATE_THRESHOLD && !health.excludedUntil,
-        slowRate: health.slowRate,
-        sampleCount: health.sampleCount,
-        backoffLevel: health.backoffLevel,
-        excludedUntil: health.excludedUntil,
-        updatedAt: health.updatedAt,
-      }));
+      // Fetch company information for all sourceIds
+      const sourceIds = healthRecords.map(h => h.sourceId);
+      const companies = await prisma.company.findMany({
+        where: { id: { in: sourceIds } },
+        select: { id: true, companyName: true },
+      });
+      const companyMap = new Map(companies.map(c => [c.id, c]));
+
+      return healthRecords.map((health: any) => {
+        const isExcluded = health.excludedUntil && new Date(health.excludedUntil) > new Date();
+        const isSlow = health.slowRate > this.SLOW_RATE_THRESHOLD;
+        const company = companyMap.get(health.sourceId);
+        
+        let status: 'HEALTHY' | 'SLOW' | 'EXCLUDED';
+        if (isExcluded) {
+          status = 'EXCLUDED';
+        } else if (isSlow) {
+          status = 'SLOW';
+        } else {
+          status = 'HEALTHY';
+        }
+
+        return {
+          companyId: health.sourceId,
+          companyName: company?.companyName || 'Unknown',
+          slowRate: health.slowRate,
+          sampleCount: health.sampleCount,
+          backoffLevel: health.backoffLevel,
+          excludedUntil: health.excludedUntil ? health.excludedUntil.toISOString() : null,
+          lastCheck: health.updatedAt.toISOString(),
+          status,
+          // Keep backward compatibility
+          sourceId: health.sourceId,
+          healthy: !isExcluded && !isSlow,
+          updatedAt: health.updatedAt,
+        };
+      });
     } catch (error) {
       logger.error({ error }, "Failed to get all source health");
       return [];

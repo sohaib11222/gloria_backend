@@ -84,7 +84,7 @@ export async function startGrpcServers() {
     availabilityPkg.core.availability.AvailabilityService.service;
   server.addService(AvailabilityService, {
     Submit: async (call: any, cb: any) => {
-      // TODO: Inject TLS credentials here in future when enabling mTLS
+      // mTLS infrastructure available but disabled by default
       try {
         const { criteria: raw, agent_id } = call.request;
 
@@ -298,7 +298,7 @@ export async function startGrpcServers() {
     },
 
     Poll: async (call: any, cb: any) => {
-      // TODO: Inject TLS credentials here in future when enabling mTLS
+      // mTLS infrastructure available but disabled by default
       try {
         const {
           request_id,
@@ -1209,11 +1209,18 @@ export async function startGrpcServers() {
           status: result.passed ? "success" : "failed",
         });
 
+        // Transform steps from internal format to gRPC format
+        const grpcSteps = result.steps.map((s) => ({
+          name: s.step || '',
+          passed: s.success || false,
+          detail: s.message || '',
+        }));
+
         cb(null, {
           company_id: result.companyId,
           kind: result.type,
           passed: result.passed,
-          steps: result.steps,
+          steps: grpcSteps,
           created_at: result.createdAt,
         });
       } catch (e: any) {
@@ -1242,11 +1249,18 @@ export async function startGrpcServers() {
           status: result.passed ? "success" : "failed",
         });
 
+        // Transform steps from internal format to gRPC format
+        const grpcSteps = result.steps.map((s) => ({
+          name: s.step || '',
+          passed: s.success || false,
+          detail: s.message || '',
+        }));
+
         cb(null, {
           company_id: result.companyId,
           kind: result.type,
           passed: result.passed,
-          steps: result.steps,
+          steps: grpcSteps,
           created_at: result.createdAt,
         });
       } catch (e: any) {
@@ -1271,11 +1285,18 @@ export async function startGrpcServers() {
           });
         }
 
+        // Transform steps from internal format to gRPC format
+        const grpcSteps = result.steps.map((s: any) => ({
+          name: s.step || s.name || '',
+          passed: s.success !== undefined ? s.success : (s.passed || false),
+          detail: s.message || s.detail || '',
+        }));
+
         cb(null, {
           company_id: result.companyId,
           kind: result.type,
           passed: result.passed,
-          steps: result.steps,
+          steps: grpcSteps,
           created_at: result.createdAt,
         });
       } catch (e: any) {
@@ -1357,15 +1378,75 @@ export async function startGrpcServers() {
         cb({ code: 13, message: error.message || "Internal error" });
       }
     },
-    WatchEchoResults: (call: any) => {
-      // Streaming implementation (optional for now)
-      call.write({
-        error: "Not implemented",
-      });
-      call.end();
+    WatchEchoResults: async (call: any) => {
+      try {
+        const { request_id } = call.request;
+        
+        if (!request_id) {
+          call.emit('error', { code: 3, message: "request_id required" });
+          call.end();
+          return;
+        }
+
+        // Poll for updates and stream them
+        let lastSeq = BigInt(0);
+        const pollInterval = 1000; // Poll every 1 second
+        const maxDuration = 300000; // 5 minutes max stream duration
+        const startTime = Date.now();
+
+        const pollAndStream = async () => {
+          try {
+            const result = await getEchoResults(request_id, lastSeq, 1000);
+            
+            // Send update if we have new items or status changed
+            if (result.newItems.length > 0 || result.status === "COMPLETE") {
+              const echoResponse = {
+                request_id: result.requestId,
+                status: result.status === "COMPLETE" ? 1 : 0,
+                responses_received: result.responsesReceived,
+                total_expected: result.totalExpected,
+                aggregate: {
+                  items: result.newItems.map((item) => ({
+                    echoed_message: item.echoedMessage,
+                    echoed_attrs: item.echoedAttrs,
+                  })),
+                },
+                progress: {
+                  started_unix_ms: Date.now() - (Date.now() - startTime),
+                  last_update_unix_ms: Date.now(),
+                  timed_out_sources: result.timedOutSources,
+                },
+              };
+              
+              call.write(echoResponse);
+              lastSeq = result.lastSeq;
+            }
+
+            // Continue polling if not complete and within time limit
+            if (result.status === "IN_PROGRESS" && (Date.now() - startTime) < maxDuration) {
+              setTimeout(pollAndStream, pollInterval);
+            } else {
+              call.end();
+            }
+          } catch (error: any) {
+            logger.error({ error: error.message, request_id }, "WatchEchoResults poll error");
+            call.emit('error', { code: 13, message: error.message || "Internal error" });
+            call.end();
+          }
+        };
+
+        // Start polling
+        pollAndStream();
+      } catch (error: any) {
+        logger.error({ error: error.message }, "WatchEchoResults error");
+        call.emit('error', { code: 13, message: error.message || "Internal error" });
+        call.end();
+      }
     },
   });
 
+  // mTLS infrastructure available but disabled by default
+  // To enable: set GRPC_TLS_ENABLED=true and use createServerCredentials()
   server.bindAsync(
     `0.0.0.0:${CORE_PORT}`,
     grpc.ServerCredentials.createInsecure(),

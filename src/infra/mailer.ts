@@ -1,16 +1,49 @@
 import nodemailer from "nodemailer";
+import { prisma } from "../data/prisma.js";
 
-// Create transporter based on environment configuration
-function createTransporter() {
+let cachedTransporter: nodemailer.Transporter | null = null;
+let transporterCacheTime: number = 0;
+const CACHE_TTL = 60000; // 1 minute cache
+
+// Create transporter based on admin configuration or environment variables
+async function createTransporter(): Promise<nodemailer.Transporter> {
+  const now = Date.now();
+  
+  // Return cached transporter if still valid
+  if (cachedTransporter && (now - transporterCacheTime) < CACHE_TTL) {
+    return cachedTransporter;
+  }
+
+  // Try to get admin-configured SMTP first
+  const smtpConfig = await prisma.smtpConfig.findFirst({
+    where: { enabled: true },
+    orderBy: { updatedAt: 'desc' },
+  });
+
+  if (smtpConfig) {
+    // Use admin-configured SMTP
+    cachedTransporter = nodemailer.createTransport({
+      host: smtpConfig.host,
+      port: smtpConfig.port,
+      secure: smtpConfig.secure, // true for TLS/SSL (465), false for STARTTLS (587)
+      auth: {
+        user: smtpConfig.user,
+        pass: smtpConfig.password,
+      },
+    });
+    transporterCacheTime = now;
+    return cachedTransporter;
+  }
+
+  // Fallback to environment variables
   const emailHost = process.env.EMAIL_HOST;
   const emailPort = process.env.EMAIL_PORT;
   const emailUser = process.env.EMAIL_USER;
   const emailPass = process.env.EMAIL_PASS;
   const emailSecure = process.env.EMAIL_SECURE === 'true';
 
-  // If SMTP credentials are provided, use SMTP
   if (emailHost && emailUser && emailPass) {
-    return nodemailer.createTransport({
+    cachedTransporter = nodemailer.createTransport({
       host: emailHost,
       port: parseInt(emailPort || '587'),
       secure: emailSecure,
@@ -19,19 +52,61 @@ function createTransporter() {
         pass: emailPass,
       },
     });
+    transporterCacheTime = now;
+    return cachedTransporter;
   }
 
-  // Fallback to console logging for development
-  return nodemailer.createTransport({
+  // Final fallback to console logging for development
+  cachedTransporter = nodemailer.createTransport({
     streamTransport: true,
     newline: "unix",
     buffer: true
   });
+  transporterCacheTime = now;
+  return cachedTransporter;
 }
 
-export const mailer = createTransporter();
+// Get the current transporter (cached)
+export async function getMailer(): Promise<nodemailer.Transporter> {
+  return createTransporter();
+}
 
-export function sendMail(opts: { to: string; subject: string; html: string; from?: string }) {
-  const from = opts.from || process.env.EMAIL_FROM || "no-reply@carhire.local";
-  return mailer.sendMail({ ...opts, from });
+// Invalidate the transporter cache (call this when SMTP config is updated)
+export function invalidateMailerCache() {
+  cachedTransporter = null;
+  transporterCacheTime = 0;
+}
+
+// Legacy export for backward compatibility
+export const mailer = {
+  sendMail: async (opts: any) => {
+    const transporter = await getMailer();
+    return transporter.sendMail(opts);
+  }
+};
+
+export async function sendMail(opts: { to: string; subject: string; html: string; from?: string }) {
+  const transporter = await getMailer();
+  
+  // Get from email from admin config or env
+  let fromEmail = opts.from || process.env.EMAIL_FROM || "no-reply@carhire.local";
+  let fromName = "Car Hire Middleware";
+  
+  const smtpConfig = await prisma.smtpConfig.findFirst({
+    where: { enabled: true },
+    orderBy: { updatedAt: 'desc' },
+  });
+  
+  if (smtpConfig) {
+    fromEmail = smtpConfig.fromEmail;
+    if (smtpConfig.fromName) {
+      fromName = smtpConfig.fromName;
+    }
+  }
+  
+  const from = smtpConfig?.fromName 
+    ? `${smtpConfig.fromName} <${fromEmail}>`
+    : fromEmail;
+  
+  return transporter.sendMail({ ...opts, from });
 }
