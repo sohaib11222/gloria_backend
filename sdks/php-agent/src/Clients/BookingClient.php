@@ -20,27 +20,31 @@ final class BookingClient
         return $this->t->bookingCreate($payload, $idempotencyKey);
     }
 
-    public function modify(string $supplierBookingRef, array $fields, string $agreementRef, string $sourceId): array
+    public function modify(string $supplierBookingRef, array $fields, string $agreementRef, ?string $sourceId = null): array
     {
+        // Backend resolves source_id from agreement_ref, so we don't need to pass it
+        // But we keep the parameter for backward compatibility
         return $this->t->bookingModify([
             'supplier_booking_ref' => $supplierBookingRef,
             'agreement_ref' => $agreementRef,
-            'source_id' => $sourceId,
             'fields' => $fields
         ]);
     }
 
-    public function cancel(string $supplierBookingRef, string $agreementRef, string $sourceId): array
+    public function cancel(string $supplierBookingRef, string $agreementRef, ?string $sourceId = null): array
     {
+        // Backend resolves source_id from agreement_ref, so we don't need to pass it
+        // But we keep the parameter for backward compatibility
         return $this->t->bookingCancel([
             'supplier_booking_ref' => $supplierBookingRef,
-            'agreement_ref' => $agreementRef,
-            'source_id' => $sourceId
+            'agreement_ref' => $agreementRef
         ]);
     }
 
-    public function check(string $supplierBookingRef, string $agreementRef, string $sourceId): array
+    public function check(string $supplierBookingRef, string $agreementRef, ?string $sourceId = null): array
     {
+        // Backend resolves source_id from agreement_ref, so we don't need to pass it
+        // But we keep the parameter for backward compatibility
         return $this->t->bookingCheck($supplierBookingRef, $agreementRef, $sourceId);
     }
 }

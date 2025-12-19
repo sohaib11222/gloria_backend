@@ -38,7 +38,7 @@ final class GrpcTransport implements TransportInterface
     {
         throw new TransportException('gRPC not wired yet. Generate stubs and implement.');
     }
-    public function bookingCheck(string $supplierBookingRef, string $agreementRef, string $sourceId): array
+    public function bookingCheck(string $supplierBookingRef, string $agreementRef, ?string $sourceId = null): array
     {
         throw new TransportException('gRPC not wired yet. Generate stubs and implement.');
     }

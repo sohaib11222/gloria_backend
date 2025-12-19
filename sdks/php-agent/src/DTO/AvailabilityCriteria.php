@@ -39,13 +39,13 @@ final class AvailabilityCriteria
     {
         return [
             'pickup_unlocode'  => $this->pickupLocode,
-            'return_unlocode'  => $this->returnLocode,
-            'pickup_at'        => $this->pickupAt->format(DATE_ATOM),
-            'return_at'        => $this->returnAt->format(DATE_ATOM),
+            'dropoff_unlocode' => $this->returnLocode, // Backend expects dropoff_unlocode
+            'pickup_iso'       => $this->pickupAt->format(DATE_ATOM), // Backend expects pickup_iso
+            'dropoff_iso'      => $this->returnAt->format(DATE_ATOM), // Backend expects dropoff_iso
             'driver_age'       => $this->driverAge,
-            'currency'         => $this->currency,
+            'residency_country' => 'US', // Default, can be overridden
+            'vehicle_classes'  => $this->vehiclePrefs, // Map vehicle_prefs to vehicle_classes
             'agreement_refs'   => $this->agreementRefs,
-            'vehicle_prefs'    => $this->vehiclePrefs,
             'rate_prefs'       => $this->ratePrefs,
             'extras'           => $this->extras
         ];

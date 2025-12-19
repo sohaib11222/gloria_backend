@@ -58,19 +58,19 @@ POST /availability/submit
 GET  /availability/poll?request_id&since_seq&wait_ms
 
 
-GET  /locations/supported?agreement_ref&locode
+GET  /locations (Note: /locations/supported endpoint not available - use /coverage/agreement/{id} to check locations)
 
 
-POST /bookings
+POST /bookings (with Idempotency-Key header)
 
 
-PATCH /bookings/{supplierBookingRef}?agreement_ref&source_id
+PATCH /bookings/{supplierBookingRef}?agreement_ref (fields in body, backend resolves source_id from agreement)
 
 
-POST /bookings/{supplierBookingRef}/cancel?agreement_ref&source_id
+POST /bookings/{supplierBookingRef}/cancel?agreement_ref (backend resolves source_id from agreement)
 
 
-GET  /bookings/{supplierBookingRef}?agreement_ref&source_id
+GET  /bookings/{supplierBookingRef}?agreement_ref (backend resolves source_id from agreement)
 
 
 gRPC

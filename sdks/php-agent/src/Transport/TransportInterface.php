@@ -16,6 +16,6 @@ interface TransportInterface
     public function bookingCreate(array $payload, ?string $idempotencyKey = null): array;
     public function bookingModify(array $payload): array;
     public function bookingCancel(array $payload): array;
-    public function bookingCheck(string $supplierBookingRef, string $agreementRef, string $sourceId): array;
+    public function bookingCheck(string $supplierBookingRef, string $agreementRef, ?string $sourceId = null): array;
 }
 
