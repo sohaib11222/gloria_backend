@@ -120,9 +120,18 @@ bookingsRouter.post("/", requireAuth(), async (req: any, res, next) => {
   
   try {
     const body = createSchema.parse(req.body);
-    const idempotencyKey = req.headers["idempotency-key"];
+    // Check for idempotency key in various header formats (case-insensitive)
+    const idempotencyKey = req.headers["idempotency-key"] || 
+                          req.headers["Idempotency-Key"] || 
+                          req.headers["IDEMPOTENCY-KEY"];
     if (!idempotencyKey) {
-      const errorResponse = { error: "SCHEMA_ERROR", message: "Missing Idempotency-Key header" };
+      const errorResponse = { 
+        error: "SCHEMA_ERROR", 
+        message: "Missing Idempotency-Key header",
+        details: "The Idempotency-Key header is required for all booking operations to ensure request safety and prevent duplicate bookings.",
+        hint: "Include the header in your request: 'Idempotency-Key: <unique-value>'",
+        example: "Idempotency-Key: booking-1234567890-abc123"
+      };
       
       // Log the error
       await auditLog({
@@ -566,8 +575,19 @@ const testCreateSchema = z.object({
 bookingsRouter.post("/test/create", requireAuth(), async (req: any, res, next) => {
   try {
     const body = testCreateSchema.parse(req.body);
-    const idempotencyKey = req.headers["idempotency-key"];
-    if (!idempotencyKey) return res.status(400).json({ error: "SCHEMA_ERROR", message: "Missing Idempotency-Key header" });
+    // Check for idempotency key in various header formats (case-insensitive)
+    const idempotencyKey = req.headers["idempotency-key"] || 
+                          req.headers["Idempotency-Key"] || 
+                          req.headers["IDEMPOTENCY-KEY"];
+    if (!idempotencyKey) {
+      return res.status(400).json({ 
+        error: "SCHEMA_ERROR", 
+        message: "Missing Idempotency-Key header",
+        details: "The Idempotency-Key header is required for all booking operations to ensure request safety and prevent duplicate bookings.",
+        hint: "Include the header in your request: 'Idempotency-Key: <unique-value>'",
+        example: "Idempotency-Key: test-create-1234567890-abc123"
+      });
+    }
     
     // Use test data for verification
     const testData = {

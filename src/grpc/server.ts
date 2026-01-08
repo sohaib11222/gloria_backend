@@ -1,3 +1,4 @@
+import "dotenv/config";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { logger } from "../infra/logger.js";
@@ -948,7 +949,22 @@ export async function startGrpcServers() {
         });
         cb(null, { items: rows.map(toAgreementDTO) });
       } catch (e: any) {
-        cb({ code: 13, message: e.message });
+        logger.error({ error: e, source_id }, "ListBySource error");
+        
+        // Handle database errors
+        if (e?.message?.includes('DATABASE_URL') || e?.message?.includes('Environment variable not found')) {
+          cb({ 
+            code: 13, 
+            message: "Database configuration error: DATABASE_URL not found. Please check your .env file and restart the server." 
+          });
+        } else if (e?.message?.includes('Access denied')) {
+          cb({ 
+            code: 13, 
+            message: "Database authentication failed. Please check your DATABASE_URL in .env file and restart the server." 
+          });
+        } else {
+          cb({ code: 13, message: e.message || "Internal server error" });
+        }
       }
     },
 

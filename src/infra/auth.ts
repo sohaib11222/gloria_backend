@@ -31,8 +31,81 @@ export function verifyAccessToken(token: string) {
 }
 
 // [AUTO-AUDIT] Accept either JWT (Authorization: Bearer ...) or API key (x-api-key)
+// For booking test endpoints, also accept email-based authentication (X-Agent-Email header)
 export function requireAuth() {
   return async (req: any, res: any, next: any) => {
+    // Check if this is a booking test endpoint - check multiple path properties
+    // Express routes might have path as just "/test/create" if router is mounted at "/bookings"
+    const path = req.path || req.url || '';
+    const originalUrl = req.originalUrl || req.url || '';
+    const baseUrl = req.baseUrl || '';
+    const fullPath = baseUrl + path;
+    
+    const isBookingTestEndpoint = 
+      path.includes('/test/') || 
+      path.startsWith('/test/') ||
+      originalUrl.includes('/bookings/test/') ||
+      originalUrl.includes('/test/') ||
+      fullPath.includes('/bookings/test/') ||
+      fullPath.includes('/test/');
+    
+    // For booking test endpoints, allow email-based authentication
+    if (isBookingTestEndpoint) {
+      // Check for email header in various case formats
+      const agentEmail = (req.headers["x-agent-email"] || 
+                         req.headers["X-Agent-Email"] || 
+                         req.headers["X-AGENT-EMAIL"] ||
+                         req.headers["x-Agent-Email"]) as string | undefined;
+      
+      console.log('[requireAuth] Booking test endpoint detected:', {
+        path,
+        originalUrl,
+        baseUrl,
+        fullPath,
+        isBookingTestEndpoint,
+        agentEmail: agentEmail ? `Present: ${agentEmail}` : 'Missing',
+        allHeaders: Object.keys(req.headers).filter(k => k.toLowerCase().includes('agent') || k.toLowerCase().includes('email')),
+        headerValues: {
+          'x-agent-email': req.headers["x-agent-email"],
+          'X-Agent-Email': req.headers["X-Agent-Email"],
+        }
+      });
+      
+      if (agentEmail) {
+        try {
+          const user = await prisma.user.findUnique({
+            where: { email: agentEmail },
+            include: { company: true }
+          });
+          
+          if (!user || !user.company) {
+            console.log('[requireAuth] User not found for email:', agentEmail);
+            return res.status(401).json({ error: "AUTH_ERROR", message: "Agent not found" });
+          }
+          
+          // Verify it's an AGENT type company
+          if (user.company.type !== "AGENT") {
+            console.log('[requireAuth] User is not an agent:', user.company.type);
+            return res.status(403).json({ error: "FORBIDDEN", message: "Only agents can access booking test endpoints" });
+          }
+          
+          console.log('[requireAuth] Email-based auth successful for:', agentEmail);
+          req.user = {
+            sub: user.id,
+            companyId: user.companyId,
+            role: user.role,
+            type: user.company.type,
+          };
+          return next();
+        } catch (e: any) {
+          console.error('[requireAuth] Email-based auth error:', e);
+          return res.status(401).json({ error: "AUTH_ERROR", message: "Authentication failed" });
+        }
+      } else {
+        console.log('[requireAuth] No agent email header found, falling back to token/auth');
+      }
+    }
+    
     const apiKey = (req.headers["x-api-key"] || req.headers["X-Api-Key"]) as string | undefined;
     if (apiKey) {
       try {

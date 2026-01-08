@@ -1,0 +1,10 @@
+blib/
+_build/
+Makefile
+Makefile.old
+*.tar.gz
+*.zip
+*.pm~
+*.bak
+.DS_Store
+

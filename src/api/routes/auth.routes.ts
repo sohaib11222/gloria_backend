@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../data/prisma.js";
 import { Auth } from "../../infra/auth.js";
 import { EmailVerificationService } from "../../services/emailVerification.js";
+import { requireAuth } from "../../infra/auth.js";
 
 export const authRouter = Router();
 
@@ -205,57 +206,164 @@ const loginSchema = z.object({
 authRouter.post("/auth/login", async (req, res, next) => {
   try {
     const body = loginSchema.parse(req.body);
-    const user = await prisma.user.findUnique({
-      where: { email: body.email },
-      include: { company: true },
-    });
-    if (!user)
-      return res
-        .status(401)
-        .json({ error: "AUTH_ERROR", message: "Invalid credentials" });
     
-    const ok = await Auth.compare(body.password, user.passwordHash);
-    if (!ok)
-      return res
-        .status(401)
-        .json({ error: "AUTH_ERROR", message: "Invalid credentials" });
+    try {
+      const user = await prisma.user.findUnique({
+        where: { email: body.email },
+        include: { company: true },
+      });
+      
+      if (!user) {
+        return res.status(401).json({ error: "AUTH_ERROR", message: "Invalid credentials" });
+      }
+      
+      if (!user.company) {
+        return res.status(500).json({
+          error: "INTERNAL_ERROR",
+          message: "User company not found"
+        });
+      }
 
-    // Check if email is verified
-    if (!user.company.emailVerified) {
-      return res.status(403).json({
-        error: "EMAIL_NOT_VERIFIED",
-        message: "Please verify your email address before logging in",
+      const ok = await Auth.compare(body.password, user.passwordHash);
+      if (!ok) {
+        return res.status(401).json({ error: "AUTH_ERROR", message: "Invalid credentials" });
+      }
+
+      // Check if email is verified
+      if (!user.company.emailVerified) {
+        return res.status(403).json({
+          error: "EMAIL_NOT_VERIFIED",
+          message: "Please verify your email address before logging in",
+          email: user.email,
+          status: "PENDING_VERIFICATION"
+        });
+      }
+
+      const access = Auth.signAccess({
+        sub: user.id,
+        companyId: user.companyId,
+        role: user.role,
+        type: user.company.type,
+      });
+      const refresh = Auth.signRefresh({ sub: user.id });
+
+      // Return complete user data (excluding sensitive fields)
+      const userData = {
+        id: user.id,
         email: user.email,
-        status: "PENDING_VERIFICATION"
+        role: user.role,
+        companyId: user.companyId,
+        company: {
+          id: user.company.id,
+          companyName: user.company.companyName,
+          type: user.company.type,
+          status: user.company.status,
+          adapterType: user.company.adapterType || null,
+          grpcEndpoint: user.company.grpcEndpoint || null,
+        },
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      };
+
+      return res.json({ 
+        token: access,
+        access,
+        refresh, 
+        user: userData,
+        companyId: user.companyId
+      });
+    } catch (dbError: any) {
+      console.error("Database error in login:", dbError);
+      
+      // Check for database authentication errors
+      const errorMessage = dbError?.message || '';
+      if (errorMessage.includes('Access denied') || 
+          errorMessage.includes('ERROR 28000') || 
+          errorMessage.includes('ERROR 1698')) {
+        return res.status(503).json({
+          error: "DATABASE_AUTH_ERROR",
+          message: "Database connection error. Please contact the administrator.",
+          hint: "The server cannot connect to the database. This is a server configuration issue."
+        });
+      }
+      
+      // Check for missing DATABASE_URL
+      if (errorMessage.includes('DATABASE_URL') || errorMessage.includes('Environment variable not found')) {
+        return res.status(503).json({
+          error: "DATABASE_CONFIG_ERROR",
+          message: "Database configuration error. Please contact the administrator.",
+          hint: "The server database configuration is missing or incorrect."
+        });
+      }
+      
+      // Generic database error
+      return res.status(500).json({
+        error: "DATABASE_ERROR",
+        message: "Database operation failed. Please try again later.",
+        hint: "If this problem persists, please contact support."
+      });
+    }
+  } catch (e: any) {
+    console.error("Login error:", e);
+    if (e.name === "ZodError") {
+      return res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Invalid request data",
+        details: e.errors
+      });
+    }
+    // Ensure we always send a response
+    if (!res.headersSent) {
+      return res.status(500).json({
+        error: "INTERNAL_ERROR",
+        message: e.message || "An unexpected error occurred"
+      });
+    }
+  }
+});
+
+/**
+ * @openapi
+ * /auth/me:
+ *   get:
+ *     tags: [Auth]
+ *     summary: Get current user info
+ *     description: Returns the current authenticated user's information
+ *     security:
+ *       - bearerAuth: []
+ */
+authRouter.get("/auth/me", requireAuth(), async (req: any, res, next) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.sub },
+      include: { company: true }
+    });
+
+    if (!user || !user.company) {
+      return res.status(404).json({
+        error: "USER_NOT_FOUND",
+        message: "User not found"
       });
     }
 
-    const access = Auth.signAccess({
-      sub: user.id,
-      companyId: user.companyId,
-      role: user.role,
-      type: user.company.type,
-    });
-    const refresh = Auth.signRefresh({ sub: user.id });
-
-    // Return complete user data (excluding sensitive fields)
     const userData = {
       id: user.id,
       email: user.email,
       role: user.role,
+      companyId: user.companyId,
       company: {
         id: user.company.id,
         companyName: user.company.companyName,
         type: user.company.type,
         status: user.company.status,
-        adapterType: user.company.adapterType,
-        grpcEndpoint: user.company.grpcEndpoint,
+        adapterType: user.company.adapterType || null,
+        grpcEndpoint: user.company.grpcEndpoint || null,
       },
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
 
-    res.json({ access, refresh, user: userData });
+    res.json(userData);
   } catch (e) {
     next(e);
   }

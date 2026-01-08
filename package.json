@@ -13,10 +13,15 @@
     "start": "node dist/index.js",
     "prisma:gen": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:seed": "node --loader ts-node/esm src/data/seed.ts",
+    "prisma:seed": "tsx src/data/seed.ts",
     "seed:unlocode": "tsx src/data/seed-unlocode.ts",
     "test:grpc": "node test-grpc-setup.js",
-    "verify": "tsx src/services/verificationRunner.ts"
+    "verify": "tsx src/services/verificationRunner.ts",
+    "test:db": "tsx scripts/fix-database.js",
+    "check:env": "node scripts/check-env.js",
+    "verify:admin": "tsx scripts/verify-admin.js",
+    "test:login": "node scripts/test-login.js",
+    "check:prisma": "node scripts/check-prisma-env.js"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.0",

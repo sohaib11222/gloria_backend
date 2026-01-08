@@ -84,6 +84,126 @@ sourcesRouter.get("/sources/branches", requireAuth(), requireCompanyType("SOURCE
 
 /**
  * @openapi
+ * /sources/branches:
+ *   post:
+ *     tags: [Sources]
+ *     summary: Create a new branch
+ *     security:
+ *       - bearerAuth: []
+ */
+const createSourceBranchSchema = z.object({
+  branchCode: z.string().min(1, "Branch code is required"),
+  name: z.string().min(1, "Name is required"),
+  status: z.string().optional(),
+  locationType: z.string().optional(),
+  collectionType: z.string().optional(),
+  email: z.string().email().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  latitude: z.number().optional().nullable(),
+  longitude: z.number().optional().nullable(),
+  addressLine: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  postalCode: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  countryCode: z.string().optional().nullable(),
+  natoLocode: z.string().optional().nullable(),
+  agreementId: z.string().optional().nullable(),
+});
+
+sourcesRouter.post("/sources/branches", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
+  try {
+    const sourceId = req.user.companyId;
+    const body = createSourceBranchSchema.parse(req.body);
+
+    // Check if branch code already exists for this source
+    const existing = await prisma.branch.findUnique({
+      where: {
+        sourceId_branchCode: {
+          sourceId,
+          branchCode: body.branchCode,
+        },
+      },
+    });
+
+    if (existing) {
+      return res.status(409).json({
+        error: "BRANCH_CODE_EXISTS",
+        message: `Branch with code ${body.branchCode} already exists`,
+      });
+    }
+
+    // Validate natoLocode if provided
+    if (body.natoLocode) {
+      const locode = await prisma.uNLocode.findUnique({
+        where: { unlocode: body.natoLocode },
+      });
+      if (!locode) {
+        return res.status(400).json({
+          error: "INVALID_UNLOCODE",
+          message: `UN/LOCODE ${body.natoLocode} not found`,
+        });
+      }
+    }
+
+    // Validate agreementId if provided
+    if (body.agreementId) {
+      const agreement = await prisma.agreement.findFirst({
+        where: {
+          id: body.agreementId,
+          sourceId,
+        },
+      });
+      if (!agreement) {
+        return res.status(400).json({
+          error: "INVALID_AGREEMENT",
+          message: "Agreement not found or does not belong to this source",
+        });
+      }
+    }
+
+    const branch = await prisma.branch.create({
+      data: {
+        sourceId,
+        branchCode: body.branchCode,
+        name: body.name,
+        status: body.status || null,
+        locationType: body.locationType || null,
+        collectionType: body.collectionType || null,
+        email: body.email || null,
+        phone: body.phone || null,
+        latitude: body.latitude || null,
+        longitude: body.longitude || null,
+        addressLine: body.addressLine || null,
+        city: body.city || null,
+        postalCode: body.postalCode || null,
+        country: body.country || null,
+        countryCode: body.countryCode || null,
+        natoLocode: body.natoLocode || null,
+        agreementId: body.agreementId || null,
+      },
+    });
+
+    res.status(201).json(branch);
+  } catch (e: any) {
+    if (e.code === "P2002") {
+      return res.status(409).json({
+        error: "BRANCH_CODE_EXISTS",
+        message: "Branch code already exists for this source",
+      });
+    }
+    if (e.name === "ZodError") {
+      return res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Invalid request data",
+        errors: e.errors,
+      });
+    }
+    next(e);
+  }
+});
+
+/**
+ * @openapi
  * /sources/branches/:id:
  *   get:
  *     tags: [Sources]
@@ -273,7 +393,14 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
       });
     }
 
-    if (!source.httpEndpoint) {
+    // Use configured httpEndpoint or fallback to default based on company type
+    const httpEndpoint =
+      source.httpEndpoint ||
+      (source.type === "AGENT"
+        ? `http://localhost:9091`
+        : `http://localhost:9090`);
+
+    if (!httpEndpoint) {
       return res.status(400).json({
         error: "HTTP_ENDPOINT_NOT_CONFIGURED",
         message: "Source httpEndpoint must be configured",
@@ -290,7 +417,7 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
     // Enforce whitelist check
     const { enforceWhitelist } = await import("../../infra/whitelistEnforcement.js");
     try {
-      await enforceWhitelist(sourceId, source.httpEndpoint);
+      await enforceWhitelist(sourceId, httpEndpoint);
     } catch (e: any) {
       return res.status(403).json({
         error: "WHITELIST_VIOLATION",
@@ -303,7 +430,7 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
     try {
-      const response = await fetch(source.httpEndpoint, {
+      const response = await fetch(httpEndpoint, {
         method: "GET",
         headers: {
           "Request-Type": "LocationRq",
@@ -417,6 +544,234 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
       }
       throw fetchError;
     }
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ============================================================================
+// Source Location Management Endpoints
+// ============================================================================
+
+/**
+ * @openapi
+ * /sources/locations/search:
+ *   get:
+ *     tags: [Sources]
+ *     summary: Search UN/LOCODE database for locations
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: query
+ *         schema: { type: string }
+ *         description: Search term (searches in unlocode, place, country, iataCode)
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 25 }
+ *       - in: query
+ *         name: cursor
+ *         schema: { type: string }
+ */
+sourcesRouter.get("/sources/locations/search", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
+  try {
+    const query = String(req.query.query || "").trim();
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+    const cursor = String(req.query.cursor || "");
+
+    const where: any = query
+      ? {
+          OR: [
+            { unlocode: { contains: query } },
+            { country: { contains: query } },
+            { place: { contains: query } },
+            { iataCode: { contains: query } },
+          ],
+        }
+      : {};
+
+    const rows = await prisma.uNLocode.findMany({
+      where,
+      take: limit + 1,
+      ...(cursor ? { cursor: { unlocode: cursor }, skip: 1 } : {}),
+      orderBy: { unlocode: "asc" },
+    });
+
+    const hasMore = rows.length > limit;
+    const items = rows.slice(0, limit).map((r) => ({
+      unlocode: r.unlocode,
+      country: r.country,
+      place: r.place,
+      iata_code: r.iataCode || "",
+      latitude: r.latitude || 0,
+      longitude: r.longitude || 0,
+    }));
+    const next_cursor = hasMore ? rows[limit].unlocode : "";
+
+    res.json({
+      items,
+      next_cursor,
+      has_more: hasMore,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /sources/locations:
+ *   post:
+ *     tags: [Sources]
+ *     summary: Add a location to source coverage
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - unlocode
+ *             properties:
+ *               unlocode:
+ *                 type: string
+ *                 description: UN/LOCODE (e.g., GBMAN)
+ */
+const addLocationSchema = z.object({
+  unlocode: z.string().min(1, "UN/LOCODE is required"),
+});
+
+sourcesRouter.post("/sources/locations", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
+  try {
+    const sourceId = req.user.companyId;
+    const body = addLocationSchema.parse(req.body);
+    const { unlocode } = body;
+
+    // Verify the UN/LOCODE exists in the database
+    const unlocodeEntry = await prisma.uNLocode.findUnique({
+      where: { unlocode: unlocode.toUpperCase() },
+    });
+
+    if (!unlocodeEntry) {
+      return res.status(404).json({
+        error: "UNLOCODE_NOT_FOUND",
+        message: `UN/LOCODE "${unlocode}" not found in database`,
+      });
+    }
+
+    // Check if location is already added
+    const existing = await prisma.sourceLocation.findUnique({
+      where: {
+        sourceId_unlocode: {
+          sourceId,
+          unlocode: unlocode.toUpperCase(),
+        },
+      },
+    });
+
+    if (existing) {
+      return res.status(409).json({
+        error: "LOCATION_ALREADY_ADDED",
+        message: `Location "${unlocode}" is already in your coverage`,
+      });
+    }
+
+    // Add location to source coverage
+    const sourceLocation = await prisma.sourceLocation.create({
+      data: {
+        sourceId,
+        unlocode: unlocode.toUpperCase(),
+      },
+      include: {
+        loc: {
+          select: {
+            unlocode: true,
+            country: true,
+            place: true,
+            iataCode: true,
+            latitude: true,
+            longitude: true,
+          },
+        },
+      },
+    });
+
+    res.status(201).json({
+      message: "Location added successfully",
+      location: {
+        unlocode: sourceLocation.loc.unlocode,
+        country: sourceLocation.loc.country,
+        place: sourceLocation.loc.place,
+        iata_code: sourceLocation.loc.iataCode || "",
+        latitude: sourceLocation.loc.latitude || 0,
+        longitude: sourceLocation.loc.longitude || 0,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /sources/locations/{unlocode}:
+ *   delete:
+ *     tags: [Sources]
+ *     summary: Remove a location from source coverage
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: unlocode
+ *         required: true
+ *         schema:
+ *           type: string
+ */
+sourcesRouter.delete("/sources/locations/:unlocode", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
+  try {
+    const sourceId = req.user.companyId;
+    const unlocode = String(req.params.unlocode || "").toUpperCase().trim();
+
+    if (!unlocode) {
+      return res.status(400).json({
+        error: "BAD_REQUEST",
+        message: "UN/LOCODE is required",
+      });
+    }
+
+    // Check if location exists in source coverage
+    const sourceLocation = await prisma.sourceLocation.findUnique({
+      where: {
+        sourceId_unlocode: {
+          sourceId,
+          unlocode,
+        },
+      },
+    });
+
+    if (!sourceLocation) {
+      return res.status(404).json({
+        error: "LOCATION_NOT_FOUND",
+        message: `Location "${unlocode}" is not in your coverage`,
+      });
+    }
+
+    // Remove location from source coverage
+    await prisma.sourceLocation.delete({
+      where: {
+        sourceId_unlocode: {
+          sourceId,
+          unlocode,
+        },
+      },
+    });
+
+    res.json({
+      message: "Location removed successfully",
+      unlocode,
+    });
   } catch (e) {
     next(e);
   }

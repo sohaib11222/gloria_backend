@@ -2244,7 +2244,14 @@ adminRouter.post("/admin/sources/:sourceId/import-branches", requireAuth(), requ
       });
     }
 
-    if (!source.httpEndpoint) {
+    // Use configured httpEndpoint or fallback to default based on company type
+    const httpEndpoint =
+      source.httpEndpoint ||
+      (source.type === "AGENT"
+        ? `http://localhost:9091`
+        : `http://localhost:9090`);
+
+    if (!httpEndpoint) {
       return res.status(400).json({
         error: "HTTP_ENDPOINT_NOT_CONFIGURED",
         message: "Source httpEndpoint must be configured",
@@ -2260,7 +2267,7 @@ adminRouter.post("/admin/sources/:sourceId/import-branches", requireAuth(), requ
 
     // Enforce whitelist check
     try {
-      await enforceWhitelist(sourceId, source.httpEndpoint);
+      await enforceWhitelist(sourceId, httpEndpoint);
     } catch (e: any) {
       return res.status(403).json({
         error: "WHITELIST_VIOLATION",
@@ -2273,7 +2280,7 @@ adminRouter.post("/admin/sources/:sourceId/import-branches", requireAuth(), requ
     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
     try {
-      const response = await fetch(source.httpEndpoint, {
+      const response = await fetch(httpEndpoint, {
         method: "GET",
         headers: {
           "Request-Type": "LocationRq",

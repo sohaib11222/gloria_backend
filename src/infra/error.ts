@@ -1,11 +1,92 @@
 import type { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
+import { logger } from "./logger.js";
 
 export function errorHandler(err: any, req: Request, res: Response, _next: NextFunction) {
   const code = err?.status || 500;
   const requestId = (req as any).requestId;
+  
+  // Log the error for debugging
+  logger.error({ 
+    err, 
+    errorMessage: err?.message, 
+    errorCode: err?.code,
+    stack: err?.stack,
+    requestId,
+    path: req.path,
+    method: req.method
+  }, "Request error");
+  
   if (err instanceof ZodError) {
     return res.status(400).json({ error: "SCHEMA_ERROR", details: err.issues, requestId });
+  }
+  
+  // Handle Prisma database errors
+  if (err?.code && err.code.startsWith('P')) {
+    let statusCode = 500;
+    let errorMessage = "Database error";
+    
+    // Check if the error message contains MySQL authentication errors
+    const fullMessage = err.message || '';
+    if (fullMessage.includes('Access denied') || 
+        fullMessage.includes('ERROR 28000') || 
+        fullMessage.includes('ERROR 1698')) {
+      return res.status(503).json({
+        error: "DATABASE_AUTH_ERROR",
+        message: "Database authentication failed. Please check your DATABASE_URL in .env file and restart the server.",
+        hint: "Format: mysql://username:password@host:port/database_name",
+        solution: "1. Check your .env file has correct DATABASE_URL\n2. Restart the server: npm run dev\n3. Verify connection: npm run test:db",
+        requestId
+      });
+    }
+    
+    // Prisma error codes
+    if (err.code === 'P1000' || err.code === 'P1001') {
+      statusCode = 503;
+      errorMessage = "Database connection failed. Please check your DATABASE_URL configuration.";
+    } else if (err.code === 'P2002') {
+      statusCode = 409;
+      errorMessage = "Duplicate entry";
+    } else if (err.code === 'P2025') {
+      statusCode = 404;
+      errorMessage = "Record not found";
+    } else {
+      errorMessage = err.message || "Database operation failed";
+    }
+    
+    return res.status(statusCode).json({ 
+      error: "DATABASE_ERROR", 
+      message: errorMessage,
+      code: err.code,
+      requestId 
+    });
+  }
+  
+  // Handle MySQL authentication errors (check both message and meta)
+  const errorMessage = err?.message || '';
+  const metaError = err?.meta?.message || '';
+  const hasAccessDenied = errorMessage.includes('Access denied') || 
+                          metaError.includes('Access denied') ||
+                          errorMessage.includes('ERROR 28000') ||
+                          errorMessage.includes('ERROR 1698');
+  
+  if (hasAccessDenied) {
+    return res.status(503).json({
+      error: "DATABASE_AUTH_ERROR",
+      message: "Database authentication failed. Please check your DATABASE_URL in .env file and restart the server.",
+      hint: "Format: mysql://username:password@host:port/database_name",
+      solution: "1. Check your .env file has correct DATABASE_URL\n2. Restart the server: npm run dev\n3. Verify connection: npm run test:db",
+      requestId
+    });
+  }
+  
+  // Handle other database connection errors
+  if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('connect')) {
+    return res.status(503).json({
+      error: "DATABASE_CONNECTION_ERROR",
+      message: "Cannot connect to database. Please ensure MySQL is running.",
+      requestId
+    });
   }
   
   // Map gRPC status codes to HTTP status codes
@@ -37,7 +118,20 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
     : code;
   
   const message = err?.message || "Internal Server Error";
-  res.status(statusCode).json({ error: err.code || "INTERNAL_ERROR", message, requestId });
+  
+  // In development, include more details
+  const isDev = process.env.NODE_ENV !== 'production';
+  const response: any = { 
+    error: err.code || "INTERNAL_ERROR", 
+    message,
+    requestId 
+  };
+  
+  if (isDev && err?.stack) {
+    response.stack = err.stack;
+  }
+  
+  res.status(statusCode).json(response);
 }
 
 

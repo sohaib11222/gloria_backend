@@ -128,13 +128,24 @@ endpointsRouter.get(
       // Log the error for debugging
       console.error("Error in GET /endpoints/config:", e);
       console.error("Request user:", req.user);
-      // Return a more informative error
-      if (e.code === "P2002" || e.code === "P2025") {
-        return res.status(400).json({
+      
+      // Handle database errors
+      if (e?.code && e.code.startsWith('P')) {
+        return res.status(500).json({
           error: "DATABASE_ERROR",
           message: "Database query failed",
+          code: e.code
         });
       }
+      
+      // Handle MySQL authentication errors
+      if (e?.message && e.message.includes('Access denied')) {
+        return res.status(503).json({
+          error: "DATABASE_AUTH_ERROR",
+          message: "Database authentication failed. Please check your DATABASE_URL in .env file."
+        });
+      }
+      
       next(e);
     }
   }

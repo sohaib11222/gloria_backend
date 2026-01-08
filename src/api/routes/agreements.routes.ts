@@ -315,7 +315,24 @@ agreementsRouter.get(
           type: "AGENT"
         }
       });
-    } catch (e) {
+    } catch (e: any) {
+      // Handle database errors
+      if (e?.code && e.code.startsWith('P')) {
+        return res.status(500).json({
+          error: "DATABASE_ERROR",
+          message: "Database query failed",
+          code: e.code
+        });
+      }
+      
+      // Handle MySQL authentication errors
+      if (e?.message && e.message.includes('Access denied')) {
+        return res.status(503).json({
+          error: "DATABASE_AUTH_ERROR",
+          message: "Database authentication failed. Please check your DATABASE_URL in .env file."
+        });
+      }
+      
       next(e);
     }
   }
@@ -751,7 +768,38 @@ agreementsRouter.get(
           { source_id: req.user.companyId, status },
           metaFromReq(req),
           (err: any, resp: any) => {
-            if (err) return next(err);
+            if (err) {
+              // Handle gRPC errors
+              const errorMessage = err.message || String(err);
+              
+              // Check for database configuration errors
+              if (errorMessage.includes('DATABASE_URL') || errorMessage.includes('Environment variable not found')) {
+                return res.status(503).json({
+                  error: "DATABASE_CONFIG_ERROR",
+                  message: "Database configuration error: DATABASE_URL not found. Please check your .env file and restart the server.",
+                  hint: "Format: mysql://username:password@host:port/database_name",
+                  solution: "1. Check your .env file has correct DATABASE_URL\n2. Restart the server: npm run dev\n3. Verify connection: npm run test:db",
+                  requestId: (req as any).requestId
+                });
+              }
+              
+              // Check for database authentication errors
+              if (errorMessage.includes('Access denied')) {
+                return res.status(503).json({
+                  error: "DATABASE_AUTH_ERROR",
+                  message: "Database authentication failed. Please check your DATABASE_URL in .env file and restart the server.",
+                  requestId: (req as any).requestId
+                });
+              }
+              
+              // Generic gRPC error
+              return res.status(500).json({
+                error: "INTERNAL_ERROR",
+                message: errorMessage,
+                code: err.code || 13,
+                requestId: (req as any).requestId
+              });
+            }
             res.json({ items: resp.items.map(toAgreementCamelCase), total: resp.items.length });
           }
         );
@@ -760,7 +808,38 @@ agreementsRouter.get(
           { agent_id: req.user.companyId, status },
           metaFromReq(req),
           (err: any, resp: any) => {
-            if (err) return next(err);
+            if (err) {
+              // Handle gRPC errors
+              const errorMessage = err.message || String(err);
+              
+              // Check for database configuration errors
+              if (errorMessage.includes('DATABASE_URL') || errorMessage.includes('Environment variable not found')) {
+                return res.status(503).json({
+                  error: "DATABASE_CONFIG_ERROR",
+                  message: "Database configuration error: DATABASE_URL not found. Please check your .env file and restart the server.",
+                  hint: "Format: mysql://username:password@host:port/database_name",
+                  solution: "1. Check your .env file has correct DATABASE_URL\n2. Restart the server: npm run dev\n3. Verify connection: npm run test:db",
+                  requestId: (req as any).requestId
+                });
+              }
+              
+              // Check for database authentication errors
+              if (errorMessage.includes('Access denied')) {
+                return res.status(503).json({
+                  error: "DATABASE_AUTH_ERROR",
+                  message: "Database authentication failed. Please check your DATABASE_URL in .env file and restart the server.",
+                  requestId: (req as any).requestId
+                });
+              }
+              
+              // Generic gRPC error
+              return res.status(500).json({
+                error: "INTERNAL_ERROR",
+                message: errorMessage,
+                code: err.code || 13,
+                requestId: (req as any).requestId
+              });
+            }
             res.json({ items: resp.items.map(toAgreementCamelCase), total: resp.items.length });
           }
         );
