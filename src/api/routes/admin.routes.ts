@@ -3447,6 +3447,16 @@ adminRouter.get("/admin/notifications", requireAuth(), requireRole("ADMIN"), asy
     const limit = Math.max(1, Math.min(100, Number(req.query.limit || 50)));
     const unreadOnly = req.query.unreadOnly === 'true';
     
+    // Get read markers for dynamic notifications (to filter out read ones)
+    const readMarkers = await prisma.notification.findMany({
+      where: {
+        companyId: null,
+        type: 'ADMIN_READ_MARKER',
+      },
+      select: { id: true },
+    });
+    const readMarkerIds = new Set(readMarkers.map(m => m.id.replace('read-marker-', '')));
+    
     // Build notifications from various sources
     const notifications: any[] = [];
     
@@ -3467,15 +3477,19 @@ adminRouter.get("/admin/notifications", requireAuth(), requireRole("ADMIN"), asy
     });
     
     pendingCompanies.forEach(company => {
-      notifications.push({
-        id: `company-pending-${company.id}`,
-        type: 'company',
-        title: 'New company awaiting approval',
-        message: `${company.companyName} (${company.type}) - ${company.email}`,
-        timestamp: company.createdAt.toISOString(),
-        read: false,
-        actionUrl: '/companies',
-      });
+      const notificationId = `company-pending-${company.id}`;
+      const isRead = readMarkerIds.has(notificationId);
+      if (!unreadOnly || !isRead) {
+        notifications.push({
+          id: notificationId,
+          type: 'company',
+          title: 'New company awaiting approval',
+          message: `${company.companyName} (${company.type}) - ${company.email}`,
+          timestamp: company.createdAt.toISOString(),
+          read: isRead,
+          actionUrl: '/companies',
+        });
+      }
     });
     
     // 2. Get pending location requests
@@ -3495,15 +3509,19 @@ adminRouter.get("/admin/notifications", requireAuth(), requireRole("ADMIN"), asy
     });
     
     pendingLocationRequests.forEach(req => {
-      notifications.push({
-        id: `location-request-${req.id}`,
-        type: 'system',
-        title: 'Location request pending approval',
-        message: `${req.locationName}, ${req.country} - Requested by ${req.source.companyName}`,
-        timestamp: req.createdAt.toISOString(),
-        read: false,
-        actionUrl: '/location-requests',
-      });
+      const notificationId = `location-request-${req.id}`;
+      const isRead = readMarkerIds.has(notificationId);
+      if (!unreadOnly || !isRead) {
+        notifications.push({
+          id: notificationId,
+          type: 'system',
+          title: 'Location request pending approval',
+          message: `${req.locationName}, ${req.country} - Requested by ${req.source.companyName}`,
+          timestamp: req.createdAt.toISOString(),
+          read: isRead,
+          actionUrl: '/location-requests',
+        });
+      }
     });
     
     // 3. Get excluded sources (health issues)
@@ -3529,15 +3547,19 @@ adminRouter.get("/admin/notifications", requireAuth(), requireRole("ADMIN"), asy
       excludedSources.forEach(health => {
         const company = companyMap.get(health.sourceId);
         if (company) {
-          notifications.push({
-            id: `health-excluded-${health.sourceId}`,
-            type: 'health',
-            title: 'Source excluded due to health issues',
-            message: `${company.companyName} excluded until ${health.excludedUntil ? new Date(health.excludedUntil).toLocaleString() : 'unknown'}`,
-            timestamp: health.excludedUntil?.toISOString() || health.updatedAt.toISOString(),
-            read: false,
-            actionUrl: '/health',
-          });
+          const notificationId = `health-excluded-${health.sourceId}`;
+          const isRead = readMarkerIds.has(notificationId);
+          if (!unreadOnly || !isRead) {
+            notifications.push({
+              id: notificationId,
+              type: 'health',
+              title: 'Source excluded due to health issues',
+              message: `${company.companyName} excluded until ${health.excludedUntil ? new Date(health.excludedUntil).toLocaleString() : 'unknown'}`,
+              timestamp: health.excludedUntil?.toISOString() || health.updatedAt.toISOString(),
+              read: isRead,
+              actionUrl: '/health',
+            });
+          }
         }
       });
     }
@@ -3564,21 +3586,26 @@ adminRouter.get("/admin/notifications", requireAuth(), requireRole("ADMIN"), asy
     });
     
     offeredAgreements.forEach(agreement => {
-      notifications.push({
-        id: `agreement-offered-${agreement.id}`,
-        type: 'agreement',
-        title: 'Agreement awaiting acceptance',
-        message: `${agreement.source.companyName} → ${agreement.agent.companyName} (${agreement.agreementRef})`,
-        timestamp: agreement.createdAt.toISOString(),
-        read: false,
-        actionUrl: '/agreements-management',
-      });
+      const notificationId = `agreement-offered-${agreement.id}`;
+      const isRead = readMarkerIds.has(notificationId);
+      if (!unreadOnly || !isRead) {
+        notifications.push({
+          id: notificationId,
+          type: 'agreement',
+          title: 'Agreement awaiting acceptance',
+          message: `${agreement.source.companyName} → ${agreement.agent.companyName} (${agreement.agreementRef})`,
+          timestamp: agreement.createdAt.toISOString(),
+          read: isRead,
+          actionUrl: '/agreements-management',
+        });
+      }
     });
     
-    // 5. Get database notifications (if any exist)
+    // 6. Get database notifications (if any exist)
     const dbNotifications = await prisma.notification.findMany({
       where: {
         companyId: null, // Admin notifications have no companyId
+        type: { not: 'ADMIN_READ_MARKER' }, // Exclude read markers
         ...(unreadOnly && { readAt: null }),
       },
       orderBy: { createdAt: 'desc' },
@@ -3610,6 +3637,7 @@ adminRouter.get("/admin/notifications", requireAuth(), requireRole("ADMIN"), asy
     });
     
     // Sort by timestamp (newest first) and limit
+    // (Filtering is already done above for dynamic notifications)
     const sortedNotifications = notifications
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, limit);
@@ -3636,16 +3664,36 @@ adminRouter.post("/admin/notifications/:id/read", requireAuth(), requireRole("AD
   try {
     const { id } = req.params;
     
-    // If it's a database notification, update it
+    // If it's a database notification (CUID starts with 'cl'), update it
     if (id.startsWith('cl')) {
       await prisma.notification.update({
         where: { id },
         data: { readAt: new Date() },
       });
+    } else {
+      // For dynamic notifications (company-pending-, location-request-, health-excluded-, agreement-offered-),
+      // create a read marker in the database to track that this notification has been read
+      // This allows us to filter them out when unreadOnly is true
+      try {
+        await prisma.notification.upsert({
+          where: { id: `read-marker-${id}` },
+          update: { readAt: new Date() },
+          create: {
+            id: `read-marker-${id}`,
+            companyId: null, // Admin notifications
+            type: 'ADMIN_READ_MARKER',
+            title: 'Read marker',
+            message: `Read marker for ${id}`,
+            readAt: new Date(),
+          },
+        });
+      } catch (error) {
+        // If upsert fails (e.g., ID too long), just log and continue
+        // The notification will still be marked as read in the frontend
+        console.warn(`Could not create read marker for notification ${id}:`, error);
+      }
     }
     
-    // For dynamic notifications (company-pending-, location-request-, etc.), 
-    // we don't persist read status, but we can return success
     res.json({ success: true });
   } catch (e) {
     next(e);

@@ -653,6 +653,165 @@ endpointsRouter.get(
  *                       type: string
  *                       description: Default adapter type
  */
+/**
+ * @openapi
+ * /endpoints/notifications:
+ *   get:
+ *     tags: [Endpoints]
+ *     summary: Get source notifications
+ *     description: Retrieve notifications for the authenticated source company
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Maximum number of notifications to return
+ *       - in: query
+ *         name: unreadOnly
+ *         schema:
+ *           type: boolean
+ *           default: false
+ *         description: Return only unread notifications
+ *     responses:
+ *       200:
+ *         description: List of notifications
+ */
+endpointsRouter.get("/endpoints/notifications", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
+  try {
+    const companyId = req.user.company.id;
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 50)));
+    const unreadOnly = req.query.unreadOnly === 'true';
+    
+    const notifications: any[] = [];
+    
+    // 1. Get health issues (excluded sources)
+    const health = await prisma.sourceHealth.findUnique({
+      where: { sourceId: companyId },
+    });
+    
+    if (health && health.excludedUntil && new Date(health.excludedUntil).getTime() > Date.now()) {
+      notifications.push({
+        id: `health-excluded-${companyId}`,
+        type: 'health',
+        title: 'Source excluded due to health issues',
+        message: `Your source has been excluded until ${new Date(health.excludedUntil).toLocaleString()}. Please check your endpoint performance.`,
+        timestamp: health.excludedUntil.toISOString(),
+        read: false,
+        actionUrl: '/health',
+      });
+    }
+    
+    // 2. Get agreement status updates
+    const recentAgreements = await prisma.agreement.findMany({
+      where: {
+        sourceId: companyId,
+        status: { in: ['ACCEPTED', 'REJECTED', 'ACTIVE'] },
+      },
+      include: {
+        agent: {
+          select: {
+            companyName: true,
+          },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 10,
+    });
+    
+    recentAgreements.forEach(agreement => {
+      if (agreement.status === 'ACCEPTED' || agreement.status === 'ACTIVE') {
+        notifications.push({
+          id: `agreement-${agreement.status.toLowerCase()}-${agreement.id}`,
+          type: 'agreement',
+          title: `Agreement ${agreement.status.toLowerCase()}`,
+          message: `${agreement.agent.companyName} has ${agreement.status === 'ACCEPTED' ? 'accepted' : 'activated'} your agreement: ${agreement.agreementRef}`,
+          timestamp: agreement.updatedAt.toISOString(),
+          read: false,
+          actionUrl: '/agreements',
+        });
+      }
+    });
+    
+    // 3. Get database notifications for this company
+    const dbNotifications = await prisma.notification.findMany({
+      where: {
+        companyId: companyId,
+        ...(unreadOnly && { readAt: null }),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    
+    dbNotifications.forEach(notif => {
+      let frontendType: 'agreement' | 'health' | 'company' | 'system' = 'system';
+      if (notif.type.includes('AGREEMENT')) {
+        frontendType = 'agreement';
+      } else if (notif.type.includes('HEALTH') || notif.type.includes('EXCLUDED')) {
+        frontendType = 'health';
+      } else if (notif.type.includes('COMPANY')) {
+        frontendType = 'company';
+      }
+      
+      notifications.push({
+        id: notif.id,
+        type: frontendType,
+        title: notif.title,
+        message: notif.message,
+        timestamp: notif.createdAt.toISOString(),
+        read: !!notif.readAt,
+        actionUrl: frontendType === 'agreement' ? '/agreements' : 
+                   frontendType === 'health' ? '/health' : '/dashboard',
+      });
+    });
+    
+    // Sort by timestamp (newest first) and limit
+    const sortedNotifications = notifications
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, limit);
+    
+    res.json({
+      items: sortedNotifications,
+      total: sortedNotifications.length,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /endpoints/notifications/{id}/read:
+ *   post:
+ *     tags: [Endpoints]
+ *     summary: Mark source notification as read
+ *     security:
+ *       - bearerAuth: []
+ */
+endpointsRouter.post("/endpoints/notifications/:id/read", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
+  try {
+    const { id } = req.params;
+    const companyId = req.user.company.id;
+    
+    // If it's a database notification, update it
+    if (id.startsWith('cl')) {
+      await prisma.notification.updateMany({
+        where: { 
+          id,
+          companyId: companyId, // Ensure it belongs to this company
+        },
+        data: { readAt: new Date() },
+      });
+    }
+    
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
 endpointsRouter.post(
   "/endpoints/reset",
   requireAuth(),

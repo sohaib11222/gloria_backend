@@ -15,6 +15,55 @@ import path from "path";
 
 export const adminGrpcRouter = Router();
 
+// Helper function to format gRPC errors into user-friendly messages
+function formatGrpcError(error: any, address: string): string {
+  const errorStr = String(error);
+  const errorMessage = error?.message || errorStr;
+  
+  // Check for common gRPC error codes
+  if (errorStr.includes('14 UNAVAILABLE') || errorStr.includes('UNAVAILABLE')) {
+    return `Cannot connect to gRPC server at ${address}. The server may not be running or the address is incorrect. Please verify the gRPC server is running and the address is correct.`;
+  }
+  
+  if (errorStr.includes('4 DEADLINE_EXCEEDED') || errorStr.includes('DEADLINE_EXCEEDED')) {
+    return `Connection timeout while trying to reach ${address}. The server may be slow or unreachable.`;
+  }
+  
+  if (errorStr.includes('12 UNIMPLEMENTED') || errorStr.includes('UNIMPLEMENTED')) {
+    return `The gRPC service at ${address} does not implement the requested method.`;
+  }
+  
+  if (errorStr.includes('2 UNKNOWN') || errorStr.includes('UNKNOWN')) {
+    return `Unknown error occurred while connecting to ${address}: ${errorMessage}`;
+  }
+  
+  // Return formatted error message
+  return `gRPC connection error: ${errorMessage}`;
+}
+
+// Helper function to validate gRPC address format
+function validateGrpcAddress(address: string): { valid: boolean; error?: string } {
+  if (!address || typeof address !== 'string') {
+    return { valid: false, error: 'Address is required and must be a string' };
+  }
+  
+  // Remove grpc:// prefix if present
+  const cleanAddr = address.replace(/^grpc:\/\//, '');
+  
+  // Check for host:port format
+  const parts = cleanAddr.split(':');
+  if (parts.length !== 2) {
+    return { valid: false, error: 'Address must be in format host:port (e.g., localhost:9091)' };
+  }
+  
+  const port = parseInt(parts[1], 10);
+  if (isNaN(port) || port < 1 || port > 65535) {
+    return { valid: false, error: 'Port must be a number between 1 and 65535' };
+  }
+  
+  return { valid: true };
+}
+
 // Configuration schema
 const grpcConfigSchema = z.object({
   sourceGrpcAddr: z.string().optional(),
@@ -308,6 +357,26 @@ adminGrpcRouter.post(
   async (req, res) => {
     const addr =
       req.body?.addr || process.env.SOURCE_GRPC_ADDR || config.sourceGrpcAddr;
+    
+    // Validate address format
+    if (!addr) {
+      return res.status(400).json({
+        ok: false,
+        error: 'No gRPC address provided. Please provide an address in the request body or configure SOURCE_GRPC_ADDR environment variable.',
+        message: 'Address is required'
+      });
+    }
+    
+    const validation = validateGrpcAddress(addr);
+    if (!validation.valid) {
+      return res.status(400).json({
+        ok: false,
+        addr,
+        error: validation.error,
+        message: 'Invalid address format'
+      });
+    }
+    
     const t0 = Date.now();
 
     try {
@@ -320,11 +389,14 @@ adminGrpcRouter.post(
         ms: Date.now() - t0,
         result,
       });
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = formatGrpcError(error, addr);
       res.status(500).json({
         ok: false,
         addr,
-        error: String(error),
+        error: errorMessage,
+        details: error?.message || String(error),
+        code: error?.code || 'UNKNOWN'
       });
     }
   }
@@ -468,6 +540,26 @@ adminGrpcRouter.post(
     try {
       const body = sourceGrpcTestSchema.parse(req.body);
       const addr = body.addr || process.env.SOURCE_GRPC_ADDR || config.sourceGrpcAddr;
+      
+      // Validate address format
+      if (!addr) {
+        return res.status(400).json({
+          ok: false,
+          error: 'No gRPC address provided. Please provide an address in the request body or configure SOURCE_GRPC_ADDR environment variable.',
+          message: 'Address is required'
+        });
+      }
+      
+      const validation = validateGrpcAddress(addr);
+      if (!validation.valid) {
+        return res.status(400).json({
+          ok: false,
+          addr,
+          error: validation.error,
+          message: 'Invalid address format'
+        });
+      }
+      
       const grpcEndpoints = body.grpcEndpoints || {};
       const t0 = Date.now();
 
@@ -492,10 +584,10 @@ adminGrpcRouter.post(
           result: healthResult,
           ms: Date.now() - t0
         };
-      } catch (error) {
+      } catch (error: any) {
         results.health = {
           ok: false,
-          error: String(error),
+          error: formatGrpcError(error, addr),
           ms: Date.now() - t0
         };
       }
@@ -510,10 +602,10 @@ adminGrpcRouter.post(
             result: locationsResult,
             ms: Date.now() - t0
           };
-        } catch (error) {
+        } catch (error: any) {
           results.locations = {
             ok: false,
-            error: String(error),
+            error: formatGrpcError(error, addr),
             ms: Date.now() - t0
           };
         }
@@ -538,10 +630,10 @@ adminGrpcRouter.post(
             result: availabilityResult,
             ms: Date.now() - t0
           };
-        } catch (error) {
+        } catch (error: any) {
           results.availability = {
             ok: false,
-            error: String(error),
+            error: formatGrpcError(error, addr),
             ms: Date.now() - t0
           };
         }
@@ -562,10 +654,10 @@ adminGrpcRouter.post(
             result: bookingResult,
             ms: Date.now() - t0
           };
-        } catch (error) {
+        } catch (error: any) {
           results.bookings = {
             ok: false,
-            error: String(error),
+            error: formatGrpcError(error, addr),
             ms: Date.now() - t0
           };
         }
@@ -669,6 +761,26 @@ adminGrpcRouter.post(
   async (req, res) => {
     const addr =
       req.body?.addr || process.env.AGENT_GRPC_ADDR || config.agentGrpcAddr;
+    
+    // Validate address format
+    if (!addr) {
+      return res.status(400).json({
+        ok: false,
+        error: 'No gRPC address provided. Please provide an address in the request body or configure AGENT_GRPC_ADDR environment variable.',
+        message: 'Address is required'
+      });
+    }
+    
+    const validation = validateGrpcAddress(addr);
+    if (!validation.valid) {
+      return res.status(400).json({
+        ok: false,
+        addr,
+        error: validation.error,
+        message: 'Invalid address format'
+      });
+    }
+    
     const t0 = Date.now();
 
     try {
@@ -681,11 +793,14 @@ adminGrpcRouter.post(
         ms: Date.now() - t0,
         result,
       });
-    } catch (error) {
+    } catch (error: any) {
+      const errorMessage = formatGrpcError(error, addr);
       res.status(500).json({
         ok: false,
         addr,
-        error: String(error),
+        error: errorMessage,
+        details: error?.message || String(error),
+        code: error?.code || 'UNKNOWN'
       });
     }
   }

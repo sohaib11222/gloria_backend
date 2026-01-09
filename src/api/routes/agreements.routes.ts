@@ -1051,3 +1051,142 @@ agreementsRouter.post(
     }
   }
 );
+
+/**
+ * @openapi
+ * /agreements/notifications:
+ *   get:
+ *     tags: [Agreements]
+ *     summary: Get agent notifications
+ *     description: Retrieve notifications for the authenticated agent company
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Maximum number of notifications to return
+ *       - in: query
+ *         name: unreadOnly
+ *         schema:
+ *           type: boolean
+ *           default: false
+ *         description: Return only unread notifications
+ *     responses:
+ *       200:
+ *         description: List of notifications
+ */
+agreementsRouter.get("/agreements/notifications", requireAuth(), requireCompanyType("AGENT"), async (req: any, res, next) => {
+  try {
+    const companyId = req.user.company.id;
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 50)));
+    const unreadOnly = req.query.unreadOnly === 'true';
+    
+    const notifications: any[] = [];
+    
+    // 1. Get new agreement offers
+    const offeredAgreements = await prisma.agreement.findMany({
+      where: {
+        agentId: companyId,
+        status: 'OFFERED',
+      },
+      include: {
+        source: {
+          select: {
+            companyName: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    });
+    
+    offeredAgreements.forEach(agreement => {
+      notifications.push({
+        id: `agreement-offered-${agreement.id}`,
+        type: 'agreement',
+        title: 'New agreement offer',
+        message: `${agreement.source.companyName} has offered you an agreement: ${agreement.agreementRef}`,
+        timestamp: agreement.createdAt.toISOString(),
+        read: false,
+        actionUrl: '/agreements',
+      });
+    });
+    
+    // 2. Get database notifications for this company
+    const dbNotifications = await prisma.notification.findMany({
+      where: {
+        companyId: companyId,
+        ...(unreadOnly && { readAt: null }),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    
+    dbNotifications.forEach(notif => {
+      let frontendType: 'agreement' | 'health' | 'company' | 'system' = 'system';
+      if (notif.type.includes('AGREEMENT')) {
+        frontendType = 'agreement';
+      } else if (notif.type.includes('HEALTH')) {
+        frontendType = 'health';
+      } else if (notif.type.includes('COMPANY')) {
+        frontendType = 'company';
+      }
+      
+      notifications.push({
+        id: notif.id,
+        type: frontendType,
+        title: notif.title,
+        message: notif.message,
+        timestamp: notif.createdAt.toISOString(),
+        read: !!notif.readAt,
+        actionUrl: frontendType === 'agreement' ? '/agreements' : '/agent',
+      });
+    });
+    
+    // Sort by timestamp (newest first) and limit
+    const sortedNotifications = notifications
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, limit);
+    
+    res.json({
+      items: sortedNotifications,
+      total: sortedNotifications.length,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /agreements/notifications/{id}/read:
+ *   post:
+ *     tags: [Agreements]
+ *     summary: Mark agent notification as read
+ *     security:
+ *       - bearerAuth: []
+ */
+agreementsRouter.post("/agreements/notifications/:id/read", requireAuth(), requireCompanyType("AGENT"), async (req: any, res, next) => {
+  try {
+    const { id } = req.params;
+    const companyId = req.user.company.id;
+    
+    // If it's a database notification, update it
+    if (id.startsWith('cl')) {
+      await prisma.notification.updateMany({
+        where: { 
+          id,
+          companyId: companyId, // Ensure it belongs to this company
+        },
+        data: { readAt: new Date() },
+      });
+    }
+    
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+});
