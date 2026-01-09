@@ -708,7 +708,7 @@ endpointsRouter.get("/endpoints/notifications", requireAuth(), requireCompanyTyp
     const recentAgreements = await prisma.agreement.findMany({
       where: {
         sourceId: companyId,
-        status: { in: ['ACCEPTED', 'REJECTED', 'ACTIVE'] },
+        status: { in: ['ACCEPTED', 'ACTIVE'] },
       },
       include: {
         agent: {
@@ -727,7 +727,7 @@ endpointsRouter.get("/endpoints/notifications", requireAuth(), requireCompanyTyp
           id: `agreement-${agreement.status.toLowerCase()}-${agreement.id}`,
           type: 'agreement',
           title: `Agreement ${agreement.status.toLowerCase()}`,
-          message: `${agreement.agent.companyName} has ${agreement.status === 'ACCEPTED' ? 'accepted' : 'activated'} your agreement: ${agreement.agreementRef}`,
+          message: `${agreement.agent?.companyName || 'Agent'} has ${agreement.status === 'ACCEPTED' ? 'accepted' : 'activated'} your agreement: ${agreement.agreementRef}`,
           timestamp: agreement.updatedAt.toISOString(),
           read: false,
           actionUrl: '/agreements',

@@ -6,9 +6,9 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:mw": "tsx watch src/index.ts",
-    "dev:agent": "cd agent-backend && node --watch server.js",
-    "dev:source": "cd source-backend && node --watch server.js",
-    "dev:all": "concurrently -n MW,AGENT,SOURCE -c green,cyan,magenta \"npm:dev:mw\" \"npm:dev:agent\" \"npm:dev:source\"",
+    "dev:agent": "cd ../gloriaconnect_test_backend/agent-backend && npm run dev",
+    "dev:source": "cd ../gloriaconnect_test_backend/source-backend && npm run dev",
+    "dev:all": "concurrently -n MW,AGENT,SOURCE -c green,cyan,magenta \"npm run dev:mw\" \"npm run dev:agent\" \"npm run dev:source\"",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "prisma:gen": "prisma generate",

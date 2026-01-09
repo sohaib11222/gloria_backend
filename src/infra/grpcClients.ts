@@ -52,7 +52,7 @@ export function createClientCredentials(): grpc.ChannelCredentials {
     return grpc.credentials.createSsl(caCert, clientKey, clientCert);
   } catch (error) {
     logger.error(
-      { error: error.message },
+      { error: error instanceof Error ? error.message : String(error) },
       "Failed to load TLS certificates, falling back to insecure"
     );
     return grpc.credentials.createInsecure();

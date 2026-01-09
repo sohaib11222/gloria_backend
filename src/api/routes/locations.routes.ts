@@ -125,7 +125,7 @@ locationsRouter.get("/coverage/source/:sourceId", requireAuth(), requireCompanyT
       iata_code: sl.loc.iataCode || "",
       latitude: sl.loc.latitude || 0,
       longitude: sl.loc.longitude || 0,
-      synced_at: sl.createdAt?.toISOString() || null
+      synced_at: (sl as any).createdAt?.toISOString() || null
     }));
 
     const next_cursor = hasMore ? sourceLocations[limit].unlocode : "";

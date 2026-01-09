@@ -19,7 +19,7 @@ export const testSourceGrpc = async (req: any, res: any) => {
     results.push({ name: "Health", status: "PASSED", response: h, duration_ms: Date.now() - t1 });
 
     const t2 = Date.now();
-    const loc = await srcProm(client, "GetLocations", {});
+    const loc = await srcProm(client, "GetLocations", {}) as any;
     results.push({ 
       name: "Locations", 
       status: Array.isArray(loc?.locations) && loc.locations.length ? "PASSED" : "FAILED", 
@@ -33,7 +33,7 @@ export const testSourceGrpc = async (req: any, res: any) => {
       dropoff_unlocode: "GBGLA",
       pickup_iso: new Date().toISOString(),
       dropoff_iso: new Date(Date.now() + 48 * 3600 * 1000).toISOString()
-    });
+    }) as any;
     results.push({ 
       name: "Availability", 
       status: Array.isArray(avail?.vehicles) && avail.vehicles.length ? "PASSED" : "FAILED", 
@@ -47,7 +47,7 @@ export const testSourceGrpc = async (req: any, res: any) => {
         PickupLocation: "GBMAN", 
         DropOffLocation: "GBGLA", 
         VehicleClass: "CDMR" 
-      });
+      }) as any;
       results.push({ 
         name: "Booking Create", 
         status: created?.BookingReference ? "PASSED" : "FAILED", 
@@ -58,7 +58,7 @@ export const testSourceGrpc = async (req: any, res: any) => {
       if (created?.BookingReference) {
         const ref = created.BookingReference;
         const t5 = Date.now();
-        const checked = await srcProm(client, "CheckBooking", { BookingReference: ref });
+        const checked = await srcProm(client, "CheckBooking", { BookingReference: ref }) as any;
         results.push({ 
           name: "Booking Check", 
           status: checked?.BookingReference === ref ? "PASSED" : "FAILED", 
@@ -67,7 +67,7 @@ export const testSourceGrpc = async (req: any, res: any) => {
         });
 
         const t6 = Date.now();
-        const cancelled = await srcProm(client, "CancelBooking", { BookingReference: ref });
+        const cancelled = await srcProm(client, "CancelBooking", { BookingReference: ref }) as any;
         results.push({ 
           name: "Booking Cancel", 
           status: cancelled?.BookingReference === ref ? "PASSED" : "FAILED", 
@@ -100,7 +100,7 @@ export const testAgentGrpc = async (req: any, res: any) => {
     const results: any = [];
 
     const t1 = Date.now();
-    const h = await agtProm(client, "GetHealth", {});
+    const h = await agtProm(client, "GetHealth", {}) as any;
     results.push({ 
       name: "Agent Health", 
       status: h?.ok === false ? "FAILED" : "PASSED", 
@@ -110,7 +110,7 @@ export const testAgentGrpc = async (req: any, res: any) => {
 
     if (searchPayload) {
       const t2 = Date.now();
-      const s = await agtProm(client, "RunSearch", searchPayload);
+      const s = await agtProm(client, "RunSearch", searchPayload) as any;
       results.push({ 
         name: "Agent Search", 
         status: s?.request_id ? "PASSED" : "FAILED", 
@@ -121,7 +121,7 @@ export const testAgentGrpc = async (req: any, res: any) => {
 
     if (bookPayload) {
       const t3 = Date.now();
-      const b = await agtProm(client, "RunBook", bookPayload);
+      const b = await agtProm(client, "RunBook", bookPayload) as any;
       results.push({ 
         name: "Agent Book", 
         status: b?.booking_id ? "PASSED" : "FAILED", 

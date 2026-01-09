@@ -2245,11 +2245,9 @@ adminRouter.post("/admin/sources/:sourceId/import-branches", requireAuth(), requ
     }
 
     // Use configured httpEndpoint or fallback to default based on company type
+    // source.type is "SOURCE" so we can directly use the SOURCE default
     const httpEndpoint =
-      source.httpEndpoint ||
-      (source.type === "AGENT"
-        ? `http://localhost:9091`
-        : `http://localhost:9090`);
+      source.httpEndpoint || `http://localhost:9090`;
 
     if (!httpEndpoint) {
       return res.status(400).json({

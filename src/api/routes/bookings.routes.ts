@@ -139,7 +139,7 @@ bookingsRouter.post("/", requireAuth(), async (req: any, res, next) => {
         endpoint: "booking.create",
         requestId,
         companyId: req.user.companyId,
-        sourceId: body.source_id,
+        sourceId: (body as any).source_id,
         httpStatus: 400,
         request: body,
         response: errorResponse,
@@ -282,7 +282,7 @@ bookingsRouter.post("/", requireAuth(), async (req: any, res, next) => {
       companyId: req.user?.companyId,
       httpStatus: 400,
       request: req.body,
-      response: { error: e.message },
+      response: { error: e instanceof Error ? e.message : String(e) },
       durationMs: Date.now() - startTime,
     });
     
@@ -372,7 +372,7 @@ bookingsRouter.patch("/:ref", requireAuth(), requireCompanyStatus("ACTIVE"), asy
       companyId: req.user?.companyId,
       httpStatus: 400,
       request: { supplier_booking_ref: req.params.ref, source_id: req.query.source_id, agreement_ref: req.query.agreement_ref },
-      response: { error: e.message },
+      response: { error: e instanceof Error ? e.message : String(e) },
       durationMs: Date.now() - startTime,
     });
     
@@ -458,7 +458,7 @@ bookingsRouter.post("/:ref/cancel", requireAuth(), requireCompanyStatus("ACTIVE"
       companyId: req.user?.companyId,
       httpStatus: 400,
       request: { supplier_booking_ref: req.params.ref, source_id: req.query.source_id, agreement_ref: req.query.agreement_ref },
-      response: { error: e.message },
+      response: { error: e instanceof Error ? e.message : String(e) },
       durationMs: Date.now() - startTime,
     });
     
@@ -544,7 +544,7 @@ bookingsRouter.get("/:ref", requireAuth(), requireCompanyStatus("ACTIVE"), async
       companyId: req.user?.companyId,
       httpStatus: 400,
       request: { supplier_booking_ref: req.params.ref, source_id: req.query.source_id, agreement_ref: req.query.agreement_ref },
-      response: { error: e.message },
+      response: { error: e instanceof Error ? e.message : String(e) },
       durationMs: Date.now() - startTime,
     });
     

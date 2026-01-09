@@ -451,15 +451,16 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
       const data = await response.json();
 
       // Validate CompanyCode
-      if (data.CompanyCode !== source.companyCode) {
+      const dataTyped = data as any;
+      if (dataTyped.CompanyCode !== source.companyCode) {
         return res.status(422).json({
           error: "COMPANY_CODE_MISMATCH",
-          message: `Expected CompanyCode ${source.companyCode}, got ${data.CompanyCode}`,
+          message: `Expected CompanyCode ${source.companyCode}, got ${dataTyped.CompanyCode}`,
         });
       }
 
       // Extract branches (assume data.Branches or data is array)
-      const branches = Array.isArray(data.Branches) ? data.Branches : (Array.isArray(data) ? data : []);
+      const branches = Array.isArray(dataTyped.Branches) ? dataTyped.Branches : (Array.isArray(data) ? data : []);
 
       if (branches.length === 0) {
         return res.status(422).json({

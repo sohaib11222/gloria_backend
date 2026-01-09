@@ -207,7 +207,7 @@ availabilityRouter.post(
         companyId: req.user?.companyId,
         httpStatus: 400,
         request: req.body,
-        response: { error: e.message },
+        response: { error: e instanceof Error ? e.message : String(e) },
         durationMs: Date.now() - startTime,
       });
       
@@ -285,7 +285,7 @@ availabilityRouter.get(
         companyId: req.user?.companyId,
         httpStatus: 400,
         request: req.query,
-        response: { error: e.message },
+        response: { error: e instanceof Error ? e.message : String(e) },
         durationMs: Date.now() - startTime,
       });
       

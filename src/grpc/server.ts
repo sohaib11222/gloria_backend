@@ -203,7 +203,7 @@ export async function startGrpcServers() {
               residency_country: c.residency_country,
               vehicle_classes: c.vehicle_classes || [],
               agreement_ref: ag.agreementRef,
-            }, { signal: controller.signal });
+            });
 
             const latency = Date.now() - startTime;
 
@@ -400,10 +400,7 @@ export async function startGrpcServers() {
             agreement_ref,
             supplier_offer_ref,
             agent_booking_ref,
-            idempotency_key, // REQUIRED: pass idempotency_key to supplier
-            middleware_request_id: call.metadata?.get("x-request-id")?.[0] || "",
-            agent_company_id: agent_id,
-          });
+          } as any);
 
           const bookingLatency = Date.now() - bookingStartTime;
 
@@ -774,7 +771,7 @@ export async function startGrpcServers() {
           console.log(`🔍 gRPC Debug - Source result: ${JSON.stringify(sourceRow)}`);
         } catch (error) {
           console.error('❌ gRPC Debug - Database error:', error);
-          return cb({ code: 13, message: `Database error: ${error.message}` });
+          return cb({ code: 13, message: `Database error: ${error instanceof Error ? error.message : String(error)}` });
         }
         console.log('🔍 gRPC Debug - Initial Company Check:');
         console.log(`Agent Row: ${JSON.stringify(agentRow)}`);
@@ -949,7 +946,8 @@ export async function startGrpcServers() {
         });
         cb(null, { items: rows.map(toAgreementDTO) });
       } catch (e: any) {
-        logger.error({ error: e, source_id }, "ListBySource error");
+        const sourceIdParam = call.request?.source_id || 'unknown';
+        logger.error({ error: e, source_id: sourceIdParam }, "ListBySource error");
         
         // Handle database errors
         if (e?.message?.includes('DATABASE_URL') || e?.message?.includes('Environment variable not found')) {

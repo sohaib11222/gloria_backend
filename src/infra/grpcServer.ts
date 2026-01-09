@@ -67,7 +67,7 @@ export function createServerCredentials(): grpc.ServerCredentials {
       }
     ], true);
   } catch (error) {
-    logger.error({ error: error.message }, 'Failed to load TLS certificates, falling back to insecure');
+    logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Failed to load TLS certificates, falling back to insecure');
     return grpc.ServerCredentials.createInsecure();
   }
 }
@@ -85,7 +85,7 @@ export async function startGrpcServer(
   // Register health service
   try {
     const healthProto = loadProto(path.join(__dirname, '../grpc/proto/health.proto'));
-    const healthPkg = healthProto.grpc?.health?.v1;
+    const healthPkg = (healthProto as any).grpc?.health?.v1;
     
     if (healthPkg?.Health?.service) {
       server.addService(healthPkg.Health.service, {
@@ -102,7 +102,7 @@ export async function startGrpcServer(
       });
     }
   } catch (error) {
-    logger.warn({ error: error.message }, 'Failed to load health proto, health service disabled');
+    logger.warn({ error: error instanceof Error ? error.message : String(error) }, 'Failed to load health proto, health service disabled');
   }
   
   // Try binding with fallback logic for Windows EACCES issues
@@ -171,7 +171,7 @@ export function createGrpcHealthCheck(addr: string): Promise<{ status: number; s
   return new Promise((resolve, reject) => {
     try {
       const healthProto = loadProto(path.join(__dirname, '../grpc/proto/health.proto'));
-      const healthPkg = healthProto.grpc?.health?.v1;
+      const healthPkg = (healthProto as any).grpc?.health?.v1;
       
       if (!healthPkg?.Health) {
         reject(new Error('Health service not available'));

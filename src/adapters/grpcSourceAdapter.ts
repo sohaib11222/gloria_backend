@@ -27,7 +27,7 @@ export function makeGrpcSourceAdapter(address: string) {
       ); 
     },
     
-    async locations() { 
+    async locations(): Promise<any> { 
       return await new Promise((res, rej) => 
         client.GetLocations({}, (e: any, r: any) => e ? rej(e) : res(r))
       ); 

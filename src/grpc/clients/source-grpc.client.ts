@@ -14,7 +14,7 @@ export function getSourceProviderClient() {
   if (!sourceProviderService) {
     try {
       const sourceProto = loadProto('protos/source_provider.proto', 'source_provider');
-      const SourceProviderService = sourceProto.SourceProviderService;
+      const SourceProviderService = (sourceProto as any).SourceProviderService;
       
       if (!SourceProviderService) {
         throw new Error('SourceProviderService not found in proto');
@@ -39,7 +39,7 @@ export function getSourceHealthClient() {
   if (!healthService) {
     try {
       const healthProto = loadProto('protos/health.proto', 'grpc.health.v1');
-      const Health = healthProto.Health;
+      const Health = (healthProto as any).Health;
       
       if (!Health) {
         throw new Error('Health service not found in proto');

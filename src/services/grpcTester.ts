@@ -52,7 +52,7 @@ export class GrpcTester {
         {
           'grpc.keepalive_time_ms': 10000,
           'grpc.keepalive_timeout_ms': 5000,
-          'grpc.keepalive_permit_without_calls': true,
+          'grpc.keepalive_permit_without_calls': 1,
           'grpc.http2.max_pings_without_data': 0,
           'grpc.http2.min_time_between_pings_ms': 10000,
           'grpc.http2.min_ping_interval_without_data_ms': 300000,
@@ -100,21 +100,10 @@ export class GrpcTester {
         reject(new Error('gRPC connection timeout'));
       }, timeout);
 
-      // Try to use gRPC reflection to get service information
+      // For now, we'll just test basic connectivity
+      // In a real implementation, you would use reflection to get service info
       try {
-        // Create a simple reflection request
-        const reflectionClient = new grpc.Client(
-          client.getChannel(),
-          grpc.credentials.createInsecure()
-        );
-
-        // Try to list services using reflection
-        const listServices = promisify(
-          reflectionClient.makeUnaryRequest.bind(reflectionClient)
-        );
-
-        // For now, we'll just test basic connectivity
-        // In a real implementation, you would use reflection to get service info
+        // Reflection not fully implemented - skip for now
         const testData = {
           serviceInfo: {
             name: 'CarHireService',
@@ -208,8 +197,6 @@ export class GrpcTester {
         message: `gRPC method test failed: ${error.message}`,
         details: {
           error: error.message,
-          serviceName,
-          methodName,
         },
       };
     }

@@ -14,7 +14,7 @@ export function getAgentTesterClient() {
   if (!agentTesterService) {
     try {
       const agentProto = loadProto('protos/agent_tester.proto', 'carhire.agent.v1');
-      const AgentTesterService = agentProto.AgentTesterService;
+      const AgentTesterService = (agentProto as any).AgentTesterService;
       
       if (!AgentTesterService) {
         throw new Error('AgentTesterService not found in proto');
@@ -39,7 +39,7 @@ export function getAgentHealthClient() {
   if (!healthService) {
     try {
       const healthProto = loadProto('protos/health.proto', 'grpc.health.v1');
-      const Health = healthProto.Health;
+      const Health = (healthProto as any).Health;
       
       if (!Health) {
         throw new Error('Health service not found in proto');

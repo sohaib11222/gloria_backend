@@ -142,7 +142,7 @@ export async function getAdapterForSource(sourceId: string): Promise<SourceAdapt
   if (useGrpc || grpcAddr) {
     const addr = grpcAddr || `${(src as any).grpc_host || "localhost"}:${(src as any).grpc_port || 50061}`;
     console.log(`🔌 Using gRPC adapter for source ${sourceId} at ${addr}`);
-    return makeGrpcSourceAdapter(addr);
+    return makeGrpcSourceAdapter(addr) as any;
   }
 
   if (src.adapterType === "grpc" && src.grpcEndpoint) {

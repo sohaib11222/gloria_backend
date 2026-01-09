@@ -1,12 +1,12 @@
 // gRPC adapter implementation for connecting to external suppliers
-import axios from 'axios';
+import fetch from 'node-fetch';
 
 export class GrpcAdapter {
   constructor(private config: { endpoint: string; authHeader: string; sourceId: string }) {}
 
   private async makeRequest(method: string, path: string, data?: any): Promise<any> {
     const url = `${this.config.endpoint}${path}`;
-    const headers: any = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json'
     };
     
@@ -15,16 +15,22 @@ export class GrpcAdapter {
     }
 
     try {
-      const response = await axios({
+      const response = await fetch(url, {
         method,
-        url,
-        data,
+        body: data ? JSON.stringify(data) : undefined,
         headers,
-        timeout: 30000
+        signal: AbortSignal.timeout(30000)
       });
-      return response.data;
-    } catch (error: any) {
-      console.error(`gRPC Adapter error for ${method} ${path}:`, error.response?.data || error.message);
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      
+      return await response.json();
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`gRPC Adapter error for ${method} ${path}:`, errorMessage);
       throw error;
     }
   }

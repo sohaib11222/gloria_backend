@@ -1,0 +1,161 @@
+// gRPC adapter implementation for connecting to external suppliers
+import fetch from 'node-fetch';
+export class GrpcAdapter {
+    config;
+    constructor(config) {
+        this.config = config;
+    }
+    async makeRequest(method, path, data) {
+        const url = `${this.config.endpoint}${path}`;
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        if (this.config.authHeader) {
+            headers['Authorization'] = this.config.authHeader;
+        }
+        try {
+            const response = await fetch(url, {
+                method,
+                body: data ? JSON.stringify(data) : undefined,
+                headers,
+                signal: AbortSignal.timeout(30000)
+            });
+            if (!response.ok) {
+                const errorText = await response.text().catch(() => 'Unknown error');
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+            return await response.json();
+        }
+        catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error(`gRPC Adapter error for ${method} ${path}:`, errorMessage);
+            throw error;
+        }
+    }
+    async locations() {
+        try {
+            const response = await this.makeRequest('GET', '/locations');
+            // Extract location codes from the response
+            return response.map((loc) => loc.LocationCode || loc.unlocode || loc).filter(Boolean);
+        }
+        catch (error) {
+            console.error('Failed to fetch locations:', error);
+            return [];
+        }
+    }
+    async availability(criteria) {
+        try {
+            // Convert internal criteria to OTA-style format
+            const otaCriteria = {
+                PickupLocation: criteria.pickup_unlocode,
+                DropOffLocation: criteria.dropoff_unlocode,
+                PickupDateTime: criteria.pickup_iso,
+                DropOffDateTime: criteria.dropoff_iso,
+                VehicleClass: criteria.vehicle_classes?.[0] || 'CDMR',
+                DriverAge: criteria.driver_age,
+                ResidencyCountry: criteria.residency_country
+            };
+            const response = await this.makeRequest('POST', '/availability', otaCriteria);
+            // Convert OTA response to internal format
+            return response.map((offer) => ({
+                source_id: this.config.sourceId,
+                agreement_ref: criteria.agreement_ref,
+                vehicle_class: offer.VehicleClass,
+                vehicle_make_model: offer.VehicleMakeModel,
+                rate_plan_code: offer.RatePlanCode,
+                currency: offer.Currency,
+                total_price: offer.TotalPrice,
+                supplier_offer_ref: offer.SupplierOfferRef,
+                availability_status: offer.AvailabilityStatus
+            }));
+        }
+        catch (error) {
+            console.error('Failed to fetch availability:', error);
+            return [];
+        }
+    }
+    async bookingCreate(input) {
+        try {
+            const bookingData = {
+                AgreementRef: input.agreement_ref,
+                SupplierOfferRef: input.supplier_offer_ref,
+                AgentBookingRef: input.agent_booking_ref,
+                PickupLocation: input.pickup_unlocode,
+                DropOffLocation: input.dropoff_unlocode,
+                PickupDateTime: input.pickup_iso,
+                DropOffDateTime: input.dropoff_iso,
+                VehicleClass: input.vehicle_class,
+                DriverAge: input.driver_age,
+                ResidencyCountry: input.residency_country
+            };
+            const response = await this.makeRequest('POST', '/booking/create', bookingData);
+            return {
+                supplier_booking_ref: response.SupplierBookingRef,
+                status: response.Status,
+                agreement_ref: response.AgreementRef,
+                supplier_offer_ref: response.SupplierOfferRef
+            };
+        }
+        catch (error) {
+            console.error('Failed to create booking:', error);
+            throw error;
+        }
+    }
+    async bookingModify(input) {
+        try {
+            // REQUIRED: agreement_ref must be sent to source on every call
+            const modifyData = {
+                SupplierBookingRef: input.supplier_booking_ref,
+                AgreementRef: input.agreement_ref
+            };
+            const response = await this.makeRequest('POST', '/booking/modify', modifyData);
+            return {
+                supplier_booking_ref: response.SupplierBookingRef,
+                status: response.Status,
+                agreement_ref: response.AgreementRef || input.agreement_ref,
+                supplier_offer_ref: response.SupplierOfferRef
+            };
+        }
+        catch (error) {
+            console.error('Failed to modify booking:', error);
+            throw error;
+        }
+    }
+    async bookingCancel(ref, agreement_ref) {
+        try {
+            // REQUIRED: agreement_ref must be sent to source on every call
+            const cancelData = {
+                SupplierBookingRef: ref,
+                AgreementRef: agreement_ref
+            };
+            const response = await this.makeRequest('POST', '/booking/cancel', cancelData);
+            return {
+                supplier_booking_ref: response.SupplierBookingRef,
+                status: response.Status,
+                agreement_ref: response.AgreementRef || agreement_ref,
+                supplier_offer_ref: response.SupplierOfferRef
+            };
+        }
+        catch (error) {
+            console.error('Failed to cancel booking:', error);
+            throw error;
+        }
+    }
+    async bookingCheck(ref, agreement_ref) {
+        try {
+            // REQUIRED: agreement_ref must be sent to source on every call
+            // For GET requests, include agreement_ref as query parameter or header
+            const response = await this.makeRequest('GET', `/booking/check/${ref}?agreement_ref=${encodeURIComponent(agreement_ref)}`);
+            return {
+                supplier_booking_ref: response.SupplierBookingRef,
+                status: response.Status,
+                agreement_ref: response.AgreementRef || agreement_ref,
+                supplier_offer_ref: response.SupplierOfferRef
+            };
+        }
+        catch (error) {
+            console.error('Failed to check booking:', error);
+            throw error;
+        }
+    }
+}

@@ -234,7 +234,7 @@ adminSourcesRouter.get('/sources/:sourceId', requireAuth(), requireCompanyType('
       });
     }
 
-    if (source.type !== 'SOURCE') {
+    if ((source as any).type !== 'SOURCE') {
       return res.status(400).json({ 
         error: 'BAD_REQUEST', 
         message: 'Company is not a source' 

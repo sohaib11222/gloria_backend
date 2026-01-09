@@ -18,15 +18,15 @@ export function startLocationSync() {
     const sources = await prisma.company.findMany({ where: { type: "SOURCE", status: "ACTIVE" }, select: { id: true }});
     for (const s of sources) {
       try {
-        const adapter = getAdapterForSource(s.id);
-        const res = await adapter.getLocations(); // must return { locations: [{ unlocode, name }] }
+        const adapter = await getAdapterForSource(s.id);
+        const res = await adapter.locations() as any; // must return { locations: [{ unlocode, name }] }
         if (!res?.locations) continue;
 
         for (const loc of res.locations) {
           await prisma.sourceLocation.upsert({
             where: { sourceId_unlocode: { sourceId: s.id, unlocode: loc.unlocode }},
-            update: { name: loc.name },
-            create: { sourceId: s.id, unlocode: loc.unlocode, name: loc.name }
+            update: {},
+            create: { sourceId: s.id, unlocode: loc.unlocode }
           });
         }
         logger.info({ sourceId: s.id, count: res.locations.length }, "✅ Location sync ok");

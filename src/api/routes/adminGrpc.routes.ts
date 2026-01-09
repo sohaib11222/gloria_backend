@@ -679,10 +679,11 @@ adminGrpcRouter.post(
       };
 
       // Save test result to database if user is authenticated and is a source
-      if (req.user?.companyId && req.user?.companyType === 'SOURCE') {
+      const user = (req as any).user;
+      if (user?.companyId && user?.companyType === 'SOURCE') {
         try {
           await prisma.company.update({
-            where: { id: req.user.companyId },
+            where: { id: user.companyId },
             data: {
               lastGrpcTestResult: testResult as any,
               lastGrpcTestAt: new Date(),
