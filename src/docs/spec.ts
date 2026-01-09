@@ -1,7 +1,7 @@
 // Backend/src/docs/spec.ts
 
 export type DocCodeSample = {
-  lang: 'curl' | 'node' | 'php';
+  lang: 'curl' | 'node' | 'php' | 'python' | 'java' | 'perl' | 'go';
   label: string;
   code: string;
 };
@@ -105,6 +105,79 @@ curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
 $out = curl_exec($ch);
 echo $out;`,
           },
+          {
+            lang: 'python',
+            label: 'Python',
+            code: `import requests
+res = requests.post('${BASE_URL}/auth/register', json={
+    'email': 'agent@example.com',
+    'password': 'secret123',
+    'companyName': 'Example Agent',
+    'type': 'AGENT'
+})
+print(res.json())`,
+          },
+          {
+            lang: 'java',
+            label: 'Java',
+            code: `import java.net.http.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+var client = HttpClient.newHttpClient();
+var mapper = new ObjectMapper();
+var body = Map.of(
+    "email", "agent@example.com",
+    "password", "secret123",
+    "companyName", "Example Agent",
+    "type", "AGENT"
+);
+var request = HttpRequest.newBuilder()
+    .uri(URI.create("${BASE_URL}/auth/register"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
+    .build();
+var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());`,
+          },
+          {
+            lang: 'perl',
+            label: 'Perl',
+            code: `use LWP::UserAgent;
+use JSON;
+my $ua = LWP::UserAgent->new;
+my $json = JSON->new;
+my $res = $ua->post('${BASE_URL}/auth/register',
+    'Content-Type' => 'application/json',
+    Content => $json->encode({
+        email => 'agent@example.com',
+        password => 'secret123',
+        companyName => 'Example Agent',
+        type => 'AGENT'
+    })
+);
+print $res->decoded_content;`,
+          },
+          {
+            lang: 'go',
+            label: 'Go',
+            code: `package main
+import (
+    "bytes"
+    "encoding/json"
+    "net/http"
+)
+func main() {
+    data := map[string]string{
+        "email": "agent@example.com",
+        "password": "secret123",
+        "companyName": "Example Agent",
+        "type": "AGENT",
+    }
+    jsonData, _ := json.Marshal(data)
+    resp, _ := http.Post("${BASE_URL}/auth/register",
+        "application/json", bytes.NewBuffer(jsonData))
+    defer resp.Body.Close()
+}`,
+          },
         ],
         roles: ['admin', 'agent', 'source'],
       },
@@ -174,6 +247,65 @@ curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
 $out = curl_exec($ch);
 echo $out;`,
           },
+          {
+            lang: 'python',
+            label: 'Python',
+            code: `import requests
+res = requests.post('${BASE_URL}/auth/verify-email', json={
+    'email': 'agent@example.com',
+    'otp': '1234'
+})
+print(res.json())`,
+          },
+          {
+            lang: 'java',
+            label: 'Java',
+            code: `import java.net.http.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+var client = HttpClient.newHttpClient();
+var mapper = new ObjectMapper();
+var body = Map.of("email", "agent@example.com", "otp", "1234");
+var request = HttpRequest.newBuilder()
+    .uri(URI.create("${BASE_URL}/auth/verify-email"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
+    .build();
+var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());`,
+          },
+          {
+            lang: 'perl',
+            label: 'Perl',
+            code: `use LWP::UserAgent;
+use JSON;
+my $ua = LWP::UserAgent->new;
+my $json = JSON->new;
+my $res = $ua->post('${BASE_URL}/auth/verify-email',
+    'Content-Type' => 'application/json',
+    Content => $json->encode({
+        email => 'agent@example.com',
+        otp => '1234'
+    })
+);
+print $res->decoded_content;`,
+          },
+          {
+            lang: 'go',
+            label: 'Go',
+            code: `package main
+import (
+    "bytes"
+    "encoding/json"
+    "net/http"
+)
+func main() {
+    data := map[string]string{"email": "agent@example.com", "otp": "1234"}
+    jsonData, _ := json.Marshal(data)
+    resp, _ := http.Post("${BASE_URL}/auth/verify-email",
+        "application/json", bytes.NewBuffer(jsonData))
+    defer resp.Body.Close()
+}`,
+          },
         ],
         roles: ['admin', 'agent', 'source'],
       },
@@ -242,6 +374,65 @@ curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
 ]));
 $out = curl_exec($ch);
 echo $out;`,
+          },
+          {
+            lang: 'python',
+            label: 'Python',
+            code: `import requests
+res = requests.post('${BASE_URL}/auth/login', json={
+    'email': 'admin@example.com',
+    'password': 'secret'
+})
+print(res.json())`,
+          },
+          {
+            lang: 'java',
+            label: 'Java',
+            code: `import java.net.http.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+var client = HttpClient.newHttpClient();
+var mapper = new ObjectMapper();
+var body = Map.of("email", "admin@example.com", "password", "secret");
+var request = HttpRequest.newBuilder()
+    .uri(URI.create("${BASE_URL}/auth/login"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
+    .build();
+var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());`,
+          },
+          {
+            lang: 'perl',
+            label: 'Perl',
+            code: `use LWP::UserAgent;
+use JSON;
+my $ua = LWP::UserAgent->new;
+my $json = JSON->new;
+my $res = $ua->post('${BASE_URL}/auth/login',
+    'Content-Type' => 'application/json',
+    Content => $json->encode({
+        email => 'admin@example.com',
+        password => 'secret'
+    })
+);
+print $res->decoded_content;`,
+          },
+          {
+            lang: 'go',
+            label: 'Go',
+            code: `package main
+import (
+    "bytes"
+    "encoding/json"
+    "net/http"
+)
+func main() {
+    data := map[string]string{"email": "admin@example.com", "password": "secret"}
+    jsonData, _ := json.Marshal(data)
+    resp, _ := http.Post("${BASE_URL}/auth/login",
+        "application/json", bytes.NewBuffer(jsonData))
+    defer resp.Body.Close()
+}`,
           },
         ],
         roles: ['admin', 'agent', 'source'],
@@ -354,6 +545,97 @@ $res = $client->request('POST', '${BASE_URL}/availability/submit', [
 ]);
 echo $res->getBody();`,
           },
+          {
+            lang: 'python',
+            label: 'Python',
+            code: `import requests
+res = requests.post('${BASE_URL}/availability/submit', json={
+    'pickup_unlocode': 'GBMAN',
+    'dropoff_unlocode': 'GBGLA',
+    'pickup_iso': '2025-11-01T10:00:00Z',
+    'dropoff_iso': '2025-11-03T10:00:00Z',
+    'driver_age': 30,
+    'residency_country': 'GB',
+    'agreement_refs': ['AG-1']
+}, headers={'Authorization': 'Bearer <token>'})
+print(res.json())`,
+          },
+          {
+            lang: 'java',
+            label: 'Java',
+            code: `import java.net.http.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+var client = HttpClient.newHttpClient();
+var mapper = new ObjectMapper();
+var body = Map.of(
+    "pickup_unlocode", "GBMAN",
+    "dropoff_unlocode", "GBGLA",
+    "pickup_iso", "2025-11-01T10:00:00Z",
+    "dropoff_iso", "2025-11-03T10:00:00Z",
+    "driver_age", 30,
+    "residency_country", "GB",
+    "agreement_refs", List.of("AG-1")
+);
+var request = HttpRequest.newBuilder()
+    .uri(URI.create("${BASE_URL}/availability/submit"))
+    .header("Authorization", "Bearer <token>")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
+    .build();
+var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());`,
+          },
+          {
+            lang: 'perl',
+            label: 'Perl',
+            code: `use LWP::UserAgent;
+use JSON;
+my $ua = LWP::UserAgent->new;
+my $json = JSON->new;
+my $res = $ua->post('${BASE_URL}/availability/submit',
+    'Authorization' => 'Bearer <token>',
+    'Content-Type' => 'application/json',
+    Content => $json->encode({
+        pickup_unlocode => 'GBMAN',
+        dropoff_unlocode => 'GBGLA',
+        pickup_iso => '2025-11-01T10:00:00Z',
+        dropoff_iso => '2025-11-03T10:00:00Z',
+        driver_age => 30,
+        residency_country => 'GB',
+        agreement_refs => ['AG-1']
+    })
+);
+print $res->decoded_content;`,
+          },
+          {
+            lang: 'go',
+            label: 'Go',
+            code: `package main
+import (
+    "bytes"
+    "encoding/json"
+    "net/http"
+)
+func main() {
+    data := map[string]interface{}{
+        "pickup_unlocode": "GBMAN",
+        "dropoff_unlocode": "GBGLA",
+        "pickup_iso": "2025-11-01T10:00:00Z",
+        "dropoff_iso": "2025-11-03T10:00:00Z",
+        "driver_age": 30,
+        "residency_country": "GB",
+        "agreement_refs": []string{"AG-1"},
+    }
+    jsonData, _ := json.Marshal(data)
+    req, _ := http.NewRequest("POST", "${BASE_URL}/availability/submit",
+        bytes.NewBuffer(jsonData))
+    req.Header.Set("Authorization", "Bearer <token>")
+    req.Header.Set("Content-Type", "application/json")
+    client := &http.Client{}
+    resp, _ := client.Do(req)
+    defer resp.Body.Close()
+}`,
+          },
         ],
         roles: ['admin', 'agent'],
       },
@@ -463,6 +745,62 @@ $res = $client->request('GET', '${BASE_URL}/availability/poll', [
 ]);
 echo $res->getBody();`,
           },
+          {
+            lang: 'python',
+            label: 'Python',
+            code: `import requests
+res = requests.get('${BASE_URL}/availability/poll', params={
+    'requestId': 'req_abc123',
+    'sinceSeq': 0,
+    'waitMs': 1500
+}, headers={'Authorization': 'Bearer <token>'})
+print(res.json())`,
+          },
+          {
+            lang: 'java',
+            label: 'Java',
+            code: `import java.net.http.*;
+var client = HttpClient.newHttpClient();
+var request = HttpRequest.newBuilder()
+    .uri(URI.create("${BASE_URL}/availability/poll?requestId=req_abc123&sinceSeq=0&waitMs=1500"))
+    .header("Authorization", "Bearer <token>")
+    .GET()
+    .build();
+var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());`,
+          },
+          {
+            lang: 'perl',
+            label: 'Perl',
+            code: `use LWP::UserAgent;
+use URI;
+my $ua = LWP::UserAgent->new;
+my $uri = URI->new('${BASE_URL}/availability/poll');
+$uri->query_form(requestId => 'req_abc123', sinceSeq => 0, waitMs => 1500);
+my $res = $ua->get($uri, 'Authorization' => 'Bearer <token>');
+print $res->decoded_content;`,
+          },
+          {
+            lang: 'go',
+            label: 'Go',
+            code: `package main
+import (
+    "net/http"
+    "net/url"
+)
+func main() {
+    req, _ := http.NewRequest("GET", "${BASE_URL}/availability/poll", nil)
+    q := url.Values{}
+    q.Add("requestId", "req_abc123")
+    q.Add("sinceSeq", "0")
+    q.Add("waitMs", "1500")
+    req.URL.RawQuery = q.Encode()
+    req.Header.Set("Authorization", "Bearer <token>")
+    client := &http.Client{}
+    resp, _ := client.Do(req)
+    defer resp.Body.Close()
+}`,
+          },
         ],
         roles: ['admin', 'agent'],
       },
@@ -560,6 +898,86 @@ $res = $client->request('POST', '${BASE_URL}/bookings', [
 ]);
 echo $res->getBody();`,
           },
+          {
+            lang: 'python',
+            label: 'Python',
+            code: `import requests
+res = requests.post('${BASE_URL}/bookings', json={
+    'agreement_ref': 'AG-1',
+    'supplier_offer_ref': 'OFFER_001',
+    'agent_booking_ref': 'AGENT_BK_123'
+}, headers={
+    'Authorization': 'Bearer <token>',
+    'Idempotency-Key': 'booking_123'
+})
+print(res.json())`,
+          },
+          {
+            lang: 'java',
+            label: 'Java',
+            code: `import java.net.http.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+var client = HttpClient.newHttpClient();
+var mapper = new ObjectMapper();
+var body = Map.of(
+    "agreement_ref", "AG-1",
+    "supplier_offer_ref", "OFFER_001",
+    "agent_booking_ref", "AGENT_BK_123"
+);
+var request = HttpRequest.newBuilder()
+    .uri(URI.create("${BASE_URL}/bookings"))
+    .header("Authorization", "Bearer <token>")
+    .header("Idempotency-Key", "booking_123")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
+    .build();
+var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());`,
+          },
+          {
+            lang: 'perl',
+            label: 'Perl',
+            code: `use LWP::UserAgent;
+use JSON;
+my $ua = LWP::UserAgent->new;
+my $json = JSON->new;
+my $res = $ua->post('${BASE_URL}/bookings',
+    'Authorization' => 'Bearer <token>',
+    'Idempotency-Key' => 'booking_123',
+    'Content-Type' => 'application/json',
+    Content => $json->encode({
+        agreement_ref => 'AG-1',
+        supplier_offer_ref => 'OFFER_001',
+        agent_booking_ref => 'AGENT_BK_123'
+    })
+);
+print $res->decoded_content;`,
+          },
+          {
+            lang: 'go',
+            label: 'Go',
+            code: `package main
+import (
+    "bytes"
+    "encoding/json"
+    "net/http"
+)
+func main() {
+    data := map[string]string{
+        "agreement_ref": "AG-1",
+        "supplier_offer_ref": "OFFER_001",
+        "agent_booking_ref": "AGENT_BK_123",
+    }
+    jsonData, _ := json.Marshal(data)
+    req, _ := http.NewRequest("POST", "${BASE_URL}/bookings", bytes.NewBuffer(jsonData))
+    req.Header.Set("Authorization", "Bearer <token>")
+    req.Header.Set("Idempotency-Key", "booking_123")
+    req.Header.Set("Content-Type", "application/json")
+    client := &http.Client{}
+    resp, _ := client.Do(req)
+    defer resp.Body.Close()
+}`,
+          },
         ],
         roles: ['admin', 'agent'],
       },
@@ -635,6 +1053,57 @@ $res = $client->request('GET', '${BASE_URL}/bookings', [
 ]);
 echo $res->getBody();`,
           },
+          {
+            lang: 'python',
+            label: 'Python',
+            code: `import requests
+res = requests.get('${BASE_URL}/bookings', params={'limit': 50},
+    headers={'Authorization': 'Bearer <token>'})
+print(res.json())`,
+          },
+          {
+            lang: 'java',
+            label: 'Java',
+            code: `import java.net.http.*;
+var client = HttpClient.newHttpClient();
+var request = HttpRequest.newBuilder()
+    .uri(URI.create("${BASE_URL}/bookings?limit=50"))
+    .header("Authorization", "Bearer <token>")
+    .GET()
+    .build();
+var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());`,
+          },
+          {
+            lang: 'perl',
+            label: 'Perl',
+            code: `use LWP::UserAgent;
+use URI;
+my $ua = LWP::UserAgent->new;
+my $uri = URI->new('${BASE_URL}/bookings');
+$uri->query_form(limit => 50);
+my $res = $ua->get($uri, 'Authorization' => 'Bearer <token>');
+print $res->decoded_content;`,
+          },
+          {
+            lang: 'go',
+            label: 'Go',
+            code: `package main
+import (
+    "net/http"
+    "net/url"
+)
+func main() {
+    req, _ := http.NewRequest("GET", "${BASE_URL}/bookings", nil)
+    q := url.Values{}
+    q.Add("limit", "50")
+    req.URL.RawQuery = q.Encode()
+    req.Header.Set("Authorization", "Bearer <token>")
+    client := &http.Client{}
+    resp, _ := client.Do(req)
+    defer resp.Body.Close()
+}`,
+          },
         ],
         roles: ['admin', 'agent'],
       },
@@ -693,6 +1162,58 @@ $res = $client->request('GET', '${BASE_URL}/bookings/BKG-2025-12345', [
   'headers' => ['Authorization' => 'Bearer <token>'],
 ]);
 echo $res->getBody();`,
+          },
+          {
+            lang: 'python',
+            label: 'Python',
+            code: `import requests
+res = requests.get('${BASE_URL}/bookings/BKG-2025-12345', params={
+    'agreement_ref': 'AG-2025-001'
+}, headers={'Authorization': 'Bearer <token>'})
+print(res.json())`,
+          },
+          {
+            lang: 'java',
+            label: 'Java',
+            code: `import java.net.http.*;
+var client = HttpClient.newHttpClient();
+var request = HttpRequest.newBuilder()
+    .uri(URI.create("${BASE_URL}/bookings/BKG-2025-12345?agreement_ref=AG-2025-001"))
+    .header("Authorization", "Bearer <token>")
+    .GET()
+    .build();
+var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());`,
+          },
+          {
+            lang: 'perl',
+            label: 'Perl',
+            code: `use LWP::UserAgent;
+use URI;
+my $ua = LWP::UserAgent->new;
+my $uri = URI->new('${BASE_URL}/bookings/BKG-2025-12345');
+$uri->query_form(agreement_ref => 'AG-2025-001');
+my $res = $ua->get($uri, 'Authorization' => 'Bearer <token>');
+print $res->decoded_content;`,
+          },
+          {
+            lang: 'go',
+            label: 'Go',
+            code: `package main
+import (
+    "net/http"
+    "net/url"
+)
+func main() {
+    req, _ := http.NewRequest("GET", "${BASE_URL}/bookings/BKG-2025-12345", nil)
+    q := url.Values{}
+    q.Add("agreement_ref", "AG-2025-001")
+    req.URL.RawQuery = q.Encode()
+    req.Header.Set("Authorization", "Bearer <token>")
+    client := &http.Client{}
+    resp, _ := client.Do(req)
+    defer resp.Body.Close()
+}`,
           },
         ],
         roles: ['admin', 'agent'],
