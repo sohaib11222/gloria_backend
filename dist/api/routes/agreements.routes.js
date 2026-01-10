@@ -929,7 +929,7 @@ agreementsRouter.post("/agreements/offers", requireAuth(), requireCompanyType("S
  */
 agreementsRouter.get("/agreements/notifications", requireAuth(), requireCompanyType("AGENT"), async (req, res, next) => {
     try {
-        const companyId = req.user.company.id;
+        const companyId = req.user.companyId;
         const limit = Math.max(1, Math.min(100, Number(req.query.limit || 50)));
         const unreadOnly = req.query.unreadOnly === 'true';
         const notifications = [];
@@ -1015,7 +1015,7 @@ agreementsRouter.get("/agreements/notifications", requireAuth(), requireCompanyT
 agreementsRouter.post("/agreements/notifications/:id/read", requireAuth(), requireCompanyType("AGENT"), async (req, res, next) => {
     try {
         const { id } = req.params;
-        const companyId = req.user.company.id;
+        const companyId = req.user.companyId;
         // If it's a database notification, update it
         if (id.startsWith('cl')) {
             await prisma.notification.updateMany({

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import fetch from "node-fetch";
 import { requireAuth, Auth } from "../../infra/auth.js";
 import { requireRole } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
@@ -2225,14 +2226,20 @@ adminRouter.post("/admin/sources/:sourceId/import-branches", requireAuth(), requ
         // Call supplier endpoint with Request-Type: LocationRq header
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+        // Ensure httpEndpoint has a valid URL format
+        let endpointUrl = httpEndpoint.trim();
+        if (!endpointUrl.startsWith('http://') && !endpointUrl.startsWith('https://')) {
+            endpointUrl = `http://${endpointUrl}`;
+        }
         try {
-            const response = await fetch(httpEndpoint, {
+            const response = await fetch(endpointUrl, {
                 method: "GET",
                 headers: {
                     "Request-Type": "LocationRq",
                     "Content-Type": "application/json",
                 },
                 signal: controller.signal,
+                timeout: 30000,
             });
             clearTimeout(timeoutId);
             if (!response.ok) {
@@ -2320,13 +2327,26 @@ adminRouter.post("/admin/sources/:sourceId/import-branches", requireAuth(), requ
         }
         catch (fetchError) {
             clearTimeout(timeoutId);
-            if (fetchError.name === "AbortError") {
+            if (fetchError.name === "AbortError" || fetchError.code === "ETIMEDOUT") {
                 return res.status(504).json({
                     error: "TIMEOUT",
-                    message: "Supplier endpoint timeout after 30s",
+                    message: `Supplier endpoint timeout after 30s: ${endpointUrl}`,
                 });
             }
-            throw fetchError;
+            // Handle fetch connection errors
+            if (fetchError.message?.includes("fetch failed") || fetchError.code === "ECONNREFUSED" || fetchError.code === "ENOTFOUND") {
+                return res.status(503).json({
+                    error: "CONNECTION_ERROR",
+                    message: `Cannot connect to supplier endpoint: ${endpointUrl}. Please ensure the source backend is running and accessible.`,
+                    details: fetchError.message || fetchError.code,
+                });
+            }
+            // Handle other fetch errors
+            return res.status(500).json({
+                error: "FETCH_ERROR",
+                message: `Failed to fetch from supplier endpoint: ${endpointUrl}`,
+                details: fetchError.message || String(fetchError),
+            });
         }
     }
     catch (e) {

@@ -2228,6 +2228,156 @@ echo $res->getBody();`,
         headers: [{ name: 'Authorization', required: true, description: 'Bearer <token>' }],
         roles: ['source'],
       },
+      {
+        id: 'branches-upload',
+        name: 'Upload Branches',
+        method: 'POST',
+        path: '/sources/upload-branches',
+        description: 'Upload branches from a JSON file. Accepts JSON in request body with format: { CompanyCode: string, Branches: [...] } or array of branches.',
+        headers: [{ name: 'Authorization', required: true, description: 'Bearer <token>' }],
+        body: [
+          { name: 'CompanyCode', required: false, type: 'string', description: 'Company code (validated against source companyCode)' },
+          { name: 'Branches', required: true, type: 'array', description: 'Array of branch objects. Can also be provided as root array.' },
+        ],
+        responses: [
+          {
+            status: 200,
+            description: 'Branches uploaded successfully',
+            bodyExample: {
+              message: 'Branches uploaded successfully',
+              imported: 5,
+              updated: 2,
+              total: 7,
+            },
+          },
+          {
+            status: 422,
+            description: 'Validation failed',
+            bodyExample: {
+              error: 'VALIDATION_FAILED',
+              message: '2 branch(es) failed validation',
+              errors: [],
+            },
+          },
+        ],
+        codeSamples: [
+          {
+            lang: 'curl',
+            label: 'cURL',
+            code: `curl -X POST "${BASE_URL}/sources/upload-branches" \\
+  -H "Authorization: Bearer <token>" \\
+  -H "Content-Type: application/json" \\
+  -d @branches.json`,
+          },
+          {
+            lang: 'node',
+            label: 'Node.js',
+            code: `import axios from 'axios';
+import fs from 'fs';
+
+const branchesData = JSON.parse(fs.readFileSync('branches.json', 'utf8'));
+const res = await axios.post('${BASE_URL}/sources/upload-branches', branchesData, {
+  headers: { Authorization: 'Bearer <token>' }
+});
+console.log(res.data);`,
+          },
+          {
+            lang: 'php',
+            label: 'PHP',
+            code: `<?php
+$client = new \\GuzzleHttp\\Client();
+$branchesData = json_decode(file_get_contents('branches.json'), true);
+$res = $client->request('POST', '${BASE_URL}/sources/upload-branches', [
+  'headers' => [
+    'Authorization' => 'Bearer <token>',
+    'Content-Type' => 'application/json'
+  ],
+  'json' => $branchesData
+]);
+echo $res->getBody();`,
+          },
+          {
+            lang: 'python',
+            label: 'Python',
+            code: `import requests
+import json
+
+with open('branches.json', 'r') as f:
+    branches_data = json.load(f)
+
+res = requests.post('${BASE_URL}/sources/upload-branches', 
+    json=branches_data,
+    headers={'Authorization': 'Bearer <token>'})
+print(res.json())`,
+          },
+          {
+            lang: 'java',
+            label: 'Java',
+            code: `import java.net.http.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
+var client = HttpClient.newHttpClient();
+var mapper = new ObjectMapper();
+String json = Files.readString(Paths.get("branches.json"));
+var branchesData = mapper.readValue(json, Map.class);
+var request = HttpRequest.newBuilder()
+    .uri(URI.create("${BASE_URL}/sources/upload-branches"))
+    .header("Authorization", "Bearer <token>")
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(branchesData)))
+    .build();
+var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());`,
+          },
+          {
+            lang: 'perl',
+            label: 'Perl',
+            code: `use LWP::UserAgent;
+use JSON;
+use File::Slurp;
+
+my $ua = LWP::UserAgent->new;
+my $json = JSON->new;
+my $file_content = read_file('branches.json');
+my $branches_data = $json->decode($file_content);
+my $res = $ua->post('${BASE_URL}/sources/upload-branches',
+    'Authorization' => 'Bearer <token>',
+    'Content-Type' => 'application/json',
+    Content => $json->encode($branches_data)
+);
+print $res->decoded_content;`,
+          },
+          {
+            lang: 'go',
+            label: 'Go',
+            code: `package main
+import (
+    "bytes"
+    "io/ioutil"
+    "net/http"
+    "encoding/json"
+)
+
+func main() {
+    data, _ := ioutil.ReadFile("branches.json")
+    var branchesData map[string]interface{}
+    json.Unmarshal(data, &branchesData)
+    
+    jsonData, _ := json.Marshal(branchesData)
+    req, _ := http.NewRequest("POST", "${BASE_URL}/sources/upload-branches",
+        bytes.NewBuffer(jsonData))
+    req.Header.Set("Authorization", "Bearer <token>")
+    req.Header.Set("Content-Type", "application/json")
+    client := &http.Client{}
+    resp, _ := client.Do(req)
+    defer resp.Body.Close()
+}`,
+          },
+        ],
+        roles: ['source'],
+      },
     ],
   },
   {

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import fetch from "node-fetch";
 import { requireAuth } from "../../infra/auth.js";
 import { requireCompanyType } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
@@ -429,15 +430,22 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
+    // Ensure httpEndpoint has a valid URL format
+    let endpointUrl = httpEndpoint.trim();
+    if (!endpointUrl.startsWith('http://') && !endpointUrl.startsWith('https://')) {
+      endpointUrl = `http://${endpointUrl}`;
+    }
+
     try {
-      const response = await fetch(httpEndpoint, {
+      const response = await fetch(endpointUrl, {
         method: "GET",
         headers: {
           "Request-Type": "LocationRq",
           "Content-Type": "application/json",
         },
         signal: controller.signal,
-      });
+        timeout: 30000,
+      } as any);
 
       clearTimeout(timeoutId);
 
@@ -537,14 +545,199 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
       });
     } catch (fetchError: any) {
       clearTimeout(timeoutId);
-      if (fetchError.name === "AbortError") {
+      if (fetchError.name === "AbortError" || fetchError.code === "ETIMEDOUT") {
         return res.status(504).json({
           error: "TIMEOUT",
-          message: "Supplier endpoint timeout after 30s",
+          message: `Supplier endpoint timeout after 30s: ${endpointUrl || httpEndpoint}`,
         });
       }
-      throw fetchError;
+      
+      // Handle fetch connection errors
+      if (fetchError.message?.includes("fetch failed") || fetchError.code === "ECONNREFUSED" || fetchError.code === "ENOTFOUND") {
+        return res.status(503).json({
+          error: "CONNECTION_ERROR",
+          message: `Cannot connect to supplier endpoint: ${endpointUrl || httpEndpoint}. Please ensure the source backend is running and accessible.`,
+          details: fetchError.message || fetchError.code,
+        });
+      }
+      
+      // Handle other fetch errors
+      return res.status(500).json({
+        error: "FETCH_ERROR",
+        message: `Failed to fetch from supplier endpoint: ${endpointUrl || httpEndpoint}`,
+        details: fetchError.message || String(fetchError),
+      });
     }
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /sources/upload-branches:
+ *   post:
+ *     tags: [Sources]
+ *     summary: Upload branches from JSON file (for own company)
+ *     description: |
+ *       Upload branch/location data from a JSON file.
+ *       Validates CompanyCode, validates each branch, and upserts to database.
+ *       Expected JSON format: { CompanyCode: string, Branches: [...] } or array of branches
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               CompanyCode:
+ *                 type: string
+ *               Branches:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ */
+sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
+  try {
+    const sourceId = req.user.companyId;
+    
+    // Load source and check approval
+    const source = await prisma.company.findUnique({
+      where: { id: sourceId },
+      select: {
+        id: true,
+        companyName: true,
+        type: true,
+        status: true,
+        approvalStatus: true,
+        emailVerified: true,
+        companyCode: true,
+        httpEndpoint: true,
+        whitelistedDomains: true,
+      },
+    });
+
+    if (!source) {
+      return res.status(404).json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
+    }
+
+    if (source.approvalStatus !== "APPROVED") {
+      return res.status(400).json({
+        error: "NOT_APPROVED",
+        message: "Source must be approved before uploading branches",
+      });
+    }
+
+    if (!source.emailVerified) {
+      return res.status(400).json({
+        error: "EMAIL_NOT_VERIFIED",
+        message: "Source email must be verified",
+      });
+    }
+
+    if (!source.companyCode) {
+      return res.status(400).json({
+        error: "COMPANY_CODE_MISSING",
+        message: "Source companyCode must be set",
+      });
+    }
+
+    const data = req.body;
+
+    if (!data) {
+      return res.status(400).json({
+        error: "INVALID_REQUEST",
+        message: "Request body is required",
+      });
+    }
+
+    // Validate CompanyCode if present
+    const dataTyped = data as any;
+    if (dataTyped.CompanyCode && dataTyped.CompanyCode !== source.companyCode) {
+      return res.status(422).json({
+        error: "COMPANY_CODE_MISMATCH",
+        message: `Expected CompanyCode ${source.companyCode}, got ${dataTyped.CompanyCode}`,
+      });
+    }
+
+    // Extract branches (assume data.Branches or data is array)
+    const branches = Array.isArray(dataTyped.Branches) ? dataTyped.Branches : (Array.isArray(data) ? data : []);
+
+    if (branches.length === 0) {
+      return res.status(422).json({
+        error: "NO_BRANCHES",
+        message: "No branches found in uploaded data. Expected format: { CompanyCode: string, Branches: [...] } or array of branches",
+      });
+    }
+
+    // Validate all branches
+    const { validateLocationArray } = await import("../../services/locationValidation.js");
+    const validation = validateLocationArray(branches, source.companyCode);
+
+    if (!validation.valid) {
+      return res.status(422).json({
+        error: "VALIDATION_FAILED",
+        message: `${validation.errors.length} branch(es) failed validation`,
+        errors: validation.errors,
+      });
+    }
+
+    // Upsert branches
+    let imported = 0;
+    let updated = 0;
+
+    for (const branch of branches) {
+      const branchData = {
+        sourceId: source.id,
+        branchCode: branch.Branchcode,
+        name: branch.Name,
+        status: branch.Status || null,
+        locationType: branch.LocationType || null,
+        collectionType: branch.CollectionType || null,
+        email: branch.EmailAddress || null,
+        phone: branch.Telephone?.attr?.PhoneNumber || null,
+        latitude: typeof branch.Latitude === "number" ? branch.Latitude : null,
+        longitude: typeof branch.Longitude === "number" ? branch.Longitude : null,
+        addressLine: branch.Address?.AddressLine?.value || null,
+        city: branch.Address?.CityName?.value || null,
+        postalCode: branch.Address?.PostalCode?.value || null,
+        country: branch.Address?.CountryName?.value || null,
+        countryCode: branch.Address?.CountryName?.attr?.Code || null,
+        natoLocode: branch.NatoLocode || null,
+        rawJson: branch,
+      };
+
+      const existing = await prisma.branch.findUnique({
+        where: {
+          sourceId_branchCode: {
+            sourceId: source.id,
+            branchCode: branch.Branchcode,
+          },
+        },
+      });
+
+      if (existing) {
+        await prisma.branch.update({
+          where: { id: existing.id },
+          data: branchData,
+        });
+        updated++;
+      } else {
+        await prisma.branch.create({
+          data: branchData,
+        });
+        imported++;
+      }
+    }
+
+    res.json({
+      message: "Branches uploaded successfully",
+      imported,
+      updated,
+      total: branches.length,
+    });
   } catch (e) {
     next(e);
   }
