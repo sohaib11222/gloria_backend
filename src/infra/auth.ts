@@ -130,7 +130,7 @@ export function requireAuth() {
     const token = h.startsWith("Bearer ") ? h.slice(7) : null;
     if (!token) return res.status(401).json({ error: "AUTH_ERROR", message: "Missing token" });
     try {
-      const decoded = Auth.verify(token);
+      const decoded = Auth.verify(token) as any;
       req.user = decoded;
       next();
     } catch (e) {

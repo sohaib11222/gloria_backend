@@ -623,3 +623,48 @@
 2026-01-10 12:55:13 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
 2026-01-10 12:55:13 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
 2026-01-10 12:55:13 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 14:00:36 +00:00: E No address added out of total 1 resolved
+2026-01-10 14:00:36 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-10 14:00:36 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 14:00:36 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 14:00:36 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 14:00:36 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 14:00:36 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 14:00:36 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 14:00:36 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 14:00:36 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 14:00:36 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 14:00:36 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 14:00:36 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 14:00:36 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 14:00:36 +00:00: E No address added out of total 1 resolved
+2026-01-10 14:00:36 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-10 14:00:36 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 14:00:36 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 14:00:36 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 14:01:31 +00:00: (node:297872) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-10 14:01:31 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-10 14:01:48 +00:00: ValidationError: The 'X-Forwarded-For' header is set but the Express 'trust proxy' setting is false (default). This could indicate a misconfiguration which would prevent express-rate-limit from accurately identifying users. See https://express-rate-limit.github.io/ERR_ERL_UNEXPECTED_X_FORWARDED_FOR/ for more information.
+2026-01-10 14:01:48 +00:00:     at Object.xForwardedForHeader (file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:157:13)
+2026-01-10 14:01:48 +00:00:     at wrappedValidations.<computed> [as xForwardedForHeader] (file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:369:22)
+2026-01-10 14:01:48 +00:00:     at Object.keyGenerator (file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:630:20)
+2026-01-10 14:01:48 +00:00:     at file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:682:32
+2026-01-10 14:01:48 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 14:01:48 +00:00:     at async file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:663:5 {
+2026-01-10 14:01:48 +00:00:   code: 'ERR_ERL_UNEXPECTED_X_FORWARDED_FOR',
+2026-01-10 14:01:48 +00:00:   help: 'https://express-rate-limit.github.io/ERR_ERL_UNEXPECTED_X_FORWARDED_FOR/'
+2026-01-10 14:01:48 +00:00: }
+2026-01-10 14:17:18 +00:00: (node:300069) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-10 14:17:18 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-10 14:18:57 +00:00: (node:300552) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-10 14:18:57 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-10 14:19:36 +00:00: ValidationError: The 'X-Forwarded-For' header is set but the Express 'trust proxy' setting is false (default). This could indicate a misconfiguration which would prevent express-rate-limit from accurately identifying users. See https://express-rate-limit.github.io/ERR_ERL_UNEXPECTED_X_FORWARDED_FOR/ for more information.
+2026-01-10 14:19:37 +00:00:     at Object.xForwardedForHeader (file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:157:13)
+2026-01-10 14:19:37 +00:00:     at wrappedValidations.<computed> [as xForwardedForHeader] (file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:369:22)
+2026-01-10 14:19:37 +00:00:     at Object.keyGenerator (file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:630:20)
+2026-01-10 14:19:37 +00:00:     at file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:682:32
+2026-01-10 14:19:37 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 14:19:37 +00:00:     at async file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:663:5 {
+2026-01-10 14:19:37 +00:00:   code: 'ERR_ERL_UNEXPECTED_X_FORWARDED_FOR',
+2026-01-10 14:19:37 +00:00:   help: 'https://express-rate-limit.github.io/ERR_ERL_UNEXPECTED_X_FORWARDED_FOR/'
+2026-01-10 14:19:37 +00:00: }

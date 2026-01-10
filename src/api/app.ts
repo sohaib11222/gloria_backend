@@ -57,12 +57,19 @@ export function buildApp() {
   app.use(locationValidationRouter);
   app.use(sourcesRouter);
   app.use(logsRouter);
+  // Mount admin routes with /api prefix to match frontend expectations
+  app.use("/api", adminRouter);
+  app.use("/api", adminGrpcRouter);
+  // Also mount without prefix for backward compatibility
   app.use(adminRouter);
   app.use(adminGrpcRouter);
   // app.use("/admin/grpc", adminGrpcRoutes); // Commented out - import removed
   app.use("/admin/grpc", newAdminGrpcRouter);
+  app.use("/api/admin/grpc", newAdminGrpcRouter);
   app.use("/admin", adminSourcesRouter);
+  app.use("/api/admin", adminSourcesRouter);
   app.use("/admin/test", adminTestRoutes);
+  app.use("/api/admin/test", adminTestRoutes);
   app.use("/ui", uiRoutes);
   app.use("/docs", docsRouter);
 
