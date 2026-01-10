@@ -17,7 +17,12 @@ export function requireCompanyType(...types) {
     return (req, res, next) => {
         const type = req.user?.type;
         if (!type || !types.includes(type)) {
-            return res.status(403).json({ error: "FORBIDDEN", message: "Wrong company type" });
+            return res.status(403).json({
+                error: "FORBIDDEN",
+                message: "Wrong company type",
+                required: types,
+                actual: type || "none"
+            });
         }
         next();
     };

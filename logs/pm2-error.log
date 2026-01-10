@@ -668,3 +668,178 @@
 2026-01-10 14:19:37 +00:00:   code: 'ERR_ERL_UNEXPECTED_X_FORWARDED_FOR',
 2026-01-10 14:19:37 +00:00:   help: 'https://express-rate-limit.github.io/ERR_ERL_UNEXPECTED_X_FORWARDED_FOR/'
 2026-01-10 14:19:37 +00:00: }
+2026-01-10 14:48:39 +00:00: Failed to send draft notification: Error: connect ECONNREFUSED 209.85.202.108:587
+2026-01-10 14:48:39 +00:00:     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16) {
+2026-01-10 14:48:39 +00:00:   errno: -111,
+2026-01-10 14:48:39 +00:00:   code: 'ESOCKET',
+2026-01-10 14:48:39 +00:00:   syscall: 'connect',
+2026-01-10 14:48:39 +00:00:   address: '209.85.202.108',
+2026-01-10 14:48:39 +00:00:   port: 587,
+2026-01-10 14:48:39 +00:00:   command: 'CONN'
+2026-01-10 14:48:39 +00:00: }
+2026-01-10 14:55:13 +00:00: (node:303398) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-10 14:55:13 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-10 14:59:07 +00:00: E No address added out of total 1 resolved
+2026-01-10 14:59:07 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-10 14:59:07 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 14:59:07 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 14:59:07 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 14:59:07 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 14:59:07 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 14:59:07 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 14:59:07 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 14:59:07 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 14:59:07 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 14:59:07 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 14:59:07 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 14:59:07 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 14:59:07 +00:00: E No address added out of total 1 resolved
+2026-01-10 14:59:07 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-10 14:59:07 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 14:59:07 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 14:59:07 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 15:00:54 +00:00: E No address added out of total 1 resolved
+2026-01-10 15:00:54 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-10 15:00:54 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 15:00:54 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 15:00:54 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 15:00:54 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 15:00:54 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 15:00:54 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 15:00:54 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 15:00:54 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 15:00:54 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 15:00:54 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 15:00:54 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 15:00:54 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 15:00:54 +00:00: E No address added out of total 1 resolved
+2026-01-10 15:00:54 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-10 15:00:54 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 15:00:54 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 15:00:54 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 15:01:41 +00:00: E No address added out of total 1 resolved
+2026-01-10 15:01:41 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-10 15:01:41 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 15:01:41 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 15:01:41 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 15:01:41 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 15:01:41 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 15:01:41 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 15:01:41 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 15:01:41 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 15:01:41 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 15:01:41 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 15:01:41 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 15:01:41 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 15:01:41 +00:00: E No address added out of total 1 resolved
+2026-01-10 15:01:41 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-10 15:01:41 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 15:01:41 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 15:01:41 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 15:31:52 +00:00: E No address added out of total 1 resolved
+2026-01-10 15:31:52 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-10 15:31:52 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 15:31:52 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 15:31:52 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 15:31:52 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 15:31:52 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 15:31:52 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 15:31:52 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 15:31:52 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 15:31:52 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 15:31:52 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 15:31:52 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 15:31:52 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 15:31:52 +00:00: E No address added out of total 1 resolved
+2026-01-10 15:31:52 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-10 15:31:52 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 15:31:52 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 15:31:52 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 16:02:05 +00:00: E No address added out of total 1 resolved
+2026-01-10 16:02:05 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-10 16:02:05 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 16:02:05 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 16:02:05 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 16:02:05 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 16:02:05 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 16:02:05 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 16:02:05 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 16:02:05 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 16:02:05 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 16:02:05 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 16:02:05 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 16:02:05 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 16:02:05 +00:00: E No address added out of total 1 resolved
+2026-01-10 16:02:05 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-10 16:02:05 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 16:02:05 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 16:02:05 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 16:32:17 +00:00: E No address added out of total 1 resolved
+2026-01-10 16:32:18 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-10 16:32:18 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 16:32:18 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 16:32:18 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 16:32:18 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 16:32:18 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 16:32:18 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 16:32:18 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 16:32:18 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 16:32:18 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 16:32:18 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 16:32:18 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 16:32:18 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 16:32:18 +00:00: E No address added out of total 1 resolved
+2026-01-10 16:32:18 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-10 16:32:18 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 16:32:18 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 16:32:18 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 17:02:32 +00:00: E No address added out of total 1 resolved
+2026-01-10 17:02:32 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-10 17:02:32 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 17:02:32 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 17:02:32 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 17:02:32 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 17:02:32 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 17:02:32 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 17:02:32 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 17:02:32 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 17:02:32 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 17:02:32 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 17:02:32 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 17:02:32 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 17:02:32 +00:00: E No address added out of total 1 resolved
+2026-01-10 17:02:32 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-10 17:02:32 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 17:02:32 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 17:02:32 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 17:03:03 +00:00: E No address added out of total 1 resolved
+2026-01-10 17:03:03 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-10 17:03:03 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 17:03:03 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 17:03:03 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 17:03:03 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 17:03:03 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 17:03:03 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 17:03:03 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 17:03:03 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 17:03:03 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 17:03:03 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 17:03:03 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 17:03:03 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 17:03:03 +00:00: E No address added out of total 1 resolved
+2026-01-10 17:03:03 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-10 17:03:03 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 17:03:03 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 17:03:03 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 17:09:16 +00:00: (node:314156) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-10 17:09:16 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-10 17:17:12 +00:00: ValidationError: The 'X-Forwarded-For' header is set but the Express 'trust proxy' setting is false (default). This could indicate a misconfiguration which would prevent express-rate-limit from accurately identifying users. See https://express-rate-limit.github.io/ERR_ERL_UNEXPECTED_X_FORWARDED_FOR/ for more information.
+2026-01-10 17:17:12 +00:00:     at Object.xForwardedForHeader (file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:157:13)
+2026-01-10 17:17:12 +00:00:     at wrappedValidations.<computed> [as xForwardedForHeader] (file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:369:22)
+2026-01-10 17:17:12 +00:00:     at Object.keyGenerator (file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:630:20)
+2026-01-10 17:17:12 +00:00:     at file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:682:32
+2026-01-10 17:17:12 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 17:17:12 +00:00:     at async file:///var/www/gloriaconnect/backend/node_modules/express-rate-limit/dist/index.mjs:663:5 {
+2026-01-10 17:17:12 +00:00:   code: 'ERR_ERL_UNEXPECTED_X_FORWARDED_FOR',
+2026-01-10 17:17:12 +00:00:   help: 'https://express-rate-limit.github.io/ERR_ERL_UNEXPECTED_X_FORWARDED_FOR/'
+2026-01-10 17:17:12 +00:00: }

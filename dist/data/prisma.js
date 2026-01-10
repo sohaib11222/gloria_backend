@@ -16,8 +16,13 @@ if (!databaseUrl) {
         process.exit(1);
     }
 }
-// Create Prisma client
+// Create Prisma client with explicit DATABASE_URL
 export const prisma = new PrismaClient({
+    datasources: {
+        db: {
+            url: databaseUrl || process.env.DATABASE_URL || '',
+        },
+    },
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
 });
 // Handle Prisma connection lifecycle

@@ -39,11 +39,15 @@ export function buildApp() {
     // app.use(ipWhitelist());
     app.use(defaultLimiter);
     app.use(healthRouter);
-    app.use(authRouter);
+    // Mount auth router with /api prefix to match frontend expectations
+    app.use("/api", authRouter);
+    app.use(authRouter); // Also mount without prefix for backward compatibility
     // Apply OTA mapper to availability and bookings routes
     app.use('/availability', otaMapper, availabilityRouter);
     app.use('/bookings', otaMapper, bookingsRouter);
-    app.use(agreementsRouter);
+    // Mount agreements router with /api prefix to match frontend expectations
+    app.use("/api", agreementsRouter);
+    app.use(agreementsRouter); // Also mount without prefix for backward compatibility
     app.use(locationsRouter);
     app.use(verificationRouter);
     app.use(endpointsRouter);
