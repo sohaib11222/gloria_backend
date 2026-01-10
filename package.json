@@ -9,7 +9,7 @@
     "dev:agent": "cd ../gloriaconnect_test_backend/agent-backend && npm run dev",
     "dev:source": "cd ../gloriaconnect_test_backend/source-backend && npm run dev",
     "dev:all": "concurrently -n MW,AGENT,SOURCE -c green,cyan,magenta \"npm run dev:mw\" \"npm run dev:agent\" \"npm run dev:source\"",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/fix-imports.cjs",
     "start": "node dist/index.js",
     "prisma:gen": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

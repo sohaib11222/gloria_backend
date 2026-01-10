@@ -1,0 +1,625 @@
+2026-01-10 12:51:18 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:18 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:18 +00:00:           ^
+2026-01-10 12:51:18 +00:00: 
+2026-01-10 12:51:18 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:18 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:18 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:18 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:18 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:18 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:18 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:18 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:18 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:18 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:18 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:18 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:18 +00:00: }
+2026-01-10 12:51:19 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:19 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:19 +00:00:           ^
+2026-01-10 12:51:19 +00:00: 
+2026-01-10 12:51:19 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:19 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:19 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:19 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:19 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:19 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:19 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:19 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:19 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:19 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:19 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:19 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:19 +00:00: }
+2026-01-10 12:51:19 +00:00: 
+2026-01-10 12:51:19 +00:00: Node.js v24.4.1
+2026-01-10 12:51:19 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:19 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:19 +00:00:           ^
+2026-01-10 12:51:19 +00:00: 
+2026-01-10 12:51:19 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:19 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:19 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:19 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:19 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:19 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:19 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:19 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:19 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:19 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:19 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:19 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:19 +00:00: }
+2026-01-10 12:51:19 +00:00: 
+2026-01-10 12:51:19 +00:00: Node.js v24.4.1
+2026-01-10 12:51:20 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:20 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:20 +00:00:           ^
+2026-01-10 12:51:20 +00:00: 
+2026-01-10 12:51:20 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:20 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:20 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:20 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:20 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:20 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:20 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:20 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:20 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:20 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:20 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:20 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:20 +00:00: }
+2026-01-10 12:51:20 +00:00: 
+2026-01-10 12:51:20 +00:00: Node.js v24.4.1
+2026-01-10 12:51:20 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:20 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:20 +00:00:           ^
+2026-01-10 12:51:20 +00:00: 
+2026-01-10 12:51:20 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:20 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:20 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:20 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:20 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:20 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:20 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:20 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:20 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:20 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:20 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:20 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:20 +00:00: }
+2026-01-10 12:51:20 +00:00: 
+2026-01-10 12:51:20 +00:00: Node.js v24.4.1
+2026-01-10 12:51:21 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:21 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:21 +00:00:           ^
+2026-01-10 12:51:21 +00:00: 
+2026-01-10 12:51:21 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:21 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:21 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:21 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:21 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:21 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:21 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:21 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:21 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:21 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:21 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:21 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:21 +00:00: }
+2026-01-10 12:51:21 +00:00: 
+2026-01-10 12:51:21 +00:00: Node.js v24.4.1
+2026-01-10 12:51:21 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:21 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:21 +00:00:           ^
+2026-01-10 12:51:21 +00:00: 
+2026-01-10 12:51:21 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:21 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:21 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:21 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:21 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:21 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:21 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:21 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:21 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:21 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:21 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:21 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:21 +00:00: }
+2026-01-10 12:51:21 +00:00: 
+2026-01-10 12:51:21 +00:00: Node.js v24.4.1
+2026-01-10 12:51:22 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:22 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:22 +00:00:           ^
+2026-01-10 12:51:22 +00:00: 
+2026-01-10 12:51:22 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:22 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:22 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:22 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:22 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:22 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:22 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:22 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:22 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:22 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:22 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:22 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:22 +00:00: }
+2026-01-10 12:51:22 +00:00: 
+2026-01-10 12:51:22 +00:00: Node.js v24.4.1
+2026-01-10 12:51:22 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:22 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:22 +00:00:           ^
+2026-01-10 12:51:22 +00:00: 
+2026-01-10 12:51:22 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:22 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:22 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:22 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:22 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:22 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:22 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:22 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:22 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:22 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:22 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:22 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:22 +00:00: }
+2026-01-10 12:51:22 +00:00: 
+2026-01-10 12:51:22 +00:00: Node.js v24.4.1
+2026-01-10 12:51:23 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:23 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:23 +00:00:           ^
+2026-01-10 12:51:23 +00:00: 
+2026-01-10 12:51:23 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:23 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:23 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:23 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:23 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:23 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:23 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:23 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:23 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:23 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:23 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:23 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:23 +00:00: }
+2026-01-10 12:51:23 +00:00: 
+2026-01-10 12:51:23 +00:00: Node.js v24.4.1
+2026-01-10 12:51:24 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:24 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:24 +00:00:           ^
+2026-01-10 12:51:24 +00:00: 
+2026-01-10 12:51:24 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:24 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:24 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:24 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:24 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:24 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:24 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:24 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:24 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:24 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:24 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:24 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:24 +00:00: }
+2026-01-10 12:51:24 +00:00: 
+2026-01-10 12:51:24 +00:00: Node.js v24.4.1
+2026-01-10 12:51:24 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:24 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:24 +00:00:           ^
+2026-01-10 12:51:24 +00:00: 
+2026-01-10 12:51:24 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:24 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:24 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:24 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:24 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:24 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:24 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:24 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:24 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:24 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:24 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:24 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:24 +00:00: }
+2026-01-10 12:51:24 +00:00: 
+2026-01-10 12:51:24 +00:00: Node.js v24.4.1
+2026-01-10 12:51:24 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:24 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:24 +00:00:           ^
+2026-01-10 12:51:24 +00:00: 
+2026-01-10 12:51:24 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:24 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:24 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:24 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:24 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:24 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:24 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:24 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:24 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:24 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:24 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:24 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:24 +00:00: }
+2026-01-10 12:51:24 +00:00: 
+2026-01-10 12:51:24 +00:00: Node.js v24.4.1
+2026-01-10 12:51:25 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:25 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:25 +00:00:           ^
+2026-01-10 12:51:25 +00:00: 
+2026-01-10 12:51:25 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:25 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:25 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:25 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:25 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:25 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:25 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:25 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:25 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:25 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:25 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:25 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:25 +00:00: }
+2026-01-10 12:51:25 +00:00: 
+2026-01-10 12:51:25 +00:00: Node.js v24.4.1
+2026-01-10 12:51:25 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:25 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:25 +00:00:           ^
+2026-01-10 12:51:25 +00:00: 
+2026-01-10 12:51:25 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:25 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:25 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:25 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:25 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:25 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:25 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:25 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:25 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:25 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:25 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:25 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:25 +00:00: }
+2026-01-10 12:51:25 +00:00: 
+2026-01-10 12:51:25 +00:00: Node.js v24.4.1
+2026-01-10 12:51:26 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:26 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:26 +00:00:           ^
+2026-01-10 12:51:26 +00:00: 
+2026-01-10 12:51:26 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:26 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:26 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:26 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:26 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:26 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:26 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:26 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:26 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:26 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:26 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:26 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:26 +00:00: }
+2026-01-10 12:51:26 +00:00: 
+2026-01-10 12:51:26 +00:00: Node.js v24.4.1
+2026-01-10 12:51:58 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:58 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:58 +00:00:           ^
+2026-01-10 12:51:58 +00:00: 
+2026-01-10 12:51:58 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:58 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:58 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:58 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:58 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:58 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:58 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:58 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:58 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:58 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:58 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:58 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:58 +00:00: }
+2026-01-10 12:51:58 +00:00: 
+2026-01-10 12:51:58 +00:00: Node.js v24.4.1
+2026-01-10 12:51:59 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:59 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:59 +00:00:           ^
+2026-01-10 12:51:59 +00:00: 
+2026-01-10 12:51:59 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:59 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:59 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:59 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:59 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:59 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:59 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:59 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:59 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:59 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:59 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:59 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:59 +00:00: }
+2026-01-10 12:51:59 +00:00: 
+2026-01-10 12:51:59 +00:00: Node.js v24.4.1
+2026-01-10 12:51:59 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:51:59 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:51:59 +00:00:           ^
+2026-01-10 12:51:59 +00:00: 
+2026-01-10 12:51:59 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:51:59 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:51:59 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:51:59 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:51:59 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:51:59 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:51:59 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:51:59 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:51:59 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:51:59 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:51:59 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:51:59 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:51:59 +00:00: }
+2026-01-10 12:51:59 +00:00: 
+2026-01-10 12:51:59 +00:00: Node.js v24.4.1
+2026-01-10 12:52:00 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:00 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:00 +00:00:           ^
+2026-01-10 12:52:00 +00:00: 
+2026-01-10 12:52:00 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:00 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:00 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:00 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:00 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:00 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:00 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:00 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:00 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:00 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:00 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:00 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:00 +00:00: }
+2026-01-10 12:52:00 +00:00: 
+2026-01-10 12:52:00 +00:00: Node.js v24.4.1
+2026-01-10 12:52:00 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:00 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:00 +00:00:           ^
+2026-01-10 12:52:00 +00:00: 
+2026-01-10 12:52:00 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:00 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:00 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:00 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:00 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:00 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:00 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:00 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:00 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:00 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:00 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:00 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:00 +00:00: }
+2026-01-10 12:52:00 +00:00: 
+2026-01-10 12:52:00 +00:00: Node.js v24.4.1
+2026-01-10 12:52:01 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:01 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:01 +00:00:           ^
+2026-01-10 12:52:01 +00:00: 
+2026-01-10 12:52:01 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:01 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:01 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:01 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:01 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:01 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:01 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:01 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:01 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:01 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:01 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:01 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:01 +00:00: }
+2026-01-10 12:52:01 +00:00: 
+2026-01-10 12:52:01 +00:00: Node.js v24.4.1
+2026-01-10 12:52:01 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:01 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:01 +00:00:           ^
+2026-01-10 12:52:01 +00:00: 
+2026-01-10 12:52:01 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:01 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:01 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:01 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:01 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:01 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:01 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:01 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:01 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:01 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:01 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:01 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:01 +00:00: }
+2026-01-10 12:52:01 +00:00: 
+2026-01-10 12:52:01 +00:00: Node.js v24.4.1
+2026-01-10 12:52:02 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:02 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:02 +00:00:           ^
+2026-01-10 12:52:02 +00:00: 
+2026-01-10 12:52:02 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:02 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:02 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:02 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:02 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:02 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:02 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:02 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:02 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:02 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:02 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:02 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:02 +00:00: }
+2026-01-10 12:52:02 +00:00: 
+2026-01-10 12:52:02 +00:00: Node.js v24.4.1
+2026-01-10 12:52:02 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:02 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:02 +00:00:           ^
+2026-01-10 12:52:02 +00:00: 
+2026-01-10 12:52:02 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:02 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:02 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:02 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:02 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:02 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:02 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:02 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:02 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:02 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:02 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:02 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:02 +00:00: }
+2026-01-10 12:52:02 +00:00: 
+2026-01-10 12:52:02 +00:00: Node.js v24.4.1
+2026-01-10 12:52:03 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:03 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:03 +00:00:           ^
+2026-01-10 12:52:03 +00:00: 
+2026-01-10 12:52:03 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:03 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:03 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:03 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:03 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:03 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:03 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:03 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:03 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:03 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:03 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:03 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:03 +00:00: }
+2026-01-10 12:52:03 +00:00: 
+2026-01-10 12:52:03 +00:00: Node.js v24.4.1
+2026-01-10 12:52:04 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:04 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:04 +00:00:           ^
+2026-01-10 12:52:04 +00:00: 
+2026-01-10 12:52:04 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:04 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:04 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:04 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:04 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:04 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:04 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:04 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:04 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:04 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:04 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:04 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:04 +00:00: }
+2026-01-10 12:52:04 +00:00: 
+2026-01-10 12:52:04 +00:00: Node.js v24.4.1
+2026-01-10 12:52:04 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:04 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:04 +00:00:           ^
+2026-01-10 12:52:04 +00:00: 
+2026-01-10 12:52:04 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:04 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:04 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:04 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:04 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:04 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:04 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:04 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:04 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:04 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:04 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:04 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:04 +00:00: }
+2026-01-10 12:52:04 +00:00: 
+2026-01-10 12:52:04 +00:00: Node.js v24.4.1
+2026-01-10 12:52:05 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:05 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:05 +00:00:           ^
+2026-01-10 12:52:05 +00:00: 
+2026-01-10 12:52:05 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:05 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:05 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:05 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:05 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:05 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:05 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:05 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:05 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:05 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:05 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:05 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:05 +00:00: }
+2026-01-10 12:52:05 +00:00: 
+2026-01-10 12:52:05 +00:00: Node.js v24.4.1
+2026-01-10 12:52:06 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:06 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:06 +00:00:           ^
+2026-01-10 12:52:06 +00:00: 
+2026-01-10 12:52:06 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:06 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:06 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:06 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:06 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:06 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:06 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:06 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:06 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:06 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:06 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:06 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:06 +00:00: }
+2026-01-10 12:52:06 +00:00: 
+2026-01-10 12:52:06 +00:00: Node.js v24.4.1
+2026-01-10 12:52:06 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:06 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:06 +00:00:           ^
+2026-01-10 12:52:06 +00:00: 
+2026-01-10 12:52:06 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:06 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:06 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:06 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:06 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:06 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:06 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:06 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:06 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:06 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:06 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:06 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:06 +00:00: }
+2026-01-10 12:52:06 +00:00: 
+2026-01-10 12:52:06 +00:00: Node.js v24.4.1
+2026-01-10 12:52:07 +00:00: node:internal/modules/esm/resolve:274
+2026-01-10 12:52:07 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-10 12:52:07 +00:00:           ^
+2026-01-10 12:52:07 +00:00: 
+2026-01-10 12:52:07 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-10 12:52:07 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-10 12:52:07 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-10 12:52:07 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-10 12:52:07 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-10 12:52:07 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-10 12:52:07 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-10 12:52:07 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-10 12:52:07 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-10 12:52:07 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-10 12:52:07 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-10 12:52:07 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-10 12:52:07 +00:00: }
+2026-01-10 12:52:07 +00:00: 
+2026-01-10 12:52:07 +00:00: Node.js v24.4.1
+2026-01-10 12:55:13 +00:00: E No address added out of total 1 resolved
+2026-01-10 12:55:13 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-10 12:55:13 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 12:55:13 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 12:55:13 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 12:55:13 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 12:55:13 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 12:55:13 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 12:55:13 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-10 12:55:13 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 12:55:13 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 12:55:13 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-10 12:55:13 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-10 12:55:13 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-10 12:55:13 +00:00: E No address added out of total 1 resolved
+2026-01-10 12:55:13 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-10 12:55:13 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-10 12:55:13 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-10 12:55:13 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
