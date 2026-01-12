@@ -30,9 +30,39 @@ import { register } from "../services/metrics.js";
 import { otaMapper } from "./middleware/otaMapper.js";
 export function buildApp() {
     const app = express();
+    // CORS - MUST BE FIRST to allow all origins and methods
+    app.use(cors({
+        origin: '*',
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+        credentials: false,
+        preflightContinue: false,
+        optionsSuccessStatus: 204
+    }));
+    // Handle OPTIONS preflight for all routes
+    app.options('*', (req, res) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+        res.setHeader('Access-Control-Allow-Credentials', 'false');
+        res.sendStatus(204);
+    });
+    // Global CORS headers middleware - applied to all requests
+    app.use((req, res, next) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+        res.setHeader('Access-Control-Allow-Credentials', 'false');
+        res.setHeader('Access-Control-Expose-Headers', '*');
+        next();
+    });
     app.use(express.json({ limit: "2mb" }));
-    app.use(helmet());
-    app.use(cors());
+    // Helmet with relaxed CSP for development - AFTER CORS
+    app.use(helmet({
+        crossOriginResourcePolicy: { policy: "cross-origin" },
+        crossOriginEmbedderPolicy: false,
+        contentSecurityPolicy: false, // Disable CSP to avoid CORS-like restrictions
+    }));
     app.use(requestId());
     app.use(pinoHttp({ logger }));
     // [AUTO-AUDIT] Enforce IP whitelist globally (can be disabled via env)

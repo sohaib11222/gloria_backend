@@ -19,6 +19,7 @@ import { adminGrpcRouter } from "./routes/adminGrpc.routes.js";
 import { endpointsRouter } from "./routes/endpoints.routes.js";
 import { locationValidationRouter } from "./routes/locationValidation.routes.js";
 import { sourcesRouter } from "./routes/sources.routes.js";
+import { supportRouter } from "./routes/support.routes.js";
 import adminTestRoutes from "./routes/adminTest.routes.js";
 import uiRoutes from "./routes/ui.routes.js";
 // import adminGrpcRoutes from "../routes/adminGrpc.js"; // Commented out - file not found
@@ -32,9 +33,45 @@ import { ipWhitelist } from "../infra/ipWhitelist.js"; // [AUTO-AUDIT]
 
 export function buildApp() {
   const app = express();
+  
+  // CORS - MUST BE FIRST to allow all origins and methods
+  app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    credentials: false,
+    preflightContinue: false,
+    optionsSuccessStatus: 204
+  }));
+  
+  // Handle OPTIONS preflight for all routes
+  app.options('*', (req: any, res: any) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
+    res.sendStatus(204);
+  });
+
+  // Global CORS headers middleware - applied to all requests
+  app.use((req: any, res: any, next: any) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
+    res.setHeader('Access-Control-Expose-Headers', '*');
+    next();
+  });
+
   app.use(express.json({ limit: "2mb" }));
-  app.use(helmet());
-  app.use(cors());
+  
+  // Helmet with relaxed CSP for development - AFTER CORS
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: false, // Disable CSP to avoid CORS-like restrictions
+  }));
+  
   app.use(requestId());
   app.use(pinoHttp({ logger } as any));
 
@@ -60,6 +97,9 @@ export function buildApp() {
   app.use(endpointsRouter);
   app.use(locationValidationRouter);
   app.use(sourcesRouter);
+  app.use(supportRouter);
+  // Mount support router with /api prefix to match frontend expectations
+  app.use("/api", supportRouter);
   app.use(logsRouter);
   // Mount admin routes with /api prefix to match frontend expectations
   app.use("/api", adminRouter);

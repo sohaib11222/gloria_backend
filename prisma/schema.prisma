@@ -100,6 +100,7 @@ model Company {
   branches         Branch[]
   echoJobs         EchoJob[]
   locationRequests LocationRequest[]
+  createdTickets   SupportTicket[]   @relation("CreatedTickets")
 }
 
 model User {
@@ -428,4 +429,48 @@ model SmtpConfig {
   updatedBy String? // User ID of admin who last updated
 
   @@unique([id])
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum MessageSenderType {
+  ADMIN
+  AGENT
+  SOURCE
+}
+
+model SupportTicket {
+  id          String              @id @default(cuid())
+  title       String
+  status      SupportTicketStatus @default(OPEN)
+  createdById String              // Company ID of creator (Agent or Source)
+  createdBy   Company             @relation("CreatedTickets", fields: [createdById], references: [id], onDelete: Cascade)
+  assignedTo  String?             // Admin user ID (optional)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  messages    SupportMessage[]
+
+  @@index([createdById, createdAt])
+  @@index([status, createdAt])
+  @@index([assignedTo])
+}
+
+model SupportMessage {
+  id          String            @id @default(cuid())
+  ticketId    String
+  ticket      SupportTicket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderId    String            // Company ID or Admin user ID
+  senderType  MessageSenderType
+  content     String?           @db.Text
+  imageUrl    String?           @db.Text // Base64 encoded image data URL
+  readAt      DateTime?
+  createdAt   DateTime          @default(now())
+
+  @@index([ticketId, createdAt])
+  @@index([senderId, createdAt])
 }

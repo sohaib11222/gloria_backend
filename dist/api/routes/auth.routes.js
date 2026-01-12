@@ -292,6 +292,10 @@ authRouter.post("/auth/login", async (req, res, next) => {
                 message: e.message || "An unexpected error occurred"
             });
         }
+        else {
+            // If headers already sent, pass to error handler
+            next(e);
+        }
     }
 });
 /**
