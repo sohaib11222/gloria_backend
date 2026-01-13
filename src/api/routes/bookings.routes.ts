@@ -97,7 +97,27 @@ async function getValidBookingData(agentId: string) {
 const createSchema = z.object({
   agreement_ref: z.string(),
   supplier_offer_ref: z.string().optional(),
-  agent_booking_ref: z.string().optional()
+  agent_booking_ref: z.string().optional(),
+  
+  // Availability context (optional - if provided, will retrieve context from availability search)
+  availability_request_id: z.string().optional(),
+  
+  // Location details (from availability search) - OTA: PickupLocation, DropOffLocation
+  pickup_unlocode: z.string().optional(),     // PickupLocation (UN/LOCODE)
+  dropoff_unlocode: z.string().optional(),    // DropOffLocation (UN/LOCODE)
+  pickup_iso: z.string().optional(),          // PickupDateTime (ISO-8601)
+  dropoff_iso: z.string().optional(),         // DropOffDateTime (ISO-8601)
+  
+  // Vehicle and driver details (from availability search/offer)
+  vehicle_class: z.string().optional(),       // VehicleClass (OTA codes: ECMN, CDMR, etc.)
+  vehicle_make_model: z.string().optional(),  // VehicleMakeModel
+  rate_plan_code: z.string().optional(),      // RatePlanCode (BAR, MEMBER, PREPAY, etc.)
+  driver_age: z.number().int().min(18).optional(), // DriverAge
+  residency_country: z.string().length(2).optional(), // ResidencyCountry (ISO 3166-1 alpha-2)
+  
+  // Customer and payment information (JSON objects)
+  customer_info: z.record(z.any()).optional(), // Customer name, contact details, etc.
+  payment_info: z.record(z.any()).optional(),  // Payment details, card info, etc.
 });
 
 /**
@@ -258,18 +278,137 @@ bookingsRouter.post("/", requireAuth(), async (req: any, res, next) => {
       }
     };
     
+    // If availability_request_id is provided, retrieve the original search criteria
+    let availabilityContext: any = null;
+    if (body.availability_request_id) {
+      try {
+        const availabilityJob = await prisma.availabilityJob.findUnique({
+          where: { id: body.availability_request_id },
+          select: { 
+            criteriaJson: true, 
+            agentId: true 
+          },
+        });
+        
+        if (availabilityJob && availabilityJob.agentId === req.user.companyId) {
+          availabilityContext = availabilityJob.criteriaJson as any;
+        } else if (availabilityJob && availabilityJob.agentId !== req.user.companyId) {
+          return res.status(403).json({ 
+            error: "FORBIDDEN", 
+            message: "Availability request does not belong to this agent" 
+          });
+        }
+      } catch (e) {
+        // If lookup fails, continue without context
+        console.error('Failed to retrieve availability context:', e);
+      }
+    }
+    
+    // Build full booking payload with all OTA fields
+    // Merge availability context with explicit booking fields (explicit fields take precedence)
+    const bookingPayload: any = {
+      agent_id: req.user.companyId,
+      source_id: agreementRow.sourceId,
+      agreement_ref: body.agreement_ref,
+      supplier_offer_ref: body.supplier_offer_ref || "",
+      idempotency_key: String(idempotencyKey),
+      agent_booking_ref: body.agent_booking_ref || "",
+      // Append trace fields for the adapter/supplier
+      middleware_request_id: requestId,
+      agent_company_id: req.user.companyId,
+    };
+    
+    // Add availability context if provided
+    if (body.availability_request_id) {
+      bookingPayload.availability_request_id = body.availability_request_id;
+    }
+    
+    // Merge availability context with explicit fields (explicit takes precedence)
+    if (availabilityContext) {
+      // Extract location details from availability search
+      if (!bookingPayload.pickup_unlocode && availabilityContext.pickup_unlocode) {
+        bookingPayload.pickup_unlocode = availabilityContext.pickup_unlocode;
+      }
+      if (!bookingPayload.dropoff_unlocode && availabilityContext.dropoff_unlocode) {
+        bookingPayload.dropoff_unlocode = availabilityContext.dropoff_unlocode;
+      }
+      if (!bookingPayload.pickup_iso && availabilityContext.pickup_iso) {
+        bookingPayload.pickup_iso = availabilityContext.pickup_iso;
+      }
+      if (!bookingPayload.dropoff_iso && availabilityContext.dropoff_iso) {
+        bookingPayload.dropoff_iso = availabilityContext.dropoff_iso;
+      }
+      if (!bookingPayload.driver_age && availabilityContext.driver_age) {
+        bookingPayload.driver_age = availabilityContext.driver_age;
+      }
+      if (!bookingPayload.residency_country && availabilityContext.residency_country) {
+        bookingPayload.residency_country = availabilityContext.residency_country;
+      }
+    }
+    
+    // If supplier_offer_ref is provided and we have availability context,
+    // try to extract vehicle details from the selected offer
+    if (body.supplier_offer_ref && body.availability_request_id) {
+      try {
+        // Find the offer in availability results
+        const availabilityResults = await prisma.availabilityResult.findMany({
+          where: {
+            jobId: body.availability_request_id,
+          },
+          select: {
+            offerJson: true,
+            sourceId: true,
+          },
+        });
+        
+        // Find the matching offer by supplier_offer_ref
+        for (const result of availabilityResults) {
+          const offer = result.offerJson as any;
+          if (offer && 
+              (offer.supplier_offer_ref === body.supplier_offer_ref || 
+               offer.SupplierOfferRef === body.supplier_offer_ref)) {
+            // Extract vehicle details from the offer
+            if (!bookingPayload.vehicle_class && (offer.vehicle_class || offer.VehicleClass)) {
+              bookingPayload.vehicle_class = offer.vehicle_class || offer.VehicleClass;
+            }
+            if (!bookingPayload.vehicle_make_model && (offer.vehicle_make_model || offer.VehicleMakeModel)) {
+              bookingPayload.vehicle_make_model = offer.vehicle_make_model || offer.VehicleMakeModel;
+            }
+            if (!bookingPayload.rate_plan_code && (offer.rate_plan_code || offer.RatePlanCode)) {
+              bookingPayload.rate_plan_code = offer.rate_plan_code || offer.RatePlanCode;
+            }
+            break; // Found the matching offer, no need to continue
+          }
+        }
+      } catch (e) {
+        // If lookup fails, continue without offer details
+        console.error('Failed to retrieve offer details from availability results:', e);
+      }
+    }
+    
+    // Add location details if provided
+    if (body.pickup_unlocode) bookingPayload.pickup_unlocode = body.pickup_unlocode;
+    if (body.dropoff_unlocode) bookingPayload.dropoff_unlocode = body.dropoff_unlocode;
+    if (body.pickup_iso) bookingPayload.pickup_iso = body.pickup_iso;
+    if (body.dropoff_iso) bookingPayload.dropoff_iso = body.dropoff_iso;
+    
+    // Add vehicle and driver details if provided
+    if (body.vehicle_class) bookingPayload.vehicle_class = body.vehicle_class;
+    if (body.vehicle_make_model) bookingPayload.vehicle_make_model = body.vehicle_make_model;
+    if (body.rate_plan_code) bookingPayload.rate_plan_code = body.rate_plan_code;
+    if (body.driver_age !== undefined) bookingPayload.driver_age = body.driver_age;
+    if (body.residency_country) bookingPayload.residency_country = body.residency_country;
+    
+    // Add customer and payment info if provided (convert to JSON strings for proto)
+    if (body.customer_info) {
+      bookingPayload.customer_info_json = JSON.stringify(body.customer_info);
+    }
+    if (body.payment_info) {
+      bookingPayload.payment_info_json = JSON.stringify(body.payment_info);
+    }
+    
     client.Create(
-      {
-        agent_id: req.user.companyId,
-        source_id: agreementRow.sourceId,
-        agreement_ref: body.agreement_ref,
-        supplier_offer_ref: body.supplier_offer_ref || "",
-        idempotency_key: String(idempotencyKey),
-        agent_booking_ref: body.agent_booking_ref || "",
-        // Append trace fields for the adapter/supplier
-        middleware_request_id: requestId,
-        agent_company_id: req.user.companyId,
-      },
+      bookingPayload,
       metaFromReq(req),
       customErrorHandler
     );

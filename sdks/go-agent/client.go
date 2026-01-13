@@ -2,69 +2,52 @@ package sdk
 
 import (
 	"context"
-	"net/http"
 )
-
-// Config holds SDK configuration
-type Config struct {
-	// REST Configuration
-	BaseURL string
-	Token   string
-	APIKey  string
-	
-	// gRPC Configuration
-	Host       string
-	CACert     string
-	ClientCert string
-	ClientKey  string
-	
-	// Common
-	AgentID           string
-	CallTimeoutMs     int
-	AvailabilitySlaMs int
-	LongPollWaitMs    int
-	CorrelationID     string
-}
 
 // Client is the main SDK client
 type Client struct {
-	config     Config
-	httpClient *http.Client
-	transport  Transport
+	config    *Config
+	transport Transport
 }
 
-// NewClient creates a new SDK client with REST transport
-func NewClient(config Config) *Client {
+// NewClient creates a new SDK client
+func NewClient(config *Config) *Client {
+	var transport Transport
+	if config.IsGrpc() {
+		transport = NewGrpcTransport(config)
+	} else {
+		transport = NewRestTransport(config)
+	}
+
 	return &Client{
-		config:     config,
-		httpClient: &http.Client{},
-		transport:  NewRestTransport(config),
+		config:    config,
+		transport: transport,
 	}
 }
 
 // Availability returns the availability client
 func (c *Client) Availability() *AvailabilityClient {
-	return NewAvailabilityClient(c.transport)
+	return NewAvailabilityClient(c.transport, c.config)
 }
 
 // Booking returns the booking client
 func (c *Client) Booking() *BookingClient {
-	return NewBookingClient(c.transport)
+	return NewBookingClient(c.transport, c.config)
 }
 
 // Locations returns the locations client
 func (c *Client) Locations() *LocationsClient {
-	return NewLocationsClient(c.transport)
+	return NewLocationsClient(c.transport, c.config)
 }
 
 // Transport interface for REST and gRPC
 type Transport interface {
-	SubmitAvailability(ctx context.Context, criteria AvailabilityCriteria) (string, error)
-	PollAvailability(ctx context.Context, requestID string, sinceSeq int, waitMs int) (*AvailabilityChunk, error)
-	CreateBooking(ctx context.Context, booking BookingCreate, idempotencyKey string) (*BookingResult, error)
-	ModifyBooking(ctx context.Context, bookingRef string, agreementRef string, idempotencyKey string) (*BookingResult, error)
-	CancelBooking(ctx context.Context, bookingRef string, agreementRef string, idempotencyKey string) (*BookingResult, error)
-	CheckBooking(ctx context.Context, bookingRef string, agreementRef string) (*BookingResult, error)
-	GetLocations(ctx context.Context) ([]Location, error)
+	AvailabilitySubmit(ctx context.Context, criteria map[string]interface{}) (map[string]interface{}, error)
+	AvailabilityPoll(ctx context.Context, requestID string, sinceSeq int, waitMs int) (map[string]interface{}, error)
+	IsLocationSupported(ctx context.Context, agreementRef, locode string) (bool, error)
+	BookingCreate(ctx context.Context, payload map[string]interface{}, idempotencyKey string) (map[string]interface{}, error)
+	BookingModify(ctx context.Context, payload map[string]interface{}) (map[string]interface{}, error)
+	BookingCancel(ctx context.Context, payload map[string]interface{}) (map[string]interface{}, error)
+	BookingCheck(ctx context.Context, supplierBookingRef, agreementRef, sourceID string) (map[string]interface{}, error)
 }
 
