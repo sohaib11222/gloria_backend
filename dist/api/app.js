@@ -19,6 +19,7 @@ import { adminGrpcRouter } from "./routes/adminGrpc.routes.js";
 import { endpointsRouter } from "./routes/endpoints.routes.js";
 import { locationValidationRouter } from "./routes/locationValidation.routes.js";
 import { sourcesRouter } from "./routes/sources.routes.js";
+import { supportRouter } from "./routes/support.routes.js";
 import adminTestRoutes from "./routes/adminTest.routes.js";
 import uiRoutes from "./routes/ui.routes.js";
 // import adminGrpcRoutes from "../routes/adminGrpc.js"; // Commented out - file not found
@@ -83,6 +84,9 @@ export function buildApp() {
     app.use(endpointsRouter);
     app.use(locationValidationRouter);
     app.use(sourcesRouter);
+    app.use(supportRouter);
+    // Mount support router with /api prefix to match frontend expectations
+    app.use("/api", supportRouter);
     app.use(logsRouter);
     // Mount admin routes with /api prefix to match frontend expectations
     app.use("/api", adminRouter);

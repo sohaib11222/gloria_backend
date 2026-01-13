@@ -1,4 +1,64 @@
+// ABSOLUTE CRITICAL: Set DATABASE_URL BEFORE ANY imports
+// This must be the VERY FIRST thing that runs - Prisma Client checks this at import time
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Get __dirname equivalent for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Try multiple paths for .env file
+const envPaths = [
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(__dirname, '../.env'),
+    '/var/www/gloriaconnect/backend/.env'
+];
+
+let databaseUrlSet = false;
+for (const envPath of envPaths) {
+    if (fs.existsSync(envPath)) {
+        try {
+            const envContent = fs.readFileSync(envPath, 'utf8');
+            const lines = envContent.split('\n');
+            for (const line of lines) {
+                if (line.startsWith('DATABASE_URL=')) {
+                    const value = line.substring(13).trim().replace(/^["']|["']$/g, '');
+                    // Set it multiple ways to ensure Prisma finds it
+                    process.env.DATABASE_URL = value;
+                    // Make it non-enumerable but still accessible
+                    Object.defineProperty(process.env, 'DATABASE_URL', {
+                        value: value,
+                        writable: true,
+                        enumerable: true,
+                        configurable: true
+                    });
+                    databaseUrlSet = true;
+                    console.log("✓ DATABASE_URL loaded from:", envPath);
+                    break;
+                }
+            }
+            if (databaseUrlSet) break;
+        } catch (e) {
+            console.warn("Failed to read .env from:", envPath, e.message);
+        }
+    }
+}
+
+// Now import dotenv for other variables (but DATABASE_URL is already set above)
 import "dotenv/config";
+import dotenv from "dotenv";
+
+// Final verification - this MUST be true before any Prisma imports
+if (!process.env.DATABASE_URL) {
+    console.error("FATAL ERROR: DATABASE_URL not found in environment!");
+    console.error("Current working directory:", process.cwd());
+    console.error("__dirname:", __dirname);
+    process.exit(1);
+} else {
+    console.log("✓ DATABASE_URL verified in process.env:", !!process.env.DATABASE_URL);
+    console.log("✓ DATABASE_URL value:", process.env.DATABASE_URL.replace(/:([^:@]+)@/, ':****@'));
+}
 import { buildApp } from "./api/app.js";
 import { logger } from "./infra/logger.js";
 import { startGrpcServers } from "./grpc/server.js";
@@ -99,3 +159,4 @@ main().catch((e) => {
     console.error(e);
     process.exit(1);
 });
+

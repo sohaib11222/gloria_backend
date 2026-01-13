@@ -1,4 +1,17 @@
 import "dotenv/config";
+import dotenv from "dotenv";
+import path from "path";
+
+// CRITICAL: Load .env file FIRST before any other imports
+// This ensures DATABASE_URL is available when Prisma Client modules are loaded
+const envPath = path.resolve(__dirname, '../.env');
+dotenv.config({ path: envPath });
+
+// Ensure DATABASE_URL is set in process.env for Prisma Client
+if (!process.env.DATABASE_URL) {
+  console.error("ERROR: DATABASE_URL not found in environment!");
+}
+
 import { buildApp } from "./api/app.js";
 import { logger } from "./infra/logger.js";
 import { startGrpcServers } from "./grpc/server.js";

@@ -28,6 +28,18 @@ if (fs.existsSync(envPath)) {
 // Ensure DATABASE_URL is set
 if (!envVars.DATABASE_URL) {
   console.error('ERROR: DATABASE_URL is not set in environment variables!');
+} else {
+  // CRITICAL: Explicitly export DATABASE_URL for Prisma Client
+  // Prisma Client requires this at runtime for schema validation
+  process.env.DATABASE_URL = envVars.DATABASE_URL;
+  console.log('✓ DATABASE_URL is set for Prisma Client');
+}
+
+// CRITICAL: Ensure DATABASE_URL is ALWAYS set
+const databaseUrl = envVars.DATABASE_URL || process.env.DATABASE_URL;
+if (!databaseUrl) {
+  console.error('FATAL ERROR: DATABASE_URL is not set!');
+  process.exit(1);
 }
 
 module.exports = {
@@ -35,9 +47,15 @@ module.exports = {
     {
       name: "gloriaconnect-backend",
       script: "node",
-      args: "dist/index.js",
+      args: "-r dotenv/config dist/index.js",
       cwd: "/var/www/gloriaconnect/backend",
-      env: envVars,
+      env: {
+        ...envVars,
+        // CRITICAL: Force DATABASE_URL to be set explicitly - Prisma Client requires this
+        DATABASE_URL: databaseUrl,
+        // Ensure Node.js can find it
+        NODE_ENV: envVars.NODE_ENV || "production",
+      },
       watch: false,
       error_file: "./logs/pm2-error.log",
       out_file: "./logs/pm2-out.log",
