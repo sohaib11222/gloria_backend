@@ -63,12 +63,42 @@ export function makeGrpcSourceAdapter(address) {
          */
         async bookingCreate(input) {
             // Transform to source_provider.proto BookingCreateRequest format
+            // Include all available booking fields for full OTA compliance
             const request = {
                 agreement_ref: input.agreement_ref || "",
                 supplier_offer_ref: input.supplier_offer_ref || "",
                 agent_booking_ref: input.agent_booking_ref || "",
                 idempotency_key: input.idempotency_key || input.idempotencyKey || "",
             };
+            // Add location details if available
+            if (input.pickup_unlocode)
+                request.pickup_unlocode = input.pickup_unlocode;
+            if (input.dropoff_unlocode)
+                request.dropoff_unlocode = input.dropoff_unlocode;
+            if (input.pickup_iso)
+                request.pickup_iso = input.pickup_iso;
+            if (input.dropoff_iso)
+                request.dropoff_iso = input.dropoff_iso;
+            // Add vehicle and driver details if available
+            if (input.vehicle_class)
+                request.vehicle_class = input.vehicle_class;
+            if (input.vehicle_make_model)
+                request.vehicle_make_model = input.vehicle_make_model;
+            if (input.rate_plan_code)
+                request.rate_plan_code = input.rate_plan_code;
+            if (input.driver_age !== undefined)
+                request.driver_age = input.driver_age;
+            if (input.residency_country)
+                request.residency_country = input.residency_country;
+            // Add customer and payment info if available
+            if (input.customer_info)
+                request.customer_info = input.customer_info;
+            if (input.customer_info_json)
+                request.customer_info_json = input.customer_info_json;
+            if (input.payment_info)
+                request.payment_info = input.payment_info;
+            if (input.payment_info_json)
+                request.payment_info_json = input.payment_info_json;
             return await new Promise((res, rej) => client.CreateBooking(request, (e, r) => {
                 if (e)
                     return rej(e);

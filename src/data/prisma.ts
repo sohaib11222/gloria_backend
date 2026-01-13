@@ -1,28 +1,26 @@
-import { PrismaClient } from "@prisma/client";
+// CRITICAL: Load environment variables BEFORE importing PrismaClient
+// Prisma Client validates schema.prisma at module initialization time
 import "dotenv/config";
 import dotenv from "dotenv";
 import path from "path";
 
-// Load .env file explicitly from the backend directory
-const envPath = path.resolve(__dirname, '../../.env');
-dotenv.config({ path: envPath });
+// Load .env file - try multiple paths to ensure it's found
+const envPaths = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), '..', '.env'),
+];
 
-// Ensure DATABASE_URL is loaded from .env
+// Try loading from each path
+for (const envPath of envPaths) {
+  const result = dotenv.config({ path: envPath });
+  if (!result.error && result.parsed) {
+    break;
+  }
+}
+
+// Ensure DATABASE_URL is loaded and set in process.env
+// This MUST happen before PrismaClient is imported
 let databaseUrl = process.env.DATABASE_URL;
-
-// CRITICAL: Prisma Client requires DATABASE_URL in process.env at runtime
-// Set it explicitly to ensure it's available for Prisma schema validation
-if (!databaseUrl) {
-  // Try alternative paths
-  const altEnvPath = path.resolve(process.cwd(), '.env');
-  dotenv.config({ path: altEnvPath });
-  databaseUrl = process.env.DATABASE_URL;
-}
-
-// Force set in process.env for Prisma Client runtime validation
-if (databaseUrl) {
-  process.env.DATABASE_URL = databaseUrl;
-}
 
 if (!databaseUrl) {
   const errorMsg = "❌ DATABASE_URL is not set in environment variables!\n" +
@@ -37,13 +35,18 @@ if (!databaseUrl) {
   }
 }
 
-// CRITICAL: Ensure DATABASE_URL is in process.env BEFORE creating PrismaClient
-// Prisma Client validates schema.prisma at runtime which requires env("DATABASE_URL")
-if (!process.env.DATABASE_URL && databaseUrl) {
+// CRITICAL: Force set in process.env - MUST be done before PrismaClient import
+// Prisma schema.prisma uses env("DATABASE_URL") which reads from process.env
+if (databaseUrl) {
   process.env.DATABASE_URL = databaseUrl;
 }
+
+// NOW import PrismaClient - DATABASE_URL must be in process.env at this point
+import { PrismaClient } from "@prisma/client";
+
+// Double-check DATABASE_URL is set
 if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL must be set in process.env for Prisma Client");
+  throw new Error("DATABASE_URL must be set in process.env before creating PrismaClient");
 }
 
 // Create Prisma client with explicit DATABASE_URL

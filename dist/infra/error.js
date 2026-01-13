@@ -72,8 +72,15 @@ export function errorHandler(err, req, res, _next) {
             requestId
         });
     }
-    // Handle other database connection errors
-    if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('connect')) {
+    // Handle SMTP/email connection errors separately from database errors
+    if (errorMessage.includes('ECONNREFUSED') && errorMessage.includes('587')) {
+        // This is an SMTP error, not a database error
+        logger.warn({ err, requestId }, "SMTP connection failed - email service unavailable");
+        // Don't return error here, let it be handled by the route or continue as 500
+    }
+    // Handle database connection errors (but not SMTP)
+    if ((errorMessage.includes('ECONNREFUSED') || errorMessage.includes('connect')) &&
+        !errorMessage.includes('587') && !errorMessage.includes('465') && !errorMessage.includes('25')) {
         return res.status(503).json({
             error: "DATABASE_CONNECTION_ERROR",
             message: "Cannot connect to database. Please ensure MySQL is running.",

@@ -18208,3 +18208,1267 @@
 2026-01-12 14:52:16 +00:00:   code: 'ERR_ERL_UNEXPECTED_X_FORWARDED_FOR',
 2026-01-12 14:52:16 +00:00:   help: 'https://express-rate-limit.github.io/ERR_ERL_UNEXPECTED_X_FORWARDED_FOR/'
 2026-01-12 14:52:16 +00:00: }
+2026-01-13 16:02:26 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:26 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:26 +00:00:                              ^
+2026-01-13 16:02:26 +00:00: 
+2026-01-13 16:02:26 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:26 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:26 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:26 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:26 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:26 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:26 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:27 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:27 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:27 +00:00:                              ^
+2026-01-13 16:02:27 +00:00: 
+2026-01-13 16:02:27 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:27 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:27 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:27 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:27 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:27 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:27 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:27 +00:00: 
+2026-01-13 16:02:27 +00:00: Node.js v24.4.1
+2026-01-13 16:02:28 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:28 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:28 +00:00:                              ^
+2026-01-13 16:02:28 +00:00: 
+2026-01-13 16:02:28 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:28 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:28 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:28 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:28 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:28 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:28 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:28 +00:00: 
+2026-01-13 16:02:28 +00:00: Node.js v24.4.1
+2026-01-13 16:02:29 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:29 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:29 +00:00:                              ^
+2026-01-13 16:02:29 +00:00: 
+2026-01-13 16:02:29 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:29 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:29 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:29 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:29 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:29 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:29 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:29 +00:00: 
+2026-01-13 16:02:29 +00:00: Node.js v24.4.1
+2026-01-13 16:02:30 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:30 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:30 +00:00:                              ^
+2026-01-13 16:02:30 +00:00: 
+2026-01-13 16:02:30 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:30 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:30 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:30 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:30 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:30 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:30 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:30 +00:00: 
+2026-01-13 16:02:30 +00:00: Node.js v24.4.1
+2026-01-13 16:02:31 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:31 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:31 +00:00:                              ^
+2026-01-13 16:02:31 +00:00: 
+2026-01-13 16:02:31 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:31 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:31 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:31 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:31 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:31 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:31 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:31 +00:00: 
+2026-01-13 16:02:31 +00:00: Node.js v24.4.1
+2026-01-13 16:02:32 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:32 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:32 +00:00:                              ^
+2026-01-13 16:02:32 +00:00: 
+2026-01-13 16:02:32 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:32 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:32 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:32 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:32 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:32 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:32 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:32 +00:00: 
+2026-01-13 16:02:32 +00:00: Node.js v24.4.1
+2026-01-13 16:02:32 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:32 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:32 +00:00:                              ^
+2026-01-13 16:02:32 +00:00: 
+2026-01-13 16:02:32 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:32 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:32 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:32 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:32 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:32 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:32 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:32 +00:00: 
+2026-01-13 16:02:32 +00:00: Node.js v24.4.1
+2026-01-13 16:02:33 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:33 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:33 +00:00:                              ^
+2026-01-13 16:02:33 +00:00: 
+2026-01-13 16:02:33 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:33 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:33 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:33 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:33 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:33 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:33 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:33 +00:00: 
+2026-01-13 16:02:33 +00:00: Node.js v24.4.1
+2026-01-13 16:02:34 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:34 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:34 +00:00:                              ^
+2026-01-13 16:02:34 +00:00: 
+2026-01-13 16:02:34 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:34 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:34 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:34 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:34 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:34 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:34 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:34 +00:00: 
+2026-01-13 16:02:34 +00:00: Node.js v24.4.1
+2026-01-13 16:02:35 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:35 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:35 +00:00:                              ^
+2026-01-13 16:02:35 +00:00: 
+2026-01-13 16:02:35 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:35 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:35 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:35 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:35 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:35 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:35 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:35 +00:00: 
+2026-01-13 16:02:35 +00:00: Node.js v24.4.1
+2026-01-13 16:02:36 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:36 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:36 +00:00:                              ^
+2026-01-13 16:02:36 +00:00: 
+2026-01-13 16:02:36 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:36 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:36 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:36 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:36 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:36 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:36 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:36 +00:00: 
+2026-01-13 16:02:36 +00:00: Node.js v24.4.1
+2026-01-13 16:02:36 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:36 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:36 +00:00:                              ^
+2026-01-13 16:02:36 +00:00: 
+2026-01-13 16:02:36 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:36 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:36 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:36 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:36 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:36 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:36 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:36 +00:00: 
+2026-01-13 16:02:36 +00:00: Node.js v24.4.1
+2026-01-13 16:02:37 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:37 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:37 +00:00:                              ^
+2026-01-13 16:02:37 +00:00: 
+2026-01-13 16:02:37 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:37 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:37 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:37 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:37 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:37 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:37 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:37 +00:00: 
+2026-01-13 16:02:37 +00:00: Node.js v24.4.1
+2026-01-13 16:02:38 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:38 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:38 +00:00:                              ^
+2026-01-13 16:02:38 +00:00: 
+2026-01-13 16:02:38 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:38 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:38 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:38 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:38 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:38 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:38 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:38 +00:00: 
+2026-01-13 16:02:38 +00:00: Node.js v24.4.1
+2026-01-13 16:02:39 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:39 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:39 +00:00:                              ^
+2026-01-13 16:02:39 +00:00: 
+2026-01-13 16:02:39 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:39 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:39 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:39 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:39 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:39 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:39 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:39 +00:00: 
+2026-01-13 16:02:39 +00:00: Node.js v24.4.1
+2026-01-13 16:02:39 +00:00: file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6
+2026-01-13 16:02:39 +00:00: const envPath = path.resolve(__dirname, '../../.env');
+2026-01-13 16:02:39 +00:00:                              ^
+2026-01-13 16:02:39 +00:00: 
+2026-01-13 16:02:39 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:02:39 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:02:39 +00:00:     at file:///var/www/gloriaconnect/backend/dist/data/prisma.js:6:30
+2026-01-13 16:02:39 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:02:39 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:02:39 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:02:39 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:02:39 +00:00: 
+2026-01-13 16:02:39 +00:00: Node.js v24.4.1
+2026-01-13 16:05:34 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:05:34 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:05:34 +00:00:                              ^
+2026-01-13 16:05:34 +00:00: 
+2026-01-13 16:05:34 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:05:34 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:05:34 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:05:34 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:05:34 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:05:34 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:05:34 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:05:34 +00:00: 
+2026-01-13 16:05:34 +00:00: Node.js v24.4.1
+2026-01-13 16:05:45 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:05:45 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:05:45 +00:00:                              ^
+2026-01-13 16:05:45 +00:00: 
+2026-01-13 16:05:45 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:05:45 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:05:45 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:05:45 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:05:45 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:05:45 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:05:45 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:05:45 +00:00: 
+2026-01-13 16:05:45 +00:00: Node.js v24.4.1
+2026-01-13 16:06:40 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:06:40 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:06:40 +00:00:                              ^
+2026-01-13 16:06:40 +00:00: 
+2026-01-13 16:06:40 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:06:40 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:06:40 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:06:40 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:06:40 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:06:40 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:06:40 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:06:40 +00:00: 
+2026-01-13 16:06:40 +00:00: Node.js v24.4.1
+2026-01-13 16:06:43 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:06:43 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:06:43 +00:00:                              ^
+2026-01-13 16:06:43 +00:00: 
+2026-01-13 16:06:43 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:06:43 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:06:43 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:06:43 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:06:43 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:06:43 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:06:43 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:06:43 +00:00: 
+2026-01-13 16:06:43 +00:00: Node.js v24.4.1
+2026-01-13 16:06:44 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:06:44 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:06:44 +00:00:                              ^
+2026-01-13 16:06:44 +00:00: 
+2026-01-13 16:06:44 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:06:44 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:06:44 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:06:44 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:06:44 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:06:44 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:06:44 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:06:44 +00:00: 
+2026-01-13 16:06:44 +00:00: Node.js v24.4.1
+2026-01-13 16:06:46 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:06:46 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:06:46 +00:00:                              ^
+2026-01-13 16:06:46 +00:00: 
+2026-01-13 16:06:46 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:06:46 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:06:46 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:06:46 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:06:46 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:06:46 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:06:46 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:06:46 +00:00: 
+2026-01-13 16:06:46 +00:00: Node.js v24.4.1
+2026-01-13 16:06:48 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:06:48 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:06:48 +00:00:                              ^
+2026-01-13 16:06:48 +00:00: 
+2026-01-13 16:06:48 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:06:48 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:06:48 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:06:48 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:06:48 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:06:48 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:06:48 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:06:48 +00:00: 
+2026-01-13 16:06:48 +00:00: Node.js v24.4.1
+2026-01-13 16:06:58 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:06:58 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:06:58 +00:00:                              ^
+2026-01-13 16:06:58 +00:00: 
+2026-01-13 16:06:58 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:06:58 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:06:58 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:06:58 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:06:58 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:06:58 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:06:58 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:06:58 +00:00: 
+2026-01-13 16:06:58 +00:00: Node.js v24.4.1
+2026-01-13 16:07:28 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:28 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:28 +00:00:                              ^
+2026-01-13 16:07:28 +00:00: 
+2026-01-13 16:07:28 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:28 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:28 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:28 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:28 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:28 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:28 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:28 +00:00: 
+2026-01-13 16:07:28 +00:00: Node.js v24.4.1
+2026-01-13 16:07:29 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:29 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:29 +00:00:                              ^
+2026-01-13 16:07:29 +00:00: 
+2026-01-13 16:07:29 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:29 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:29 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:29 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:29 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:29 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:29 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:29 +00:00: 
+2026-01-13 16:07:29 +00:00: Node.js v24.4.1
+2026-01-13 16:07:31 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:31 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:31 +00:00:                              ^
+2026-01-13 16:07:31 +00:00: 
+2026-01-13 16:07:31 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:31 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:31 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:31 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:31 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:31 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:31 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:31 +00:00: 
+2026-01-13 16:07:31 +00:00: Node.js v24.4.1
+2026-01-13 16:07:32 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:32 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:32 +00:00:                              ^
+2026-01-13 16:07:32 +00:00: 
+2026-01-13 16:07:32 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:32 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:32 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:32 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:32 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:32 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:32 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:32 +00:00: 
+2026-01-13 16:07:32 +00:00: Node.js v24.4.1
+2026-01-13 16:07:33 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:33 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:33 +00:00:                              ^
+2026-01-13 16:07:33 +00:00: 
+2026-01-13 16:07:33 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:33 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:33 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:33 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:33 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:33 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:33 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:33 +00:00: 
+2026-01-13 16:07:33 +00:00: Node.js v24.4.1
+2026-01-13 16:07:34 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:34 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:34 +00:00:                              ^
+2026-01-13 16:07:34 +00:00: 
+2026-01-13 16:07:34 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:34 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:34 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:34 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:34 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:34 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:34 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:34 +00:00: 
+2026-01-13 16:07:34 +00:00: Node.js v24.4.1
+2026-01-13 16:07:35 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:35 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:35 +00:00:                              ^
+2026-01-13 16:07:35 +00:00: 
+2026-01-13 16:07:35 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:35 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:35 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:35 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:35 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:35 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:35 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:35 +00:00: 
+2026-01-13 16:07:35 +00:00: Node.js v24.4.1
+2026-01-13 16:07:36 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:36 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:36 +00:00:                              ^
+2026-01-13 16:07:36 +00:00: 
+2026-01-13 16:07:36 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:36 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:36 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:36 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:36 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:36 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:36 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:36 +00:00: 
+2026-01-13 16:07:36 +00:00: Node.js v24.4.1
+2026-01-13 16:07:37 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:37 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:37 +00:00:                              ^
+2026-01-13 16:07:37 +00:00: 
+2026-01-13 16:07:37 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:37 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:37 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:37 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:37 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:37 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:37 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:37 +00:00: 
+2026-01-13 16:07:37 +00:00: Node.js v24.4.1
+2026-01-13 16:07:39 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:39 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:39 +00:00:                              ^
+2026-01-13 16:07:39 +00:00: 
+2026-01-13 16:07:39 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:39 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:39 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:39 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:39 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:39 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:39 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:39 +00:00: 
+2026-01-13 16:07:39 +00:00: Node.js v24.4.1
+2026-01-13 16:07:40 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:40 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:40 +00:00:                              ^
+2026-01-13 16:07:40 +00:00: 
+2026-01-13 16:07:40 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:40 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:40 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:40 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:40 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:40 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:40 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:40 +00:00: 
+2026-01-13 16:07:40 +00:00: Node.js v24.4.1
+2026-01-13 16:07:41 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:41 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:41 +00:00:                              ^
+2026-01-13 16:07:41 +00:00: 
+2026-01-13 16:07:41 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:41 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:41 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:41 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:41 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:41 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:41 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:41 +00:00: 
+2026-01-13 16:07:41 +00:00: Node.js v24.4.1
+2026-01-13 16:07:42 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:42 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:42 +00:00:                              ^
+2026-01-13 16:07:42 +00:00: 
+2026-01-13 16:07:42 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:42 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:42 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:42 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:42 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:42 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:42 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:42 +00:00: 
+2026-01-13 16:07:42 +00:00: Node.js v24.4.1
+2026-01-13 16:07:43 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:43 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:43 +00:00:                              ^
+2026-01-13 16:07:43 +00:00: 
+2026-01-13 16:07:43 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:43 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:43 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:43 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:43 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:43 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:43 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:43 +00:00: 
+2026-01-13 16:07:43 +00:00: Node.js v24.4.1
+2026-01-13 16:07:44 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:44 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:44 +00:00:                              ^
+2026-01-13 16:07:44 +00:00: 
+2026-01-13 16:07:44 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:44 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:44 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:44 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:44 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:44 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:44 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:44 +00:00: 
+2026-01-13 16:07:44 +00:00: Node.js v24.4.1
+2026-01-13 16:07:45 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:45 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:45 +00:00:                              ^
+2026-01-13 16:07:45 +00:00: 
+2026-01-13 16:07:45 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:45 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:45 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:45 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:45 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:45 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:45 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:45 +00:00: 
+2026-01-13 16:07:45 +00:00: Node.js v24.4.1
+2026-01-13 16:07:46 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:46 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:46 +00:00:                              ^
+2026-01-13 16:07:46 +00:00: 
+2026-01-13 16:07:46 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:46 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:46 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:46 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:46 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:46 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:46 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:46 +00:00: 
+2026-01-13 16:07:46 +00:00: Node.js v24.4.1
+2026-01-13 16:07:47 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:47 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:47 +00:00:                              ^
+2026-01-13 16:07:47 +00:00: 
+2026-01-13 16:07:47 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:47 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:47 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:47 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:47 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:47 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:47 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:47 +00:00: 
+2026-01-13 16:07:47 +00:00: Node.js v24.4.1
+2026-01-13 16:07:48 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:48 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:48 +00:00:                              ^
+2026-01-13 16:07:48 +00:00: 
+2026-01-13 16:07:48 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:48 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:48 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:48 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:48 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:48 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:48 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:48 +00:00: 
+2026-01-13 16:07:48 +00:00: Node.js v24.4.1
+2026-01-13 16:07:49 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:49 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:49 +00:00:                              ^
+2026-01-13 16:07:49 +00:00: 
+2026-01-13 16:07:49 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:49 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:49 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:49 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:49 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:49 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:49 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:49 +00:00: 
+2026-01-13 16:07:49 +00:00: Node.js v24.4.1
+2026-01-13 16:07:50 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:50 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:50 +00:00:                              ^
+2026-01-13 16:07:50 +00:00: 
+2026-01-13 16:07:50 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:50 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:50 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:50 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:50 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:50 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:50 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:50 +00:00: 
+2026-01-13 16:07:50 +00:00: Node.js v24.4.1
+2026-01-13 16:07:51 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:51 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:51 +00:00:                              ^
+2026-01-13 16:07:51 +00:00: 
+2026-01-13 16:07:51 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:51 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:51 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:51 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:51 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:51 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:51 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:51 +00:00: 
+2026-01-13 16:07:51 +00:00: Node.js v24.4.1
+2026-01-13 16:07:52 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:52 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:52 +00:00:                              ^
+2026-01-13 16:07:52 +00:00: 
+2026-01-13 16:07:52 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:52 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:52 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:52 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:52 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:52 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:52 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:52 +00:00: 
+2026-01-13 16:07:52 +00:00: Node.js v24.4.1
+2026-01-13 16:07:53 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:53 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:53 +00:00:                              ^
+2026-01-13 16:07:53 +00:00: 
+2026-01-13 16:07:53 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:53 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:53 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:53 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:53 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:53 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:53 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:53 +00:00: 
+2026-01-13 16:07:53 +00:00: Node.js v24.4.1
+2026-01-13 16:07:55 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:55 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:55 +00:00:                              ^
+2026-01-13 16:07:55 +00:00: 
+2026-01-13 16:07:55 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:55 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:55 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:55 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:55 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:55 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:55 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:55 +00:00: 
+2026-01-13 16:07:55 +00:00: Node.js v24.4.1
+2026-01-13 16:07:56 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:56 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:56 +00:00:                              ^
+2026-01-13 16:07:56 +00:00: 
+2026-01-13 16:07:56 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:56 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:56 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:56 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:56 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:56 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:56 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:56 +00:00: 
+2026-01-13 16:07:56 +00:00: Node.js v24.4.1
+2026-01-13 16:07:57 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:07:57 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:07:57 +00:00:                              ^
+2026-01-13 16:07:57 +00:00: 
+2026-01-13 16:07:57 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:07:57 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:07:57 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:07:57 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:07:57 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:07:57 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:07:57 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:07:57 +00:00: 
+2026-01-13 16:07:57 +00:00: Node.js v24.4.1
+2026-01-13 16:08:00 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:08:00 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:08:00 +00:00:                              ^
+2026-01-13 16:08:00 +00:00: 
+2026-01-13 16:08:00 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:08:00 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:08:00 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:08:00 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:08:00 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:08:00 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:08:00 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:08:00 +00:00: 
+2026-01-13 16:08:00 +00:00: Node.js v24.4.1
+2026-01-13 16:08:02 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:08:02 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:08:02 +00:00:                              ^
+2026-01-13 16:08:02 +00:00: 
+2026-01-13 16:08:02 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:08:02 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:08:02 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:08:02 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:08:02 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:08:02 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:08:02 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:08:02 +00:00: 
+2026-01-13 16:08:02 +00:00: Node.js v24.4.1
+2026-01-13 16:08:03 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:08:03 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:08:03 +00:00:                              ^
+2026-01-13 16:08:03 +00:00: 
+2026-01-13 16:08:03 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:08:03 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:08:03 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:08:03 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:08:03 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:08:03 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:08:03 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:08:03 +00:00: 
+2026-01-13 16:08:03 +00:00: Node.js v24.4.1
+2026-01-13 16:08:05 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:08:05 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:08:05 +00:00:                              ^
+2026-01-13 16:08:05 +00:00: 
+2026-01-13 16:08:05 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:08:05 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:08:05 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:08:05 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:08:05 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:08:05 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:08:05 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:08:05 +00:00: 
+2026-01-13 16:08:05 +00:00: Node.js v24.4.1
+2026-01-13 16:08:06 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:08:06 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:08:06 +00:00:                              ^
+2026-01-13 16:08:06 +00:00: 
+2026-01-13 16:08:06 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:08:06 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:08:06 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:08:06 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:08:06 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:08:06 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:08:06 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:08:06 +00:00: 
+2026-01-13 16:08:06 +00:00: Node.js v24.4.1
+2026-01-13 16:08:08 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:08:08 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:08:08 +00:00:                              ^
+2026-01-13 16:08:08 +00:00: 
+2026-01-13 16:08:08 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:08:08 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:08:08 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:08:08 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:08:08 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:08:08 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:08:08 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:08:08 +00:00: 
+2026-01-13 16:08:08 +00:00: Node.js v24.4.1
+2026-01-13 16:08:09 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:08:09 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:08:09 +00:00:                              ^
+2026-01-13 16:08:09 +00:00: 
+2026-01-13 16:08:09 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:08:09 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:08:09 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:08:09 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:08:09 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:08:09 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:08:09 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:08:09 +00:00: 
+2026-01-13 16:08:09 +00:00: Node.js v24.4.1
+2026-01-13 16:08:57 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:08:57 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:08:57 +00:00:                              ^
+2026-01-13 16:08:57 +00:00: 
+2026-01-13 16:08:57 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:08:57 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:08:57 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:08:57 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:08:57 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:08:57 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:08:57 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:08:57 +00:00: 
+2026-01-13 16:08:57 +00:00: Node.js v24.4.1
+2026-01-13 16:09:55 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:09:55 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:09:55 +00:00:                              ^
+2026-01-13 16:09:55 +00:00: 
+2026-01-13 16:09:55 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:09:55 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:09:55 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:09:55 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:09:55 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:09:55 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:09:55 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:09:55 +00:00: 
+2026-01-13 16:09:55 +00:00: Node.js v24.4.1
+2026-01-13 16:11:18 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:11:18 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:11:18 +00:00:                              ^
+2026-01-13 16:11:18 +00:00: 
+2026-01-13 16:11:18 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:11:18 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:11:18 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:11:18 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:11:18 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:11:18 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:11:18 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:11:18 +00:00: 
+2026-01-13 16:11:18 +00:00: Node.js v24.4.1
+2026-01-13 16:12:33 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:12:33 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:12:33 +00:00:                              ^
+2026-01-13 16:12:33 +00:00: 
+2026-01-13 16:12:33 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:12:33 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:12:33 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:12:33 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:12:33 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:12:33 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:12:33 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:12:33 +00:00: 
+2026-01-13 16:12:33 +00:00: Node.js v24.4.1
+2026-01-13 16:13:45 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:13:45 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:13:45 +00:00:                              ^
+2026-01-13 16:13:45 +00:00: 
+2026-01-13 16:13:45 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:13:45 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:13:45 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:13:45 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:13:45 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:13:45 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:13:45 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:13:45 +00:00: 
+2026-01-13 16:13:45 +00:00: Node.js v24.4.1
+2026-01-13 16:14:50 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:14:50 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:14:50 +00:00:                              ^
+2026-01-13 16:14:50 +00:00: 
+2026-01-13 16:14:50 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:14:50 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:14:50 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:14:50 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:14:50 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:14:50 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:14:50 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:14:50 +00:00: 
+2026-01-13 16:14:50 +00:00: Node.js v24.4.1
+2026-01-13 16:16:28 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:16:28 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:16:28 +00:00:                              ^
+2026-01-13 16:16:28 +00:00: 
+2026-01-13 16:16:28 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:16:28 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:16:28 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:16:28 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:16:28 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:16:28 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:16:28 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:16:28 +00:00: 
+2026-01-13 16:16:28 +00:00: Node.js v24.4.1
+2026-01-13 16:18:01 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:18:01 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:18:01 +00:00:                              ^
+2026-01-13 16:18:01 +00:00: 
+2026-01-13 16:18:01 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:18:01 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:18:01 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:18:01 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:18:01 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:18:01 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:18:01 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:18:01 +00:00: 
+2026-01-13 16:18:01 +00:00: Node.js v24.4.1
+2026-01-13 16:19:03 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:19:03 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:19:03 +00:00:                              ^
+2026-01-13 16:19:03 +00:00: 
+2026-01-13 16:19:03 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:19:03 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:19:04 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:19:04 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:19:04 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:19:04 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:19:04 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:19:04 +00:00: 
+2026-01-13 16:19:04 +00:00: Node.js v24.4.1
+2026-01-13 16:20:46 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:20:46 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:20:46 +00:00:                              ^
+2026-01-13 16:20:46 +00:00: 
+2026-01-13 16:20:46 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:20:46 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:20:46 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:20:46 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:20:46 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:20:46 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:20:46 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:20:46 +00:00: 
+2026-01-13 16:20:46 +00:00: Node.js v24.4.1
+2026-01-13 16:21:45 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:21:45 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:21:45 +00:00:                              ^
+2026-01-13 16:21:45 +00:00: 
+2026-01-13 16:21:45 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:21:45 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:21:45 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:21:45 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:21:45 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:21:45 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:21:45 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:21:45 +00:00: 
+2026-01-13 16:21:45 +00:00: Node.js v24.4.1
+2026-01-13 16:22:10 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:22:10 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:22:10 +00:00:                              ^
+2026-01-13 16:22:10 +00:00: 
+2026-01-13 16:22:10 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:22:10 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:22:10 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:22:10 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:22:10 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:22:10 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:22:10 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:22:11 +00:00: 
+2026-01-13 16:22:11 +00:00: Node.js v24.4.1
+2026-01-13 16:22:20 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:22:20 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:22:20 +00:00:                              ^
+2026-01-13 16:22:20 +00:00: 
+2026-01-13 16:22:20 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:22:20 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:22:20 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:22:20 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:22:20 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:22:20 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:22:20 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:22:20 +00:00: 
+2026-01-13 16:22:20 +00:00: Node.js v24.4.1
+2026-01-13 16:22:36 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:22:36 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:22:36 +00:00:                              ^
+2026-01-13 16:22:36 +00:00: 
+2026-01-13 16:22:36 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:22:36 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:22:36 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:22:36 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:22:36 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:22:36 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:22:36 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:22:36 +00:00: 
+2026-01-13 16:22:36 +00:00: Node.js v24.4.1
+2026-01-13 16:23:33 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:23:34 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:23:34 +00:00:                              ^
+2026-01-13 16:23:34 +00:00: 
+2026-01-13 16:23:34 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:23:34 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:23:34 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:23:34 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:23:34 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:23:34 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:23:34 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:23:34 +00:00: 
+2026-01-13 16:23:34 +00:00: Node.js v24.4.1
+2026-01-13 16:25:30 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:25:30 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:25:30 +00:00:                              ^
+2026-01-13 16:25:30 +00:00: 
+2026-01-13 16:25:30 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:25:30 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:25:30 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:25:30 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:25:30 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:25:30 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:25:30 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:25:30 +00:00: 
+2026-01-13 16:25:30 +00:00: Node.js v24.4.1
+2026-01-13 16:26:55 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:26:55 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:26:55 +00:00:                              ^
+2026-01-13 16:26:55 +00:00: 
+2026-01-13 16:26:55 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:26:55 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:26:55 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:26:55 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:26:55 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:26:55 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:26:55 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:26:55 +00:00: 
+2026-01-13 16:26:55 +00:00: Node.js v24.4.1
+2026-01-13 16:27:29 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:27:29 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:27:29 +00:00:                              ^
+2026-01-13 16:27:29 +00:00: 
+2026-01-13 16:27:29 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:27:29 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:27:29 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:27:29 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:27:29 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:27:29 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:27:29 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:27:30 +00:00: 
+2026-01-13 16:27:30 +00:00: Node.js v24.4.1
+2026-01-13 16:29:01 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:29:01 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:29:01 +00:00:                              ^
+2026-01-13 16:29:01 +00:00: 
+2026-01-13 16:29:01 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:29:01 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:29:01 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:29:01 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:29:01 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:29:01 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:29:01 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:29:01 +00:00: 
+2026-01-13 16:29:01 +00:00: Node.js v24.4.1
+2026-01-13 16:29:23 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:29:23 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:29:23 +00:00:                              ^
+2026-01-13 16:29:23 +00:00: 
+2026-01-13 16:29:23 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:29:23 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:29:23 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:29:23 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:29:23 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:29:23 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:29:23 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:29:23 +00:00: 
+2026-01-13 16:29:23 +00:00: Node.js v24.4.1
+2026-01-13 16:29:33 +00:00: file:///var/www/gloriaconnect/backend/dist/index.js:6
+2026-01-13 16:29:33 +00:00: const envPath = path.resolve(__dirname, '../.env');
+2026-01-13 16:29:33 +00:00:                              ^
+2026-01-13 16:29:33 +00:00: 
+2026-01-13 16:29:33 +00:00: ReferenceError: __dirname is not defined in ES module scope
+2026-01-13 16:29:33 +00:00: This file is being treated as an ES module because it has a '.js' file extension and '/var/www/gloriaconnect/backend/package.json' contains "type": "module". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.
+2026-01-13 16:29:33 +00:00:     at file:///var/www/gloriaconnect/backend/dist/index.js:6:30
+2026-01-13 16:29:33 +00:00:     at ModuleJob.run (node:internal/modules/esm/module_job:370:25)
+2026-01-13 16:29:33 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:29:33 +00:00:     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
+2026-01-13 16:29:33 +00:00:     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:99:5)
+2026-01-13 16:29:33 +00:00: 
+2026-01-13 16:29:33 +00:00: Node.js v24.4.1
+2026-01-13 16:29:34 +00:00: node:internal/modules/esm/resolve:274
+2026-01-13 16:29:34 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-13 16:29:34 +00:00:           ^
+2026-01-13 16:29:34 +00:00: 
+2026-01-13 16:29:34 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-13 16:29:34 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-13 16:29:34 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-13 16:29:34 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-13 16:29:34 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-13 16:29:34 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-13 16:29:34 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-13 16:29:34 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-13 16:29:34 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-13 16:29:34 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-13 16:29:34 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-13 16:29:34 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-13 16:29:34 +00:00: }
+2026-01-13 16:29:34 +00:00: 
+2026-01-13 16:29:34 +00:00: Node.js v24.4.1
+2026-01-13 16:29:35 +00:00: node:internal/modules/esm/resolve:274
+2026-01-13 16:29:35 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-13 16:29:35 +00:00:           ^
+2026-01-13 16:29:35 +00:00: 
+2026-01-13 16:29:35 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-13 16:29:35 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-13 16:29:35 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-13 16:29:35 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-13 16:29:35 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-13 16:29:35 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-13 16:29:35 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-13 16:29:35 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-13 16:29:35 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-13 16:29:35 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-13 16:29:35 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-13 16:29:35 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-13 16:29:35 +00:00: }
+2026-01-13 16:29:35 +00:00: 
+2026-01-13 16:29:35 +00:00: Node.js v24.4.1
+2026-01-13 16:29:37 +00:00: node:internal/modules/esm/resolve:274
+2026-01-13 16:29:37 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-13 16:29:37 +00:00:           ^
+2026-01-13 16:29:37 +00:00: 
+2026-01-13 16:29:37 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-13 16:29:37 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-13 16:29:37 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-13 16:29:37 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-13 16:29:37 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-13 16:29:37 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-13 16:29:37 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-13 16:29:37 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-13 16:29:37 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-13 16:29:37 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-13 16:29:37 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-13 16:29:37 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-13 16:29:37 +00:00: }
+2026-01-13 16:29:37 +00:00: 
+2026-01-13 16:29:37 +00:00: Node.js v24.4.1
+2026-01-13 16:29:39 +00:00: node:internal/modules/esm/resolve:274
+2026-01-13 16:29:39 +00:00:     throw new ERR_MODULE_NOT_FOUND(
+2026-01-13 16:29:39 +00:00:           ^
+2026-01-13 16:29:39 +00:00: 
+2026-01-13 16:29:39 +00:00: Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/var/www/gloriaconnect/backend/dist/infra/logger' imported from /var/www/gloriaconnect/backend/dist/infra/grpcClients.js
+2026-01-13 16:29:39 +00:00:     at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+2026-01-13 16:29:39 +00:00:     at moduleResolve (node:internal/modules/esm/resolve:859:10)
+2026-01-13 16:29:39 +00:00:     at defaultResolve (node:internal/modules/esm/resolve:983:11)
+2026-01-13 16:29:39 +00:00:     at ModuleLoader.defaultResolve (node:internal/modules/esm/loader:801:12)
+2026-01-13 16:29:39 +00:00:     at #cachedDefaultResolve (node:internal/modules/esm/loader:725:25)
+2026-01-13 16:29:39 +00:00:     at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+2026-01-13 16:29:39 +00:00:     at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:309:38)
+2026-01-13 16:29:39 +00:00:     at #link (node:internal/modules/esm/module_job:208:49)
+2026-01-13 16:29:39 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5) {
+2026-01-13 16:29:39 +00:00:   code: 'ERR_MODULE_NOT_FOUND',
+2026-01-13 16:29:39 +00:00:   url: 'file:///var/www/gloriaconnect/backend/dist/infra/logger'
+2026-01-13 16:29:39 +00:00: }
+2026-01-13 16:29:39 +00:00: 
+2026-01-13 16:29:39 +00:00: Node.js v24.4.1
+2026-01-13 16:29:42 +00:00: E No address added out of total 1 resolved
+2026-01-13 16:29:42 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-13 16:29:42 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 16:29:42 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 16:29:42 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:29:42 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 16:29:42 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 16:29:42 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 16:29:42 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 16:29:42 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 16:29:42 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:29:42 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 16:29:42 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 16:29:42 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 16:29:42 +00:00: E No address added out of total 1 resolved
+2026-01-13 16:29:42 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-13 16:29:42 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 16:29:42 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:29:42 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 16:59:51 +00:00: E No address added out of total 1 resolved
+2026-01-13 16:59:51 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-13 16:59:51 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 16:59:51 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 16:59:51 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:59:51 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 16:59:51 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 16:59:51 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 16:59:51 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 16:59:51 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 16:59:51 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:59:51 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 16:59:51 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 16:59:51 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 16:59:51 +00:00: E No address added out of total 1 resolved
+2026-01-13 16:59:51 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-13 16:59:51 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 16:59:51 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 16:59:51 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 17:30:13 +00:00: E No address added out of total 1 resolved
+2026-01-13 17:30:13 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-13 17:30:13 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 17:30:13 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 17:30:13 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 17:30:13 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 17:30:13 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 17:30:13 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 17:30:13 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 17:30:13 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 17:30:13 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 17:30:13 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 17:30:13 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 17:30:13 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 17:30:13 +00:00: E No address added out of total 1 resolved
+2026-01-13 17:30:13 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-13 17:30:14 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 17:30:14 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 17:30:14 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 18:00:24 +00:00: E No address added out of total 1 resolved
+2026-01-13 18:00:24 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-13 18:00:24 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 18:00:24 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 18:00:24 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 18:00:24 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 18:00:24 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 18:00:24 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 18:00:24 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 18:00:24 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 18:00:24 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 18:00:24 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 18:00:24 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 18:00:24 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 18:00:24 +00:00: E No address added out of total 1 resolved
+2026-01-13 18:00:24 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-13 18:00:24 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 18:00:24 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 18:00:24 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 18:30:37 +00:00: E No address added out of total 1 resolved
+2026-01-13 18:30:37 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-13 18:30:37 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 18:30:37 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 18:30:37 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 18:30:37 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 18:30:37 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 18:30:37 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 18:30:37 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 18:30:37 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 18:30:37 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 18:30:37 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 18:30:37 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 18:30:37 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 18:30:37 +00:00: E No address added out of total 1 resolved
+2026-01-13 18:30:37 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-13 18:30:37 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 18:30:37 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 18:30:37 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 18:56:41 +00:00: (node:577172) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-13 18:56:41 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-13 19:04:08 +00:00: (node:578604) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-13 19:04:08 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-13 19:04:36 +00:00: (node:578870) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-13 19:04:36 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-13 19:48:00 +00:00: E No address added out of total 1 resolved
+2026-01-13 19:48:00 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-13 19:48:00 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 19:48:00 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 19:48:00 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 19:48:00 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 19:48:00 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 19:48:00 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 19:48:00 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 19:48:00 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 19:48:00 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 19:48:00 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 19:48:00 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 19:48:00 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 19:48:00 +00:00: E No address added out of total 1 resolved
+2026-01-13 19:48:00 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-13 19:48:00 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 19:48:00 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 19:48:00 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 19:48:48 +00:00: E No address added out of total 1 resolved
+2026-01-13 19:48:48 +00:00: ❌ Unhandled Promise Rejection at: Promise {
+2026-01-13 19:48:48 +00:00:   <rejected> Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 19:48:48 +00:00:       at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 19:48:48 +00:00:       at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 19:48:48 +00:00:       at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 19:48:48 +00:00:       at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 19:48:48 +00:00:       at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 19:48:48 +00:00: } reason: Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50051]
+2026-01-13 19:48:48 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 19:48:48 +00:00:     at processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 19:48:48 +00:00:     at runNextTicks (node:internal/process/task_queues:69:3)
+2026-01-13 19:48:48 +00:00:     at process.processImmediate (node:internal/timers:473:9)
+2026-01-13 19:48:48 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 19:48:48 +00:00: E No address added out of total 1 resolved
+2026-01-13 19:48:48 +00:00: Public gRPC bind error Error: No address added out of total 1 resolved errors: [listen EADDRINUSE: address already in use 0.0.0.0:50052]
+2026-01-13 19:48:48 +00:00:     at Server.bindAddressList (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:490:27)
+2026-01-13 19:48:48 +00:00:     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+2026-01-13 19:48:48 +00:00:     at async Server.bindPort (/var/www/gloriaconnect/backend/node_modules/@grpc/grpc-js/build/src/server.js:523:36)
+2026-01-13 19:51:10 +00:00: (node:583134) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-13 19:51:10 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-13 19:51:32 +00:00: Failed to send OTP email: Error: connect ECONNREFUSED 192.178.223.108:587
+2026-01-13 19:51:32 +00:00:     at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16) {
+2026-01-13 19:51:32 +00:00:   errno: -111,
+2026-01-13 19:51:32 +00:00:   code: 'ESOCKET',
+2026-01-13 19:51:32 +00:00:   syscall: 'connect',
+2026-01-13 19:51:32 +00:00:   address: '192.178.223.108',
+2026-01-13 19:51:32 +00:00:   port: 587,
+2026-01-13 19:51:32 +00:00:   command: 'CONN'
+2026-01-13 19:51:32 +00:00: }

@@ -55,8 +55,14 @@ authRouter.post("/auth/register", async (req, res, next) => {
       },
     });
 
-    // Send OTP email
-    await EmailVerificationService.sendOTPEmail(body.email, body.companyName);
+    // Send OTP email (non-blocking - don't fail registration if email fails)
+    try {
+      await EmailVerificationService.sendOTPEmail(body.email, body.companyName);
+    } catch (emailError: any) {
+      // Log the email error but don't fail the registration
+      console.error("Failed to send OTP email:", emailError);
+      // Registration still succeeds, but user will need to resend OTP
+    }
 
     res.json({
       message: "Registration successful! Please check your email for verification code.",

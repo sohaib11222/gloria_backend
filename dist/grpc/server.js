@@ -235,11 +235,16 @@ export async function startGrpcServers() {
                 if (!request_id)
                     return cb({ code: 3, message: "Missing request_id" });
                 const out = await AvailabilityStore.getJobSince(String(request_id), Number(since_seq), Number(wait_ms));
+                // Add availability_request_id to each offer for booking context
+                const offersWithRequestId = out.new_items.map((offer) => ({
+                    ...offer,
+                    availability_request_id: request_id, // Add request_id to each offer
+                }));
                 // gRPC proto expects: complete, last_seq, offers
                 cb(null, {
                     complete: out.status !== "IN_PROGRESS",
                     last_seq: out.last_seq,
-                    offers: out.new_items,
+                    offers: offersWithRequestId,
                 });
             }
             catch (e) {
@@ -255,7 +260,9 @@ export async function startGrpcServers() {
             const t0 = Date.now();
             const req = call.request;
             try {
-                const { agent_id, source_id, agreement_ref, supplier_offer_ref, idempotency_key, agent_booking_ref, } = req;
+                const { agent_id, source_id, agreement_ref, supplier_offer_ref, idempotency_key, agent_booking_ref, 
+                // New OTA fields
+                availability_request_id, pickup_unlocode, dropoff_unlocode, pickup_iso, dropoff_iso, vehicle_class, vehicle_make_model, rate_plan_code, driver_age, residency_country, customer_info_json, payment_info_json, } = req;
                 if (!source_id)
                     return cb({ code: 3, message: "source_id is required" });
                 if (!idempotency_key)
@@ -310,13 +317,76 @@ export async function startGrpcServers() {
                 // Route to adapter with health monitoring
                 const adapter = await getAdapterForSource(source_id);
                 const bookingStartTime = Date.now();
+                // Get agent company info for POS element in OTA XML
+                let agentCompanyName;
+                try {
+                    const agentCompany = await prisma.company.findUnique({
+                        where: { id: agent_id },
+                        select: { companyName: true },
+                    });
+                    agentCompanyName = agentCompany?.companyName;
+                }
+                catch (e) {
+                    // If lookup fails, continue without company name
+                }
+                // Build full booking payload for adapter
+                const bookingPayload = {
+                    agreement_ref,
+                    supplier_offer_ref: supplier_offer_ref || "",
+                    agent_booking_ref: agent_booking_ref || "",
+                    agent_id, // Add agent ID for OTA XML POS element
+                    agent_company_name: agentCompanyName, // Add agent company name for OTA XML
+                };
+                // Add location details if provided
+                if (pickup_unlocode)
+                    bookingPayload.pickup_unlocode = pickup_unlocode;
+                if (dropoff_unlocode)
+                    bookingPayload.dropoff_unlocode = dropoff_unlocode;
+                if (pickup_iso)
+                    bookingPayload.pickup_iso = pickup_iso;
+                if (dropoff_iso)
+                    bookingPayload.dropoff_iso = dropoff_iso;
+                // Add vehicle and driver details if provided
+                if (vehicle_class)
+                    bookingPayload.vehicle_class = vehicle_class;
+                if (vehicle_make_model)
+                    bookingPayload.vehicle_make_model = vehicle_make_model;
+                if (rate_plan_code)
+                    bookingPayload.rate_plan_code = rate_plan_code;
+                if (driver_age !== undefined)
+                    bookingPayload.driver_age = driver_age;
+                if (residency_country)
+                    bookingPayload.residency_country = residency_country;
+                // Parse customer and payment info JSON strings if provided
+                let customerInfo = null;
+                let paymentInfo = null;
+                if (customer_info_json) {
+                    try {
+                        customerInfo = typeof customer_info_json === 'string'
+                            ? JSON.parse(customer_info_json)
+                            : customer_info_json;
+                        bookingPayload.customer_info = customerInfo;
+                    }
+                    catch (e) {
+                        // If parsing fails, keep as string
+                        bookingPayload.customer_info_json = customer_info_json;
+                    }
+                }
+                if (payment_info_json) {
+                    try {
+                        paymentInfo = typeof payment_info_json === 'string'
+                            ? JSON.parse(payment_info_json)
+                            : payment_info_json;
+                        bookingPayload.payment_info = paymentInfo;
+                    }
+                    catch (e) {
+                        // If parsing fails, keep as string
+                        bookingPayload.payment_info_json = payment_info_json;
+                    }
+                }
                 let supplierResp;
                 try {
-                    supplierResp = await adapter.bookingCreate({
-                        agreement_ref,
-                        supplier_offer_ref,
-                        agent_booking_ref,
-                    });
+                    supplierResp = await adapter.bookingCreate(bookingPayload);
                     const bookingLatency = Date.now() - bookingStartTime;
                     // Record successful booking health metric
                     await SourceHealthService.recordMetric({
@@ -359,15 +429,46 @@ export async function startGrpcServers() {
                     }, bookingLatency / 1000);
                     throw error;
                 }
-                // Persist booking
+                // Parse ISO datetime strings to DateTime objects if provided
+                let pickupDateTime;
+                let dropoffDateTime;
+                if (pickup_iso) {
+                    pickupDateTime = new Date(pickup_iso);
+                    if (isNaN(pickupDateTime.getTime()))
+                        pickupDateTime = undefined;
+                }
+                if (dropoff_iso) {
+                    dropoffDateTime = new Date(dropoff_iso);
+                    if (isNaN(dropoffDateTime.getTime()))
+                        dropoffDateTime = undefined;
+                }
+                // Persist booking with full context
                 const booking = await prisma.booking.create({
                     data: {
                         agentId: agent_id,
                         sourceId: source_id,
                         agreementRef: agreement_ref,
                         supplierBookingRef: supplierResp.supplier_booking_ref,
-                        status: supplierResp.status,
+                        agentBookingRef: agent_booking_ref || null,
+                        idempotencyKey: idempotency_key || null,
+                        status: supplierResp.status || "REQUESTED",
                         payloadJson: supplierResp,
+                        // Availability context
+                        availabilityRequestId: availability_request_id || null,
+                        // Location details
+                        pickupUnlocode: pickup_unlocode || null,
+                        dropoffUnlocode: dropoff_unlocode || null,
+                        pickupDateTime: pickupDateTime || null,
+                        dropoffDateTime: dropoffDateTime || null,
+                        // Vehicle and driver details
+                        vehicleClass: vehicle_class || null,
+                        vehicleMakeModel: vehicle_make_model || null,
+                        ratePlanCode: rate_plan_code || null,
+                        driverAge: driver_age || null,
+                        residencyCountry: residency_country || null,
+                        // Customer and payment info
+                        customerInfoJson: customerInfo || null,
+                        paymentInfoJson: paymentInfo || null,
                     },
                 });
                 // Save idempotency record
@@ -417,27 +518,49 @@ export async function startGrpcServers() {
             const t0 = Date.now();
             const req = call.request;
             try {
-                const { supplier_booking_ref, source_id } = req;
+                const { supplier_booking_ref, source_id, agreement_ref } = req;
                 if (!supplier_booking_ref || !source_id) {
                     return cb({ code: 3, message: "supplier_booking_ref and source_id are required" });
                 }
-                // Lookup booking to get agreement_ref
-                const booking = await prisma.booking.findFirst({
-                    where: {
-                        supplierBookingRef: supplier_booking_ref,
-                        sourceId: source_id,
-                    },
-                    select: { agreementRef: true, agentId: true },
-                });
-                if (!booking) {
-                    return cb({ code: 5, message: "Booking not found" });
+                // Use agreement_ref from request if provided, otherwise lookup from booking
+                let agreementRef = agreement_ref;
+                let agentId;
+                if (!agreementRef) {
+                    // Lookup booking to get agreement_ref
+                    const booking = await prisma.booking.findFirst({
+                        where: {
+                            supplierBookingRef: supplier_booking_ref,
+                            sourceId: source_id,
+                        },
+                        select: { agreementRef: true, agentId: true },
+                    });
+                    if (!booking) {
+                        return cb({ code: 5, message: "Booking not found" });
+                    }
+                    agreementRef = booking.agreementRef;
+                    agentId = booking.agentId;
+                }
+                // Lookup booking to get agentId if not already known
+                if (!agentId) {
+                    const booking = await prisma.booking.findFirst({
+                        where: {
+                            supplierBookingRef: supplier_booking_ref,
+                            sourceId: source_id,
+                            agreementRef: agreementRef,
+                        },
+                        select: { agentId: true },
+                    });
+                    if (!booking) {
+                        return cb({ code: 5, message: "Booking not found for this agreement" });
+                    }
+                    agentId = booking.agentId;
                 }
                 // Validate agreement is ACTIVE
                 const ag = await prisma.agreement.findFirst({
                     where: {
-                        agentId: booking.agentId,
+                        agentId: agentId,
                         sourceId: source_id,
-                        agreementRef: booking.agreementRef,
+                        agreementRef: agreementRef,
                         status: "ACTIVE",
                     },
                 });
@@ -447,7 +570,7 @@ export async function startGrpcServers() {
                 const adapter = await getAdapterForSource(source_id);
                 const resp = await adapter.bookingModify({
                     supplier_booking_ref,
-                    agreement_ref: booking.agreementRef,
+                    agreement_ref: agreementRef,
                 });
                 await prisma.booking.updateMany({
                     where: {
@@ -459,9 +582,9 @@ export async function startGrpcServers() {
                 await auditLog({
                     direction: "IN",
                     endpoint: "booking.modify",
-                    companyId: booking.agentId,
+                    companyId: agentId,
                     sourceId: source_id,
-                    agreementRef: booking.agreementRef,
+                    agreementRef: agreementRef,
                     grpcStatus: 0,
                     request: req,
                     response: resp,
@@ -469,8 +592,8 @@ export async function startGrpcServers() {
                 });
                 cb(null, {
                     supplier_booking_ref,
+                    agreement_ref: agreementRef,
                     status: resp.status,
-                    agreement_ref: booking.agreementRef,
                     source_id,
                 });
             }
@@ -491,27 +614,49 @@ export async function startGrpcServers() {
             const t0 = Date.now();
             const req = call.request;
             try {
-                const { supplier_booking_ref, source_id } = req;
+                const { supplier_booking_ref, source_id, agreement_ref } = req;
                 if (!supplier_booking_ref || !source_id) {
                     return cb({ code: 3, message: "supplier_booking_ref and source_id are required" });
                 }
-                // Lookup booking to get agreement_ref
-                const booking = await prisma.booking.findFirst({
-                    where: {
-                        supplierBookingRef: supplier_booking_ref,
-                        sourceId: source_id,
-                    },
-                    select: { agreementRef: true, agentId: true },
-                });
-                if (!booking) {
-                    return cb({ code: 5, message: "Booking not found" });
+                // Use agreement_ref from request if provided, otherwise lookup from booking
+                let agreementRef = agreement_ref;
+                let agentId;
+                if (!agreementRef) {
+                    // Lookup booking to get agreement_ref
+                    const booking = await prisma.booking.findFirst({
+                        where: {
+                            supplierBookingRef: supplier_booking_ref,
+                            sourceId: source_id,
+                        },
+                        select: { agreementRef: true, agentId: true },
+                    });
+                    if (!booking) {
+                        return cb({ code: 5, message: "Booking not found" });
+                    }
+                    agreementRef = booking.agreementRef;
+                    agentId = booking.agentId;
+                }
+                // Lookup booking to get agentId if not already known
+                if (!agentId) {
+                    const booking = await prisma.booking.findFirst({
+                        where: {
+                            supplierBookingRef: supplier_booking_ref,
+                            sourceId: source_id,
+                            agreementRef: agreementRef,
+                        },
+                        select: { agentId: true },
+                    });
+                    if (!booking) {
+                        return cb({ code: 5, message: "Booking not found for this agreement" });
+                    }
+                    agentId = booking.agentId;
                 }
                 // Validate agreement is ACTIVE
                 const ag = await prisma.agreement.findFirst({
                     where: {
-                        agentId: booking.agentId,
+                        agentId: agentId,
                         sourceId: source_id,
-                        agreementRef: booking.agreementRef,
+                        agreementRef: agreementRef,
                         status: "ACTIVE",
                     },
                 });
@@ -519,7 +664,7 @@ export async function startGrpcServers() {
                     return cb({ code: 9, message: "AGREEMENT_INACTIVE or not found" });
                 }
                 const adapter = await getAdapterForSource(source_id);
-                const resp = await adapter.bookingCancel(supplier_booking_ref, booking.agreementRef);
+                const resp = await adapter.bookingCancel(supplier_booking_ref, agreementRef);
                 await prisma.booking.updateMany({
                     where: {
                         supplierBookingRef: supplier_booking_ref,
@@ -530,9 +675,9 @@ export async function startGrpcServers() {
                 await auditLog({
                     direction: "IN",
                     endpoint: "booking.cancel",
-                    companyId: booking.agentId,
+                    companyId: agentId,
                     sourceId: source_id,
-                    agreementRef: booking.agreementRef,
+                    agreementRef: agreementRef,
                     grpcStatus: 0,
                     request: req,
                     response: resp,
@@ -540,8 +685,8 @@ export async function startGrpcServers() {
                 });
                 cb(null, {
                     supplier_booking_ref,
+                    agreement_ref: agreementRef,
                     status: resp.status,
-                    agreement_ref: booking.agreementRef,
                     source_id,
                 });
             }
@@ -562,27 +707,49 @@ export async function startGrpcServers() {
             const t0 = Date.now();
             const req = call.request;
             try {
-                const { supplier_booking_ref, source_id } = req;
+                const { supplier_booking_ref, source_id, agreement_ref } = req;
                 if (!supplier_booking_ref || !source_id) {
                     return cb({ code: 3, message: "supplier_booking_ref and source_id are required" });
                 }
-                // Lookup booking to get agreement_ref
-                const booking = await prisma.booking.findFirst({
-                    where: {
-                        supplierBookingRef: supplier_booking_ref,
-                        sourceId: source_id,
-                    },
-                    select: { agreementRef: true, agentId: true },
-                });
-                if (!booking) {
-                    return cb({ code: 5, message: "Booking not found" });
+                // Use agreement_ref from request if provided, otherwise lookup from booking
+                let agreementRef = agreement_ref;
+                let agentId;
+                if (!agreementRef) {
+                    // Lookup booking to get agreement_ref
+                    const booking = await prisma.booking.findFirst({
+                        where: {
+                            supplierBookingRef: supplier_booking_ref,
+                            sourceId: source_id,
+                        },
+                        select: { agreementRef: true, agentId: true },
+                    });
+                    if (!booking) {
+                        return cb({ code: 5, message: "Booking not found" });
+                    }
+                    agreementRef = booking.agreementRef;
+                    agentId = booking.agentId;
+                }
+                // Lookup booking to get agentId if not already known
+                if (!agentId) {
+                    const booking = await prisma.booking.findFirst({
+                        where: {
+                            supplierBookingRef: supplier_booking_ref,
+                            sourceId: source_id,
+                            agreementRef: agreementRef,
+                        },
+                        select: { agentId: true },
+                    });
+                    if (!booking) {
+                        return cb({ code: 5, message: "Booking not found for this agreement" });
+                    }
+                    agentId = booking.agentId;
                 }
                 // Validate agreement is ACTIVE
                 const ag = await prisma.agreement.findFirst({
                     where: {
-                        agentId: booking.agentId,
+                        agentId: agentId,
                         sourceId: source_id,
-                        agreementRef: booking.agreementRef,
+                        agreementRef: agreementRef,
                         status: "ACTIVE",
                     },
                 });
@@ -590,13 +757,13 @@ export async function startGrpcServers() {
                     return cb({ code: 9, message: "AGREEMENT_INACTIVE or not found" });
                 }
                 const adapter = await getAdapterForSource(source_id);
-                const resp = await adapter.bookingCheck(supplier_booking_ref, booking.agreementRef);
+                const resp = await adapter.bookingCheck(supplier_booking_ref, agreementRef);
                 await auditLog({
                     direction: "IN",
                     endpoint: "booking.check",
-                    companyId: booking.agentId,
+                    companyId: agentId,
                     sourceId: source_id,
-                    agreementRef: booking.agreementRef,
+                    agreementRef: agreementRef,
                     grpcStatus: 0,
                     request: req,
                     response: resp,
@@ -604,8 +771,8 @@ export async function startGrpcServers() {
                 });
                 cb(null, {
                     supplier_booking_ref,
+                    agreement_ref: agreementRef,
                     status: resp.status,
-                    agreement_ref: booking.agreementRef,
                     source_id,
                 });
             }

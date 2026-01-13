@@ -1,22 +1,32 @@
-// gRPC adapter implementation for connecting to external suppliers
+// HTTP adapter implementation for connecting to external suppliers
 import fetch from 'node-fetch';
+import { buildOtaVehResRQ, convertToOtaBookingData } from '../services/otaXmlBuilder.js';
 export class GrpcAdapter {
     config;
     constructor(config) {
         this.config = config;
     }
-    async makeRequest(method, path, data) {
+    async makeRequest(method, path, data, useXml = false) {
         const url = `${this.config.endpoint}${path}`;
         const headers = {
-            'Content-Type': 'application/json'
+            'Content-Type': useXml ? 'application/xml' : 'application/json'
         };
         if (this.config.authHeader) {
             headers['Authorization'] = this.config.authHeader;
         }
+        let body;
+        if (data) {
+            if (useXml && typeof data === 'string') {
+                body = data;
+            }
+            else {
+                body = JSON.stringify(data);
+            }
+        }
         try {
             const response = await fetch(url, {
                 method,
-                body: data ? JSON.stringify(data) : undefined,
+                body,
                 headers,
                 signal: AbortSignal.timeout(30000)
             });
@@ -24,11 +34,18 @@ export class GrpcAdapter {
                 const errorText = await response.text().catch(() => 'Unknown error');
                 throw new Error(`HTTP ${response.status}: ${errorText}`);
             }
-            return await response.json();
+            // Try to parse as JSON first, fall back to text
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+                return await response.json();
+            }
+            else {
+                return await response.text();
+            }
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            console.error(`gRPC Adapter error for ${method} ${path}:`, errorMessage);
+            console.error(`HTTP Adapter error for ${method} ${path}:`, errorMessage);
             throw error;
         }
     }
@@ -76,24 +93,55 @@ export class GrpcAdapter {
     }
     async bookingCreate(input) {
         try {
-            const bookingData = {
-                AgreementRef: input.agreement_ref,
-                SupplierOfferRef: input.supplier_offer_ref,
-                AgentBookingRef: input.agent_booking_ref,
-                PickupLocation: input.pickup_unlocode,
-                DropOffLocation: input.dropoff_unlocode,
-                PickupDateTime: input.pickup_iso,
-                DropOffDateTime: input.dropoff_iso,
-                VehicleClass: input.vehicle_class,
-                DriverAge: input.driver_age,
-                ResidencyCountry: input.residency_country
-            };
-            const response = await this.makeRequest('POST', '/booking/create', bookingData);
+            // Check if we have full booking data and should use OTA XML
+            const hasFullBookingData = !!(input.pickup_unlocode || input.pickup_iso ||
+                input.vehicle_class || input.driver_age);
+            const useOtaXml = this.config.useOtaXml && hasFullBookingData &&
+                this.config.agentId;
+            let response;
+            if (useOtaXml) {
+                // Generate OTA XML format
+                // Use agent info from input if available, otherwise fall back to config
+                const agentId = input.agent_id || this.config.agentId || '';
+                const agentCompanyName = input.agent_company_name || this.config.agentCompanyName;
+                const otaData = convertToOtaBookingData(input, agentId, agentCompanyName);
+                const xmlPayload = buildOtaVehResRQ(otaData);
+                response = await this.makeRequest('POST', '/booking/create', xmlPayload, true);
+                // Parse XML response if needed (for now, expect JSON response even with XML request)
+                if (typeof response === 'string') {
+                    // TODO: Add XML parsing if source returns XML
+                    // For now, try to parse as JSON
+                    try {
+                        response = JSON.parse(response);
+                    }
+                    catch (e) {
+                        // If not JSON, return raw response
+                    }
+                }
+            }
+            else {
+                // Use JSON format (backward compatible)
+                const bookingData = {
+                    AgreementRef: input.agreement_ref,
+                    SupplierOfferRef: input.supplier_offer_ref,
+                    AgentBookingRef: input.agent_booking_ref,
+                    PickupLocation: input.pickup_unlocode,
+                    DropOffLocation: input.dropoff_unlocode,
+                    PickupDateTime: input.pickup_iso,
+                    DropOffDateTime: input.dropoff_iso,
+                    VehicleClass: input.vehicle_class,
+                    DriverAge: input.driver_age,
+                    ResidencyCountry: input.residency_country,
+                    ...(input.customer_info && { CustomerInfo: input.customer_info }),
+                    ...(input.payment_info && { PaymentInfo: input.payment_info })
+                };
+                response = await this.makeRequest('POST', '/booking/create', bookingData);
+            }
             return {
-                supplier_booking_ref: response.SupplierBookingRef,
-                status: response.Status,
-                agreement_ref: response.AgreementRef,
-                supplier_offer_ref: response.SupplierOfferRef
+                supplier_booking_ref: response.SupplierBookingRef || response.supplier_booking_ref,
+                status: response.Status || response.status || 'REQUESTED',
+                agreement_ref: response.AgreementRef || response.agreement_ref || input.agreement_ref,
+                supplier_offer_ref: response.SupplierOfferRef || response.supplier_offer_ref
             };
         }
         catch (error) {

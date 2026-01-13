@@ -75,7 +75,9 @@ export function buildApp() {
     app.use(authRouter); // Also mount without prefix for backward compatibility
     // Apply OTA mapper to availability and bookings routes
     app.use('/availability', otaMapper, availabilityRouter);
+    app.use('/api/availability', otaMapper, availabilityRouter);
     app.use('/bookings', otaMapper, bookingsRouter);
+    app.use('/api/bookings', otaMapper, bookingsRouter);
     // Mount agreements router with /api prefix to match frontend expectations
     app.use("/api", agreementsRouter);
     app.use(agreementsRouter); // Also mount without prefix for backward compatibility
