@@ -24,7 +24,7 @@ import (
 )
 
 func main() {
-    config := sdk.Config{
+    config := sdk.ForRest(sdk.ConfigData{
         BaseURL: "https://your-gateway.example.com",
         Token: "Bearer <JWT>",
         APIKey: "<YOUR_API_KEY>", // Optional
@@ -32,46 +32,60 @@ func main() {
         CallTimeoutMs: 12000,
         AvailabilitySlaMs: 120000,
         LongPollWaitMs: 10000,
-    }
+    })
     
     client := sdk.NewClient(config)
     ctx := context.Background()
     
     // Search availability
-    criteria := sdk.AvailabilityCriteria{
-        PickupLocode: "PKKHI",
-        ReturnLocode: "PKLHE",
-        PickupAt: time.Date(2025, 11, 3, 10, 0, 0, 0, time.UTC),
-        ReturnAt: time.Date(2025, 11, 5, 10, 0, 0, 0, time.UTC),
-        DriverAge: 28,
-        Currency: "USD",
-        AgreementRefs: []string{"AGR-001"},
-    }
+    criteria := sdk.MakeAvailabilityCriteria(
+        "PKKHI",
+        "PKLHE",
+        time.Date(2025, 11, 3, 10, 0, 0, 0, time.UTC),
+        time.Date(2025, 11, 5, 10, 0, 0, 0, time.UTC),
+        28,
+        "USD",
+        []string{"AGR-001"},
+    )
     
-    chunks, err := client.Availability().Search(ctx, criteria)
+    resultChan, err := client.Availability().Search(ctx, criteria)
     if err != nil {
         panic(err)
     }
     
-    for chunk := range chunks {
-        fmt.Printf("[%s] items=%d cursor=%d\n", chunk.Status, len(chunk.Items), chunk.Cursor)
+    for result := range resultChan {
+        if result.Error != nil {
+            fmt.Printf("Error: %v\n", result.Error)
+            break
+        }
+        chunk := result.Chunk
+        fmt.Printf("[%s] items=%d", chunk.Status, len(chunk.Items))
+        if chunk.Cursor != nil {
+            fmt.Printf(" cursor=%d", *chunk.Cursor)
+        }
+        fmt.Println()
         if chunk.Status == "COMPLETE" {
             break
         }
     }
     
     // Create booking
-    booking := sdk.BookingCreate{
-        AgreementRef: "AGR-001",
-        SupplierID: "SRC-AVIS",
-        OfferID: "off_123",
-        Driver: sdk.Driver{
-            FirstName: "Ali",
-            LastName: "Raza",
-            Email: "ali@example.com",
-            Phone: "+92...",
-            Age: 28,
+    bookingData := map[string]interface{}{
+        "agreement_ref": "AGR-001",
+        "supplier_id":   "SRC-AVIS",
+        "offer_id":      "off_123",
+        "driver": map[string]interface{}{
+            "first_name": "Ali",
+            "last_name":  "Raza",
+            "email":      "ali@example.com",
+            "phone":      "+92...",
+            "age":        28,
         },
+    }
+    
+    booking, err := sdk.BookingCreateFromOffer(bookingData)
+    if err != nil {
+        panic(err)
     }
     
     result, err := client.Booking().Create(ctx, booking, "idem-123")
@@ -95,20 +109,20 @@ The SDK uses the following REST endpoints (aligned with middleware):
 
 ## gRPC Transport
 
-gRPC transport is available but requires proto file generation:
+gRPC transport is currently a stub implementation. Full implementation requires proto file generation from the backend:
 
 ```bash
 protoc --go_out=. --go-grpc_out=. ../../protos/*.proto
 ```
 
-Then implement the methods in `transport/grpc.go` using the generated stubs.
+The gRPC transport will return errors indicating it's not yet implemented until proto files are generated and integrated.
 
 ## Configuration
 
 ### REST Configuration
 
 ```go
-config := sdk.Config{
+config := sdk.ForRest(sdk.ConfigData{
     BaseURL: "https://api.example.com", // Required
     Token: "Bearer <JWT>", // Required
     APIKey: "<API_KEY>", // Optional
@@ -117,13 +131,13 @@ config := sdk.Config{
     AvailabilitySlaMs: 120000, // Default: 120000
     LongPollWaitMs: 10000, // Default: 10000
     CorrelationID: "custom-id", // Auto-generated if not provided
-}
+})
 ```
 
 ### gRPC Configuration
 
 ```go
-config := sdk.Config{
+config := sdk.ForGrpc(sdk.ConfigData{
     Host: "api.example.com:50051", // Required
     CACert: "<CA_CERT>", // Required
     ClientCert: "<CLIENT_CERT>", // Required
@@ -132,7 +146,7 @@ config := sdk.Config{
     CallTimeoutMs: 10000, // Default: 10000
     AvailabilitySlaMs: 120000, // Default: 120000
     LongPollWaitMs: 10000, // Default: 10000
-}
+})
 ```
 
 ## Features
@@ -149,18 +163,33 @@ config := sdk.Config{
 ```go
 result, err := client.Booking().Create(ctx, booking, "idem-123")
 if err != nil {
-    if sdkErr, ok := err.(*sdk.TransportException); ok {
-        fmt.Printf("Status: %d, Code: %s\n", sdkErr.StatusCode, sdkErr.Code)
+    var transportErr *sdk.TransportException
+    if errors.As(err, &transportErr) {
+        fmt.Printf("Status: %d, Code: %s\n", transportErr.StatusCode, transportErr.Code)
     }
     return err
 }
 ```
 
+Note: Import `errors` package for error handling utilities.
+
 ## Requirements
 
 - Go 1.18+
-- Standard library: `net/http`, `encoding/json`, `context`
-- For gRPC: `google.golang.org/grpc` and generated proto stubs
+- Standard library: `net/http`, `encoding/json`, `context`, `time`, `fmt`
+- For gRPC: `google.golang.org/grpc` and generated proto stubs (not yet implemented)
+
+## Package Structure
+
+- `config.go` - Configuration management with factory methods (`ForRest`, `ForGrpc`)
+- `exceptions.go` - Error handling with `TransportException`
+- `dto.go` - Data transfer objects (AvailabilityCriteria, AvailabilityChunk, BookingCreate, etc.)
+- `client.go` - Main client implementation
+- `availability_client.go` - Availability search with channel-based streaming
+- `booking_client.go` - Booking operations (create, modify, cancel, check)
+- `locations_client.go` - Location support checking
+- `rest_transport.go` - REST transport implementation
+- `grpc_transport.go` - gRPC transport stub (requires proto generation)
 
 ## License
 

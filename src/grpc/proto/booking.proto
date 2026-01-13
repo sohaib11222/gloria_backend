@@ -9,6 +9,26 @@ message CreateRequest {
   string supplier_offer_ref = 4; // SupplierOfferRef
   string idempotency_key = 5;    // IdempotencyKey
   string agent_booking_ref = 6;  // AgentBookingRef (optional)
+  
+  // Availability context (links booking to original search)
+  string availability_request_id = 7; // Links to AvailabilityJob.requestId
+  
+  // Location details (from availability search) - OTA: PickupLocation, DropOffLocation
+  string pickup_unlocode = 8;    // PickupLocation (UN/LOCODE)
+  string dropoff_unlocode = 9;   // DropOffLocation (UN/LOCODE)
+  string pickup_iso = 10;        // PickupDateTime (ISO-8601)
+  string dropoff_iso = 11;       // DropOffDateTime (ISO-8601)
+  
+  // Vehicle and driver details (from availability search/offer)
+  string vehicle_class = 12;     // VehicleClass (OTA codes: ECMN, CDMR, etc.)
+  string vehicle_make_model = 13; // VehicleMakeModel
+  string rate_plan_code = 14;    // RatePlanCode (BAR, MEMBER, PREPAY, etc.)
+  uint32 driver_age = 15;        // DriverAge
+  string residency_country = 16; // ResidencyCountry (ISO 3166-1 alpha-2)
+  
+  // Customer and payment information (JSON strings for flexibility)
+  string customer_info_json = 17; // Customer name, contact details, etc.
+  string payment_info_json = 18;  // Payment details, card info, etc.
 }
 
 // OTA XML field naming conventions for car rental booking response
@@ -19,9 +39,21 @@ message Booking {
   string source_id = 4;            // SourceId
 }
 
-message ModifyRequest { string supplier_booking_ref = 1; string source_id = 2; }
-message CancelRequest { string supplier_booking_ref = 1; string source_id = 2; }
-message CheckRequest  { string supplier_booking_ref = 1; string source_id = 2; }
+message ModifyRequest { 
+  string supplier_booking_ref = 1; 
+  string source_id = 2; 
+  string agreement_ref = 3; // AgreementRef - REQUIRED for all booking operations
+}
+message CancelRequest { 
+  string supplier_booking_ref = 1; 
+  string source_id = 2; 
+  string agreement_ref = 3; // AgreementRef - REQUIRED for all booking operations
+}
+message CheckRequest { 
+  string supplier_booking_ref = 1; 
+  string source_id = 2; 
+  string agreement_ref = 3; // AgreementRef - REQUIRED for all booking operations
+}
 
 service BookingService {
   rpc Create(CreateRequest) returns (Booking);

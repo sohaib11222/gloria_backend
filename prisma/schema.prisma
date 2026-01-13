@@ -203,21 +203,43 @@ model AvailabilityResult {
 }
 
 model Booking {
-  id                 String        @id @default(cuid())
-  agentId            String
-  sourceId           String
-  agreementRef       String
-  supplierBookingRef String?
-  agentBookingRef    String?
-  idempotencyKey     String?
-  status             BookingStatus @default(REQUESTED)
-  payloadJson        Json?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  id                     String        @id @default(cuid())
+  agentId                String
+  sourceId               String
+  agreementRef           String
+  supplierBookingRef     String?
+  agentBookingRef        String?
+  idempotencyKey         String?
+  status                 BookingStatus @default(REQUESTED)
+  payloadJson            Json?
+  
+  // Availability context (links booking to original search)
+  availabilityRequestId  String?       // Links to AvailabilityJob.requestId
+  
+  // Location details (from availability search)
+  pickupUnlocode         String?
+  dropoffUnlocode        String?
+  pickupDateTime         DateTime?
+  dropoffDateTime        DateTime?
+  
+  // Vehicle and driver details (from availability search/offer)
+  vehicleClass           String?
+  vehicleMakeModel       String?
+  ratePlanCode           String?
+  driverAge              Int?
+  residencyCountry       String?       // ISO 3166-1 alpha-2
+  
+  // Customer and payment information (JSON fields for flexibility)
+  customerInfoJson       Json?         // Customer name, contact details, etc.
+  paymentInfoJson        Json?         // Payment details, card info, etc.
+  
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, agreementRef, createdAt])
   @@index([sourceId, supplierBookingRef])
+  @@index([availabilityRequestId])
 }
 
 model Notification {
