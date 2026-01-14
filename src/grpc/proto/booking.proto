@@ -43,6 +43,21 @@ message ModifyRequest {
   string supplier_booking_ref = 1; 
   string source_id = 2; 
   string agreement_ref = 3; // AgreementRef - REQUIRED for all booking operations
+  
+  // Modification fields (all optional)
+  string pickup_unlocode = 4;    // PickupLocation (UN/LOCODE)
+  string dropoff_unlocode = 5;   // DropOffLocation (UN/LOCODE)
+  string pickup_iso = 6;         // PickupDateTime (ISO-8601)
+  string dropoff_iso = 7;        // DropOffDateTime (ISO-8601)
+  string vehicle_class = 8;      // VehicleClass (OTA codes: ECMN, CDMR, etc.)
+  string vehicle_make_model = 9; // VehicleMakeModel
+  string rate_plan_code = 10;    // RatePlanCode (BAR, MEMBER, PREPAY, etc.)
+  uint32 driver_age = 11;        // DriverAge
+  string residency_country = 12; // ResidencyCountry (ISO 3166-1 alpha-2)
+  string customer_info_json = 13; // Customer information (JSON string)
+  string payment_info_json = 14;  // Payment information (JSON string)
+  repeated string special_equip_prefs = 15; // Special equipment preferences
+  bool option_change_indicator = 16; // OptionChangeIndicator
 }
 message CancelRequest { 
   string supplier_booking_ref = 1; 

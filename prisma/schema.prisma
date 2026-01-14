@@ -242,6 +242,23 @@ model Booking {
   @@index([availabilityRequestId])
 }
 
+model BookingHistory {
+  id            String   @id @default(cuid())
+  bookingId     String
+  eventType     String   // CREATED, MODIFIED, CANCELLED, STATUS_CHANGED
+  changes       Json?    // Field-level changes: { field: { before, after } }
+  beforeState   Json?    // Snapshot of booking before change
+  afterState    Json?    // Snapshot of booking after change
+  userId        String?  // User/company ID who made the change
+  source        String?  // Source of change: AGENT, SOURCE, SYSTEM, ADMIN
+  metadata      Json?    // Additional metadata (reason, notes, etc.)
+  timestamp     DateTime @default(now())
+
+  @@index([bookingId, timestamp])
+  @@index([bookingId, eventType])
+  @@index([timestamp])
+}
+
 model Notification {
   id        String    @id @default(cuid())
   companyId String?
@@ -337,6 +354,8 @@ model SourceHealth {
   excludedUntil DateTime?
   lastResetBy   String? // Admin user ID who reset
   lastResetAt   DateTime?
+  strikeCount   Int       @default(0) // NEW: Track strikes (3 strikes trigger backoff)
+  lastStrikeAt  DateTime? // NEW: When last strike occurred
   updatedAt     DateTime  @updatedAt
 
   @@index([sourceId])
