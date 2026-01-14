@@ -37,8 +37,8 @@ func main() {
     client := sdk.NewClient(config)
     ctx := context.Background()
     
-    // Search availability
-    criteria := sdk.MakeAvailabilityCriteria(
+    // Search availability (with validation)
+    criteria, err := sdk.MakeAvailabilityCriteria(
         "PKKHI",
         "PKLHE",
         time.Date(2025, 11, 3, 10, 0, 0, 0, time.UTC),
@@ -47,6 +47,9 @@ func main() {
         "USD",
         []string{"AGR-001"},
     )
+    if err != nil {
+        log.Fatal(err)
+    }
     
     resultChan, err := client.Availability().Search(ctx, criteria)
     if err != nil {
@@ -70,9 +73,9 @@ func main() {
     }
     
     // Create booking
+    // Note: supplier_id is not required - backend resolves source_id from agreement_ref
     bookingData := map[string]interface{}{
         "agreement_ref": "AGR-001",
-        "supplier_id":   "SRC-AVIS",
         "offer_id":      "off_123",
         "driver": map[string]interface{}{
             "first_name": "Ali",
@@ -157,6 +160,44 @@ config := sdk.ForGrpc(sdk.ConfigData{
 - **Idempotency**: Booking creation supports idempotency keys
 - **Error Handling**: Comprehensive error handling with `TransportException`
 - **Context Support**: Full context.Context support for cancellation and timeouts
+- **Input Validation**: Automatic validation of criteria, bookings, and configuration
+- **Location Support**: Location validation happens automatically during availability submit
+
+## Input Validation
+
+The SDK automatically validates inputs. Invalid inputs will return errors immediately:
+
+```go
+// Invalid input will return an error
+criteria, err := sdk.MakeAvailabilityCriteria(
+    "", // Error: pickupLocode is required
+    "PKLHE",
+    time.Date(2025, 11, 3, 10, 0, 0, 0, time.UTC),
+    time.Date(2025, 11, 1, 10, 0, 0, 0, time.UTC), // Error: returnAt must be after pickupAt
+    17, // Error: driverAge must be between 18 and 100
+    "USD",
+    []string{}, // Error: agreementRefs must be a non-empty array
+)
+if err != nil {
+    log.Fatal("Validation error:", err)
+}
+```
+
+**Validated Fields:**
+- AvailabilityCriteria: dates, locodes, driver age (18-100), currency, agreement refs
+- BookingCreate: required fields (agreement_ref)
+- Config: required fields and timeout values
+
+## Location Support
+
+Location validation is automatically performed during availability submit. The `IsLocationSupported()` method currently returns `false` as a safe default because the backend requires agreement ID (not ref) to check coverage.
+
+```go
+// Location validation happens automatically during availability search
+// The IsLocationSupported() method is informational only
+supported, _ := client.Locations().IsSupported(ctx, "AGR-001", "GBMAN")
+// Returns false (safe default) - use availability submit for actual validation
+```
 
 ## Error Handling
 

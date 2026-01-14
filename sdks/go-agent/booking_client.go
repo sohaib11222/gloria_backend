@@ -29,9 +29,7 @@ func (bc *BookingClient) Create(ctx context.Context, booking *BookingCreate, ide
 		return nil, fmt.Errorf("agreement_ref required")
 	}
 
-	if booking.SupplierID == "" {
-		return nil, fmt.Errorf("supplier_id required")
-	}
+	// Note: supplier_id is not required - backend resolves source_id from agreement_ref
 
 	payload := booking.ToMap()
 	result, err := bc.transport.BookingCreate(ctx, payload, idempotencyKey)

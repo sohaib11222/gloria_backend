@@ -13,9 +13,7 @@ export class BookingClient {
     if (!payload.agreement_ref) {
       throw new Error('agreement_ref required');
     }
-    if (!payload.supplier_id) {
-      throw new Error('supplier_id required');
-    }
+    // Note: supplier_id is not required - backend resolves source_id from agreement_ref
     return this.transport.bookingCreate(payload, idempotencyKey);
   }
 

@@ -296,28 +296,42 @@ locationsRouter.delete("/coverage/agreement/:agreementId/override/:unlocode", re
  *       - bearerAuth: []
  */
 const locationRequestSchema = z.object({
-  locationName: z.string().min(1),
-  country: z.string().min(2),
+  locationName: z.string().min(1, "Location name is required"),
+  country: z.string()
+    .length(2, "Country code must be exactly 2 letters (ISO 3166-1 alpha-2)")
+    .regex(/^[A-Z]{2}$/, "Country code must be 2 uppercase letters (e.g., GB, US, FR)"),
   city: z.string().optional(),
   address: z.string().optional(),
-  iataCode: z.string().optional(),
+  iataCode: z.string()
+    .max(3, "IATA code must be 3 letters or less")
+    .regex(/^[A-Z]{0,3}$/, "IATA code must contain only uppercase letters")
+    .optional()
+    .or(z.literal("")),
   reason: z.string().optional(),
 });
 
 locationsRouter.post("/locations/request", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
   try {
     const sourceId = req.user.companyId;
+    // Normalize country code to uppercase
+    if (req.body.country) {
+      req.body.country = req.body.country.toUpperCase().trim();
+    }
+    // Normalize IATA code to uppercase if provided
+    if (req.body.iataCode) {
+      req.body.iataCode = req.body.iataCode.toUpperCase().trim() || null;
+    }
     const body = locationRequestSchema.parse(req.body);
 
     const request = await prisma.locationRequest.create({
       data: {
         sourceId,
-        locationName: body.locationName,
+        locationName: body.locationName.trim(),
         country: body.country,
-        city: body.city || null,
-        address: body.address || null,
-        iataCode: body.iataCode || null,
-        reason: body.reason || null,
+        city: body.city?.trim() || null,
+        address: body.address?.trim() || null,
+        iataCode: body.iataCode && body.iataCode.length > 0 ? body.iataCode : null,
+        reason: body.reason?.trim() || null,
         status: "PENDING",
       },
       include: {

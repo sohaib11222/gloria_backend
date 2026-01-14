@@ -86,11 +86,31 @@ export class EmailVerificationService {
       </html>
     `;
 
-    await sendMail({
-      to: email,
-      subject: "Verify Your Email - Car Hire Middleware",
-      html,
-    });
+    try {
+      await sendMail({
+        to: email,
+        subject: "Verify Your Email - Car Hire Middleware",
+        html,
+      });
+      console.log(`✅ OTP email sent to ${email} (OTP: ${otp})`);
+    } catch (error: any) {
+      console.error(`❌ Failed to send OTP email to ${email}:`, error);
+      
+      // Check if it's an SMTP authentication error
+      const isSmtpAuthError = error.message?.includes('Username and Password not accepted') ||
+                              error.message?.includes('Invalid login') ||
+                              error.message?.includes('BadCredentials') ||
+                              error.code === 'EAUTH';
+      
+      if (isSmtpAuthError) {
+        // OTP is already stored in DB, so we can still return it
+        // The caller can handle showing it in dev mode
+        throw new Error(`SMTP authentication failed. Please check your SMTP credentials in the admin panel or environment variables.`);
+      }
+      
+      // Re-throw with a cleaner message
+      throw new Error(`Failed to send verification email: ${error.message}`);
+    }
 
     return otp; // Return for testing purposes
   }

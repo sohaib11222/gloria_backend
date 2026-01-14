@@ -29,11 +29,31 @@ class Config:
     @classmethod
     def for_grpc(cls, data: dict) -> "Config":
         """Create configuration for gRPC transport."""
+        # Validation
+        if not data.get("host") or not str(data.get("host", "")).strip():
+            raise ValueError("host is required for gRPC configuration")
+        if not data.get("caCert") or not str(data.get("caCert", "")).strip():
+            raise ValueError("caCert is required for gRPC configuration")
+        if not data.get("clientCert") or not str(data.get("clientCert", "")).strip():
+            raise ValueError("clientCert is required for gRPC configuration")
+        if not data.get("clientKey") or not str(data.get("clientKey", "")).strip():
+            raise ValueError("clientKey is required for gRPC configuration")
         return cls(True, data)
 
     @classmethod
     def for_rest(cls, data: dict) -> "Config":
         """Create configuration for REST transport."""
+        # Validation
+        if not data.get("baseUrl") or not str(data.get("baseUrl", "")).strip():
+            raise ValueError("baseUrl is required for REST configuration")
+        if not data.get("token") or not str(data.get("token", "")).strip():
+            raise ValueError("token is required for REST configuration")
+        if "callTimeoutMs" in data and data["callTimeoutMs"] < 1000:
+            raise ValueError("callTimeoutMs must be at least 1000ms")
+        if "availabilitySlaMs" in data and data["availabilitySlaMs"] < 1000:
+            raise ValueError("availabilitySlaMs must be at least 1000ms")
+        if "longPollWaitMs" in data and data["longPollWaitMs"] < 1000:
+            raise ValueError("longPollWaitMs must be at least 1000ms")
         return cls(False, data)
 
     def is_grpc(self) -> bool:

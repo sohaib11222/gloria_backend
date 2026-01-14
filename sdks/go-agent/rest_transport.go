@@ -141,7 +141,11 @@ func (rt *RestTransport) AvailabilityPoll(ctx context.Context, requestID string,
 	return rt.doRequest(ctx, "GET", path, nil, rt.headers(nil), timeout)
 }
 
-// IsLocationSupported checks if a location is supported
+// IsLocationSupported checks if a location is supported.
+// Note: Currently returns false as a safe default because the backend requires
+// agreement ID (not ref) to check coverage, and there's no direct endpoint to
+// resolve agreementRef to agreementId. Location validation is automatically
+// performed during availability submit.
 func (rt *RestTransport) IsLocationSupported(ctx context.Context, agreementRef, locode string) (bool, error) {
 	// Backend doesn't have a direct /locations/supported endpoint
 	// Return false for safety - SDK users should check locations via agreement coverage endpoint

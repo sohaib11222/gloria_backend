@@ -26,6 +26,8 @@ config = Config.for_rest({
     "longPollWaitMs": 10000,
 })
 
+# The client uses async HTTP (httpx) for non-blocking requests
+# For proper cleanup, use async context manager or manually close the transport
 client = CarHireClient(config)
 
 # Search availability
@@ -45,9 +47,9 @@ async for chunk in client.get_availability().search(criteria):
         break
 
 # Create booking
+# Note: supplier_id is not required - backend resolves source_id from agreement_ref
 booking = BookingCreate.from_offer({
     "agreement_ref": "AGR-001",
-    "supplier_id": "SRC-AVIS",
     "offer_id": "off_123",
     "driver": {
         "firstName": "Ali",
@@ -124,6 +126,42 @@ Config.for_grpc({
 - **Error Handling**: Comprehensive error handling with `TransportException`
 - **Type Hints**: Full type annotations included
 
+## Input Validation
+
+The SDK automatically validates inputs:
+
+- **AvailabilityCriteria**: Validates dates, locodes, driver age (18-100), currency, and agreement refs
+- **BookingCreate**: Validates required fields (agreement_ref)
+- **Config**: Validates required fields (baseUrl, token for REST; host, certificates for gRPC)
+- **Locations**: UN/LOCODEs are automatically normalized to uppercase
+
+```python
+# Invalid input will raise ValueError
+try:
+    criteria = AvailabilityCriteria.make(
+        pickup_locode="",  # Error: pickup_locode is required
+        return_locode="PKLHE",
+        pickup_at=datetime(2025, 11, 3),
+        return_at=datetime(2025, 11, 1),  # Error: return_at must be after pickup_at
+        driver_age=17,  # Error: driver_age must be between 18 and 100
+        currency="USD",
+        agreement_refs=[],  # Error: agreement_refs must be a non-empty list
+    )
+except ValueError as e:
+    print(f"Validation error: {e}")
+```
+
+## Location Support
+
+Location validation is automatically performed during availability submit. The `is_supported()` method currently returns `False` as a safe default because the backend requires agreement ID (not ref) to check coverage.
+
+```python
+# Location validation happens automatically during availability search
+# The is_supported() method is informational only
+supported = await client.get_locations().is_supported("AGR-001", "GBMAN")
+# Returns False (safe default) - use availability submit for actual validation
+```
+
 ## Error Handling
 
 ```python
@@ -139,7 +177,7 @@ except TransportException as e:
 ## Requirements
 
 - Python 3.8+
-- requests >= 2.31.0
+- httpx >= 0.25.0 (async HTTP client)
 - grpcio >= 1.60.0 (for gRPC transport)
 
 ## License

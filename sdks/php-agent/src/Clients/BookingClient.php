@@ -16,7 +16,7 @@ final class BookingClient
     {
         $payload = $dto->toArray();
         if (empty($payload['agreement_ref'])) throw new InvalidArgumentException('agreement_ref required');
-        if (empty($payload['supplier_id']))   throw new InvalidArgumentException('supplier_id required');
+        // Note: supplier_id is not required - backend resolves source_id from agreement_ref
         return $this->t->bookingCreate($payload, $idempotencyKey);
     }
 

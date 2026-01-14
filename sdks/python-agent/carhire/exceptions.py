@@ -18,7 +18,8 @@ class TransportException(Exception):
         code = None
         message = str(error)
 
-        if hasattr(error, "response"):
+        # Handle httpx errors
+        if hasattr(error, "response") and error.response is not None:
             response = error.response
             if hasattr(response, "status_code"):
                 status_code = response.status_code
@@ -26,12 +27,27 @@ class TransportException(Exception):
                 try:
                     import json
                     data = json.loads(response.text)
-                    message = json.dumps(data)
+                    if isinstance(data, dict) and "message" in data:
+                        message = data["message"]
+                    else:
+                        message = json.dumps(data)
                 except:
                     message = response.text
+            elif hasattr(response, "content"):
+                try:
+                    import json
+                    data = json.loads(response.content)
+                    if isinstance(data, dict) and "message" in data:
+                        message = data["message"]
+                    else:
+                        message = json.dumps(data)
+                except:
+                    message = str(response.content)
 
-        if hasattr(error, "code"):
-            code = str(error.code)
+        # Handle httpx HTTPStatusError
+        if hasattr(error, "response") and error.response is not None:
+            if hasattr(error.response, "status_code"):
+                status_code = error.response.status_code
 
         return cls(message, status_code, code)
 

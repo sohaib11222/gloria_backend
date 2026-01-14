@@ -40,9 +40,9 @@ foreach ($client->availability()->search($criteria) as $chunk) {
   // $chunk->items, $chunk->status (PARTIAL|COMPLETE), $chunk->cursor
 }
 
+// Note: supplier_id is not required - backend resolves source_id from agreement_ref
 $booking = BookingCreate::fromOffer([
   'agreement_ref' => 'AGR-001',
-  'supplier_id'   => 'SRC-AVIS',
   'offer_id'      => 'off_123',
   'driver'        => ['firstName'=>'Ali','lastName'=>'Raza','email'=>'ali@example.com','phone'=>'+92...', 'age'=>28]
 ]);
@@ -466,7 +466,7 @@ final class BookingClient
     {
         $payload = $dto->toArray();
         if (empty($payload['agreement_ref'])) throw new InvalidArgumentException('agreement_ref required');
-        if (empty($payload['supplier_id']))   throw new InvalidArgumentException('supplier_id required');
+        // Note: supplier_id is not required - backend resolves source_id from agreement_ref
         return $this->t->bookingCreate($payload, $idempotencyKey);
     }
 
@@ -624,7 +624,8 @@ final class BookingCreate
     public static function fromOffer(array $offer): self
     {
         // Minimal validation; middleware will enforce full schema
-        foreach (['agreement_ref','supplier_id','offer_id'] as $k) {
+        // Note: supplier_id is not required - backend resolves source_id from agreement_ref
+        foreach (['agreement_ref'] as $k) {
             if (empty($offer[$k])) throw new \InvalidArgumentException("$k required");
         }
         return new self($offer);

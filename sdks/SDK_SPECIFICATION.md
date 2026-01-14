@@ -56,6 +56,8 @@ All transports implement:
 #### LocationsClient
 
 - `isSupported(agreementRef, locode)` - Check if location is supported
+  
+  **Note:** Currently returns `false` as a safe default. The backend requires agreement ID (not ref) to check coverage, and there's no direct endpoint to resolve agreementRef to ID. Location validation is automatically performed during availability submit, so this method is primarily for informational purposes. A future backend endpoint `GET /locations/supported?agreement_ref={ref}&locode={code}` would enable full implementation.
 
 ## Data Models
 
@@ -92,8 +94,7 @@ All transports implement:
 
 ```typescript
 {
-  agreement_ref: string;
-  supplier_id: string;
+  agreement_ref: string;  // Required - backend resolves source_id from this
   offer_id?: string;
   supplier_offer_ref?: string;
   agent_booking_ref?: string;
@@ -106,6 +107,8 @@ All transports implement:
   };
 }
 ```
+
+**Note:** `supplier_id` is not required. The backend automatically resolves `source_id` from `agreement_ref` by looking up the agreement in the database.
 
 ## REST Endpoints
 
@@ -191,6 +194,36 @@ All SDKs provide `TransportException` with:
 - Uses standard PHP patterns
 - Uses Guzzle for HTTP
 - Uses grpc/grpc for gRPC
+
+## Input Validation
+
+All SDKs automatically validate inputs:
+
+- **AvailabilityCriteria**: 
+  - Validates dates (pickupAt < returnAt)
+  - Validates locodes (non-empty, normalized to uppercase)
+  - Validates driver age (18-100)
+  - Validates currency (non-empty, normalized to uppercase)
+  - Validates agreement refs (non-empty array)
+  - Validates residency country (2-letter ISO code if provided)
+
+- **BookingCreate**: 
+  - Validates required fields (agreement_ref)
+  - Note: supplier_id is not required (backend resolves from agreement_ref)
+
+- **Config**: 
+  - REST: Validates baseUrl and token are required
+  - gRPC: Validates host, caCert, clientCert, clientKey are required
+  - Validates timeout values are at least 1000ms
+
+## Location Support
+
+The `isLocationSupported()` method currently returns `false` as a safe default because:
+- The backend requires agreement ID (not ref) to check coverage
+- There's no direct endpoint to resolve agreementRef to agreementId
+- Location validation is automatically performed during availability submit
+
+**Recommendation**: Use availability submit for location validation, which validates locations automatically.
 
 ## Versioning
 

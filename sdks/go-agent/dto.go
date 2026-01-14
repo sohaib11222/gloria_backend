@@ -2,6 +2,8 @@ package sdk
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -20,14 +22,45 @@ type AvailabilityCriteria struct {
 	Extras            map[string]interface{}
 }
 
-// MakeAvailabilityCriteria creates a new AvailabilityCriteria
+// MakeAvailabilityCriteria creates a new AvailabilityCriteria with validation
 func MakeAvailabilityCriteria(
 	pickupLocode, returnLocode string,
 	pickupAt, returnAt time.Time,
 	driverAge int,
 	currency string,
 	agreementRefs []string,
-) *AvailabilityCriteria {
+) (*AvailabilityCriteria, error) {
+	// Validation
+	if pickupLocode == "" {
+		return nil, fmt.Errorf("pickupLocode is required")
+	}
+	if returnLocode == "" {
+		return nil, fmt.Errorf("returnLocode is required")
+	}
+	if pickupAt.IsZero() {
+		return nil, fmt.Errorf("pickupAt must be a valid time")
+	}
+	if returnAt.IsZero() {
+		return nil, fmt.Errorf("returnAt must be a valid time")
+	}
+	if !returnAt.After(pickupAt) {
+		return nil, fmt.Errorf("returnAt must be after pickupAt")
+	}
+	if driverAge < 18 || driverAge > 100 {
+		return nil, fmt.Errorf("driverAge must be between 18 and 100")
+	}
+	if currency == "" {
+		return nil, fmt.Errorf("currency is required")
+	}
+	if agreementRefs == nil || len(agreementRefs) == 0 {
+		return nil, fmt.Errorf("agreementRefs must be a non-empty array")
+	}
+	
+	// Normalize
+	pickupLocode = strings.ToUpper(strings.TrimSpace(pickupLocode))
+	returnLocode = strings.ToUpper(strings.TrimSpace(returnLocode))
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	
 	if agreementRefs == nil {
 		agreementRefs = []string{}
 	}
@@ -43,7 +76,7 @@ func MakeAvailabilityCriteria(
 		RatePrefs:        []string{},
 		ResidencyCountry: "US",
 		Extras:           make(map[string]interface{}),
-	}
+	}, nil
 }
 
 // WithVehiclePrefs sets vehicle preferences
@@ -133,14 +166,37 @@ func AvailabilityChunkFromJSON(data []byte) (*AvailabilityChunk, error) {
 }
 
 // BookingCreate represents booking creation data
+// Supports all optional fields accepted by the backend
 type BookingCreate struct {
 	AgreementRef      string                 `json:"agreement_ref"`
-	SupplierID        string                 `json:"supplier_id"`
-	OfferID           string                 `json:"offer_id,omitempty"`
 	SupplierOfferRef  string                 `json:"supplier_offer_ref,omitempty"`
 	AgentBookingRef   string                 `json:"agent_booking_ref,omitempty"`
-	Driver            *Driver                `json:"driver,omitempty"`
-	Extras            map[string]interface{} `json:"-"`
+	
+	// Availability context (optional - if provided, will retrieve context from availability search)
+	AvailabilityRequestID string `json:"availability_request_id,omitempty"`
+	
+	// Location details (from availability search) - OTA: PickupLocation, DropOffLocation
+	PickupUnlocode   string `json:"pickup_unlocode,omitempty"`   // PickupLocation (UN/LOCODE)
+	DropoffUnlocode  string `json:"dropoff_unlocode,omitempty"`  // DropOffLocation (UN/LOCODE)
+	PickupISO        string `json:"pickup_iso,omitempty"`        // PickupDateTime (ISO-8601)
+	DropoffISO       string `json:"dropoff_iso,omitempty"`       // DropOffDateTime (ISO-8601)
+	
+	// Vehicle and driver details (from availability search/offer)
+	VehicleClass     string `json:"vehicle_class,omitempty"`     // VehicleClass (OTA codes: ECMN, CDMR, etc.)
+	VehicleMakeModel string `json:"vehicle_make_model,omitempty"` // VehicleMakeModel
+	RatePlanCode     string `json:"rate_plan_code,omitempty"`    // RatePlanCode (BAR, MEMBER, PREPAY, etc.)
+	DriverAge        int    `json:"driver_age,omitempty"`        // DriverAge
+	ResidencyCountry string `json:"residency_country,omitempty"` // ResidencyCountry (ISO 3166-1 alpha-2)
+	
+	// Customer and payment information (JSON objects)
+	CustomerInfo map[string]interface{} `json:"customer_info,omitempty"` // Customer name, contact details, etc.
+	PaymentInfo  map[string]interface{} `json:"payment_info,omitempty"`  // Payment details, card info, etc.
+	
+	// Legacy/deprecated fields (kept for backward compatibility)
+	SupplierID string  `json:"supplier_id,omitempty"` // Note: Not required - backend resolves from agreement_ref
+	OfferID    string  `json:"offer_id,omitempty"`
+	Driver     *Driver `json:"driver,omitempty"`
+	Extras     map[string]interface{} `json:"-"`
 }
 
 // Driver represents driver information
@@ -165,10 +221,10 @@ func BookingCreateFromOffer(data map[string]interface{}) (*BookingCreate, error)
 		return nil, fmt.Errorf("agreement_ref required")
 	}
 
+	// Note: supplier_id is not required - backend resolves source_id from agreement_ref
+	// Optional: allow supplier_id if provided for backward compatibility
 	if supplierID, ok := data["supplier_id"].(string); ok {
 		booking.SupplierID = supplierID
-	} else {
-		return nil, fmt.Errorf("supplier_id required")
 	}
 
 	// Optional fields
@@ -212,10 +268,54 @@ func BookingCreateFromOffer(data map[string]interface{}) (*BookingCreate, error)
 		booking.Driver = driver
 	}
 
-	// Store extras
+	// Optional fields from backend schema
+	if val, ok := data["availability_request_id"].(string); ok {
+		booking.AvailabilityRequestID = val
+	}
+	if val, ok := data["pickup_unlocode"].(string); ok {
+		booking.PickupUnlocode = val
+	}
+	if val, ok := data["dropoff_unlocode"].(string); ok {
+		booking.DropoffUnlocode = val
+	}
+	if val, ok := data["pickup_iso"].(string); ok {
+		booking.PickupISO = val
+	}
+	if val, ok := data["dropoff_iso"].(string); ok {
+		booking.DropoffISO = val
+	}
+	if val, ok := data["vehicle_class"].(string); ok {
+		booking.VehicleClass = val
+	}
+	if val, ok := data["vehicle_make_model"].(string); ok {
+		booking.VehicleMakeModel = val
+	}
+	if val, ok := data["rate_plan_code"].(string); ok {
+		booking.RatePlanCode = val
+	}
+	if val, ok := data["driver_age"].(float64); ok {
+		booking.DriverAge = int(val)
+	}
+	if val, ok := data["driver_age"].(int); ok {
+		booking.DriverAge = val
+	}
+	if val, ok := data["residency_country"].(string); ok {
+		booking.ResidencyCountry = val
+	}
+	if val, ok := data["customer_info"].(map[string]interface{}); ok {
+		booking.CustomerInfo = val
+	}
+	if val, ok := data["payment_info"].(map[string]interface{}); ok {
+		booking.PaymentInfo = val
+	}
+
+	// Store extras (unknown fields)
 	for k, v := range data {
 		switch k {
-		case "agreement_ref", "supplier_id", "offer_id", "supplier_offer_ref", "agent_booking_ref", "driver":
+		case "agreement_ref", "supplier_id", "offer_id", "supplier_offer_ref", "agent_booking_ref", 
+		     "driver", "availability_request_id", "pickup_unlocode", "dropoff_unlocode", 
+		     "pickup_iso", "dropoff_iso", "vehicle_class", "vehicle_make_model", 
+		     "rate_plan_code", "driver_age", "residency_country", "customer_info", "payment_info":
 			// Skip known fields
 		default:
 			booking.Extras[k] = v
@@ -229,17 +329,59 @@ func BookingCreateFromOffer(data map[string]interface{}) (*BookingCreate, error)
 func (bc *BookingCreate) ToMap() map[string]interface{} {
 	result := map[string]interface{}{
 		"agreement_ref": bc.AgreementRef,
-		"supplier_id":   bc.SupplierID,
 	}
-
-	if bc.OfferID != "" {
-		result["offer_id"] = bc.OfferID
-	}
+	
+	// Add optional fields if provided
 	if bc.SupplierOfferRef != "" {
 		result["supplier_offer_ref"] = bc.SupplierOfferRef
 	}
 	if bc.AgentBookingRef != "" {
 		result["agent_booking_ref"] = bc.AgentBookingRef
+	}
+	if bc.AvailabilityRequestID != "" {
+		result["availability_request_id"] = bc.AvailabilityRequestID
+	}
+	if bc.PickupUnlocode != "" {
+		result["pickup_unlocode"] = bc.PickupUnlocode
+	}
+	if bc.DropoffUnlocode != "" {
+		result["dropoff_unlocode"] = bc.DropoffUnlocode
+	}
+	if bc.PickupISO != "" {
+		result["pickup_iso"] = bc.PickupISO
+	}
+	if bc.DropoffISO != "" {
+		result["dropoff_iso"] = bc.DropoffISO
+	}
+	if bc.VehicleClass != "" {
+		result["vehicle_class"] = bc.VehicleClass
+	}
+	if bc.VehicleMakeModel != "" {
+		result["vehicle_make_model"] = bc.VehicleMakeModel
+	}
+	if bc.RatePlanCode != "" {
+		result["rate_plan_code"] = bc.RatePlanCode
+	}
+	if bc.DriverAge > 0 {
+		result["driver_age"] = bc.DriverAge
+	}
+	if bc.ResidencyCountry != "" {
+		result["residency_country"] = bc.ResidencyCountry
+	}
+	if bc.CustomerInfo != nil {
+		result["customer_info"] = bc.CustomerInfo
+	}
+	if bc.PaymentInfo != nil {
+		result["payment_info"] = bc.PaymentInfo
+	}
+	
+	// Legacy/deprecated fields (kept for backward compatibility)
+	// Note: supplier_id is optional - backend resolves source_id from agreement_ref
+	if bc.SupplierID != "" {
+		result["supplier_id"] = bc.SupplierID
+	}
+	if bc.OfferID != "" {
+		result["offer_id"] = bc.OfferID
 	}
 	if bc.Driver != nil {
 		driver := map[string]interface{}{}

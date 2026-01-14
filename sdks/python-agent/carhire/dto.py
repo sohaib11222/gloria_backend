@@ -49,13 +49,33 @@ class AvailabilityCriteria:
         extras: Optional[Dict[str, Any]] = None,
     ) -> "AvailabilityCriteria":
         """Create availability criteria."""
+        # Validation
+        if not pickup_locode or not pickup_locode.strip():
+            raise ValueError("pickup_locode is required")
+        if not return_locode or not return_locode.strip():
+            raise ValueError("return_locode is required")
+        if not pickup_at or not isinstance(pickup_at, datetime):
+            raise ValueError("pickup_at must be a valid datetime")
+        if not return_at or not isinstance(return_at, datetime):
+            raise ValueError("return_at must be a valid datetime")
+        if return_at <= pickup_at:
+            raise ValueError("return_at must be after pickup_at")
+        if not driver_age or driver_age < 18 or driver_age > 100:
+            raise ValueError("driver_age must be between 18 and 100")
+        if not currency or not currency.strip():
+            raise ValueError("currency is required")
+        if not agreement_refs or not isinstance(agreement_refs, list) or len(agreement_refs) == 0:
+            raise ValueError("agreement_refs must be a non-empty list")
+        if residency_country and len(residency_country) != 2:
+            raise ValueError("residency_country must be a 2-letter ISO code")
+        
         return cls(
-            pickup_locode,
-            return_locode,
+            pickup_locode.strip().upper(),
+            return_locode.strip().upper(),
             pickup_at,
             return_at,
             driver_age,
-            currency,
+            currency.strip().upper(),
             agreement_refs,
             vehicle_prefs,
             rate_prefs,
@@ -107,7 +127,16 @@ class AvailabilityChunk:
 
 
 class BookingCreate:
-    """Booking creation data."""
+    """Booking creation data.
+    
+    Supports all optional fields accepted by the backend:
+    - availability_request_id: Link to availability search
+    - pickup_unlocode, dropoff_unlocode: Location details
+    - pickup_iso, dropoff_iso: Date/time details
+    - vehicle_class, vehicle_make_model, rate_plan_code: Vehicle details
+    - driver_age, residency_country: Driver details
+    - customer_info, payment_info: Customer and payment information
+    """
 
     def __init__(self, data: Dict[str, Any]):
         self.data = data
@@ -115,10 +144,11 @@ class BookingCreate:
     @classmethod
     def from_offer(cls, offer: Dict[str, Any]) -> "BookingCreate":
         """Create booking from offer data."""
-        required = ["agreement_ref", "supplier_id"]
+        required = ["agreement_ref"]
         for key in required:
             if not offer.get(key):
                 raise ValueError(f"{key} required")
+        # Note: supplier_id is not required - backend resolves source_id from agreement_ref
         return cls(offer)
 
     def to_dict(self) -> Dict[str, Any]:

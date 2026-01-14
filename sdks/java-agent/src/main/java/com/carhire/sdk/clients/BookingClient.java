@@ -20,9 +20,7 @@ public class BookingClient {
         if (!dto.containsKey("agreement_ref")) {
             throw new IllegalArgumentException("agreement_ref required");
         }
-        if (!dto.containsKey("supplier_id")) {
-            throw new IllegalArgumentException("supplier_id required");
-        }
+        // Note: supplier_id is not required - backend resolves source_id from agreement_ref
         return transport.bookingCreate(dto, idempotencyKey);
     }
 

@@ -51,9 +51,9 @@ for my $chunk ($client->availability()->search($criteria)) {
 }
 
 # Create booking
+# Note: supplier_id is not required - backend resolves source_id from agreement_ref
 my $booking = {
     agreement_ref => 'AGR-001',
-    supplier_id   => 'SRC-AVIS',
     offer_id      => 'off_123',
     driver        => {
         firstName => 'Ali',

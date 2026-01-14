@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../../data/prisma.js";
 import { Auth } from "../../infra/auth.js";
 import { EmailVerificationService } from "../../services/emailVerification.js";
+import { PasswordResetService } from "../../services/passwordReset.js";
 import { requireAuth } from "../../infra/auth.js";
 
 export const authRouter = Router();
@@ -55,21 +56,47 @@ authRouter.post("/auth/register", async (req, res, next) => {
       },
     });
 
-    // Send OTP email (non-blocking - don't fail registration if email fails)
+    // Send OTP email
+    let emailSent = false;
+    let emailError: string | null = null;
     try {
-      await EmailVerificationService.sendOTPEmail(body.email, body.companyName);
-    } catch (emailError: any) {
-      // Log the email error but don't fail the registration
-      console.error("Failed to send OTP email:", emailError);
+      const otp = await EmailVerificationService.sendOTPEmail(body.email, body.companyName);
+      emailSent = true;
+      console.log(`✅ Registration successful for ${body.email}, OTP sent: ${otp}`);
+    } catch (emailErr: any) {
+      emailSent = false;
+      emailError = emailErr.message || "Unknown error";
+      console.error(`❌ Registration succeeded but failed to send OTP email to ${body.email}:`, emailErr);
       // Registration still succeeds, but user will need to resend OTP
     }
 
-    res.json({
-      message: "Registration successful! Please check your email for verification code.",
+    // Return response with email status
+    // NEVER include OTP in API response for security reasons
+    const response: any = {
+      message: emailSent 
+        ? "Registration successful! Please check your email for verification code."
+        : "Registration successful! However, we couldn't send the verification email. Please use the resend OTP feature or check the server console (development mode only).",
       email: body.email,
       companyName: body.companyName,
-      status: "PENDING_VERIFICATION"
-    });
+      status: "PENDING_VERIFICATION",
+      emailSent,
+    };
+    
+    // Log OTP to console in development mode only (never in API response)
+    if (!emailSent && process.env.NODE_ENV !== 'production') {
+      const company = await prisma.company.findUnique({
+        where: { email: body.email },
+        select: { emailOtp: true },
+      });
+      if (company?.emailOtp) {
+        console.log(`\n${'='.repeat(80)}`);
+        console.log(`🔑 REGISTRATION OTP FOR ${body.email}: ${company.emailOtp}`);
+        console.log(`⚠️  Email sending failed - OTP shown in console for development only`);
+        console.log(`${'='.repeat(80)}\n`);
+      }
+    }
+    
+    res.json(response);
   } catch (e) {
     next(e);
   }
@@ -172,12 +199,126 @@ authRouter.post("/auth/resend-otp", async (req, res, next) => {
       });
     }
 
-    await EmailVerificationService.resendOTP(email);
+    let emailSent = false;
+    let emailError: string | null = null;
+    let otp: string | null = null;
 
-    res.json({
-      message: "OTP email sent successfully!",
-      email
+    try {
+      otp = await EmailVerificationService.resendOTP(email);
+      emailSent = true;
+      console.log(`✅ Resend OTP successful for ${email}, OTP sent: ${otp}`);
+    } catch (emailErr: any) {
+      emailSent = false;
+      // Extract detailed error message
+      const errorMsg = emailErr.message || "Unknown error";
+      const errorCode = emailErr.code || emailErr.responseCode || 'N/A';
+      emailError = errorMsg;
+      console.error(`❌ Resend OTP: Failed to send email to ${email}:`, {
+        message: errorMsg,
+        code: errorCode,
+        response: emailErr.response,
+        command: emailErr.command,
+        responseCode: emailErr.responseCode
+      });
+      
+      // Check if OTP was generated but email failed
+      const company = await prisma.company.findUnique({
+        where: { email },
+        select: { emailOtp: true, emailVerified: true },
+      });
+
+      if (company && !company.emailVerified && company.emailOtp) {
+        otp = company.emailOtp;
+        console.log(`⚠️  OTP generated but email failed. OTP: ${otp}`);
+      } else if (emailErr.message.includes("Company not found")) {
+        return res.status(404).json({
+          error: "COMPANY_NOT_FOUND",
+          message: "Company not found"
+        });
+      } else if (emailErr.message.includes("Email already verified")) {
+        return res.status(400).json({
+          error: "EMAIL_ALREADY_VERIFIED",
+          message: "Email is already verified"
+        });
+      }
+    }
+
+    // Check SMTP configuration status for better error messages
+    const smtpConfig = await prisma.smtpConfig.findFirst({
+      where: { enabled: true },
+      orderBy: { updatedAt: 'desc' },
     });
+    const hasEnvVars = !!(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
+    const isSmtpConfigured = !!smtpConfig || hasEnvVars;
+    const configSource = smtpConfig ? 'admin_panel' : (hasEnvVars ? 'environment_variables' : 'none');
+    
+    // Determine the specific issue
+    let errorType = 'unknown';
+    let errorDetails = '';
+    
+    if (!isSmtpConfigured) {
+      errorType = 'not_configured';
+      errorDetails = 'SMTP is not configured. No admin config found and environment variables are missing.';
+    } else if (emailError) {
+      if (emailError.includes('Authentication') || emailError.includes('BadCredentials') || emailError.includes('Username and Password not accepted')) {
+        errorType = 'auth_failed';
+        errorDetails = 'SMTP credentials are incorrect. For Gmail, use an App Password (not your regular password).';
+      } else if (emailError.includes('SMTP')) {
+        errorType = 'smtp_error';
+        errorDetails = `SMTP error: ${emailError}`;
+      } else {
+        errorType = 'send_failed';
+        errorDetails = emailError;
+      }
+    }
+    
+    // Return response with email status
+    // NEVER include OTP in API response for security reasons
+    const response: any = {
+      message: emailSent 
+        ? "OTP email sent successfully! Please check your email."
+        : errorType === 'not_configured'
+          ? "OTP was generated but email sending failed. SMTP is not configured. Please configure SMTP to receive emails."
+          : "OTP was generated but email sending failed. Please check your SMTP configuration.",
+      email,
+      emailSent,
+      smtpConfigured: isSmtpConfigured,
+      configSource,
+      errorType,
+      errorDetails: !emailSent ? errorDetails : undefined,
+      help: !emailSent ? {
+        configureViaAdmin: "POST /admin/smtp with your SMTP credentials",
+        configureViaEnv: "Set EMAIL_HOST, EMAIL_USER, EMAIL_PASS in .env file (no quotes around values)",
+        gmailHelp: "For Gmail: Enable 2-Step Verification and use App Password from https://myaccount.google.com/apppasswords",
+        checkConsole: "In development mode, check server console for OTP and detailed error logs",
+        note: configSource === 'admin_panel' 
+          ? "⚠️ Admin panel config is active and overrides .env variables. To use .env, disable admin config."
+          : configSource === 'environment_variables'
+          ? "Using .env variables. Make sure values have NO quotes: EMAIL_PASS=obmfugyywnvxctez (not EMAIL_PASS=\"obmfugyywnvxctez\")"
+          : "No SMTP configuration found. Configure via admin panel or .env file."
+      } : undefined
+    };
+
+    // Log OTP to console in development mode only (never in API response)
+    if (!emailSent && otp) {
+      const isDev = process.env.NODE_ENV !== 'production';
+      if (isDev) {
+        console.log(`\n${'='.repeat(80)}`);
+        console.log(`🔑 OTP FOR ${email}: ${otp}`);
+        console.log(`⚠️  Email sending failed - OTP shown in console for development only`);
+        console.log(`${'='.repeat(80)}\n`);
+      } else {
+        console.error(`❌ Email sending failed for ${email}. OTP was generated but not sent.`);
+        console.error(`   Please check SMTP configuration in admin panel or environment variables.`);
+      }
+    }
+
+    // If email failed, return 200 with warning, not 500
+    if (!emailSent) {
+      return res.status(200).json(response);
+    }
+
+    res.json(response);
   } catch (e: any) {
     if (e.message === "Company not found") {
       return res.status(404).json({
@@ -373,6 +514,170 @@ authRouter.get("/auth/me", requireAuth(), async (req: any, res, next) => {
     };
 
     res.json(userData);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /auth/forgot-password:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Request password reset
+ *     description: |
+ *       Request a password reset by email. Sends an OTP to the user's email address.
+ */
+authRouter.post("/auth/forgot-password", async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({
+        error: "MISSING_EMAIL",
+        message: "Email is required"
+      });
+    }
+
+    let emailSent = false;
+    let emailError: string | null = null;
+    let otp: string | null = null;
+
+    try {
+      otp = await PasswordResetService.sendResetOTP(email);
+      emailSent = true;
+      console.log(`✅ Password reset OTP sent to ${email}`);
+    } catch (emailErr: any) {
+      emailSent = false;
+      emailError = emailErr.message || "Unknown error";
+      console.error(`❌ Failed to send password reset OTP to ${email}:`, emailErr);
+      
+      // Check for specific error cases
+      if (emailErr.message.includes("User not found")) {
+        // Don't reveal if user exists or not for security
+        // Return success message even if user doesn't exist
+        return res.status(200).json({
+          message: "If an account with that email exists, a password reset code has been sent.",
+          emailSent: false, // Actually false, but we don't reveal this
+        });
+      } else if (emailErr.message.includes("Email not verified")) {
+        return res.status(400).json({
+          error: "EMAIL_NOT_VERIFIED",
+          message: "Please verify your email address before resetting your password",
+        });
+      }
+    }
+
+    // Check SMTP configuration status
+    const smtpConfig = await prisma.smtpConfig.findFirst({
+      where: { enabled: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+    const hasEnvVars = !!(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
+    const isSmtpConfigured = !!smtpConfig || hasEnvVars;
+    const configSource = smtpConfig ? 'admin_panel' : (hasEnvVars ? 'environment_variables' : 'none');
+    
+    // Log OTP to console in development mode only
+    if (!emailSent && otp && process.env.NODE_ENV !== 'production') {
+      const company = await prisma.company.findUnique({
+        where: { email },
+        select: { emailOtp: true },
+      });
+      if (company?.emailOtp) {
+        console.log(`\n${'='.repeat(80)}`);
+        console.log(`🔑 PASSWORD RESET OTP FOR ${email}: ${company.emailOtp}`);
+        console.log(`⚠️  Email sending failed - OTP shown in console for development only`);
+        console.log(`${'='.repeat(80)}\n`);
+      }
+    }
+
+    const response: any = {
+      message: emailSent 
+        ? "Password reset code sent successfully! Please check your email."
+        : "Password reset code was generated but email sending failed. Please check your SMTP configuration. In development mode, check the server console for the OTP.",
+      email,
+      emailSent,
+      smtpConfigured: isSmtpConfigured,
+      configSource,
+    };
+
+    res.status(200).json(response);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /auth/verify-reset-otp:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Verify password reset OTP
+ *     description: |
+ *       Verify the OTP code sent for password reset.
+ */
+const verifyResetOTPSchema = z.object({
+  email: z.string().email(),
+  otp: z.string().length(4),
+});
+
+authRouter.post("/auth/verify-reset-otp", async (req, res, next) => {
+  try {
+    const body = verifyResetOTPSchema.parse(req.body);
+    
+    const isValid = await PasswordResetService.verifyResetOTP(body.email, body.otp);
+    
+    if (!isValid) {
+      return res.status(400).json({
+        error: "INVALID_OTP",
+        message: "Invalid or expired OTP code"
+      });
+    }
+
+    res.json({
+      message: "OTP verified successfully. You can now reset your password.",
+      verified: true,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /auth/reset-password:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Reset password
+ *     description: |
+ *       Reset password using verified OTP code.
+ */
+const resetPasswordSchema = z.object({
+  email: z.string().email(),
+  otp: z.string().length(4),
+  newPassword: z.string().min(6, "Password must be at least 6 characters"),
+});
+
+authRouter.post("/auth/reset-password", async (req, res, next) => {
+  try {
+    const body = resetPasswordSchema.parse(req.body);
+    
+    const success = await PasswordResetService.resetPassword(
+      body.email,
+      body.otp,
+      body.newPassword
+    );
+    
+    if (!success) {
+      return res.status(400).json({
+        error: "INVALID_OTP",
+        message: "Invalid or expired OTP code"
+      });
+    }
+
+    res.json({
+      message: "Password reset successfully! You can now login with your new password.",
+    });
   } catch (e) {
     next(e);
   }

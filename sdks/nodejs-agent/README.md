@@ -44,9 +44,9 @@ for await (const chunk of client.getAvailability().search(criteria)) {
 }
 
 // Create booking
+// Note: supplier_id is not required - backend resolves source_id from agreement_ref
 const booking = BookingCreate.fromOffer({
   agreement_ref: 'AGR-001',
-  supplier_id: 'SRC-AVIS',
   offer_id: 'off_123',
   driver: {
     firstName: 'Ali',
@@ -122,6 +122,45 @@ Config.forGrpc({
 - **Idempotency**: Booking creation supports idempotency keys
 - **Error Handling**: Comprehensive error handling with `TransportException`
 - **TypeScript Support**: Full type definitions included
+- **Input Validation**: Automatic validation of criteria, bookings, and configuration
+- **Location Support**: Location validation happens automatically during availability submit
+
+## Input Validation
+
+The SDK automatically validates inputs:
+
+- **AvailabilityCriteria**: Validates dates, locodes, driver age (18-100), currency, and agreement refs
+- **BookingCreate**: Validates required fields (agreement_ref)
+- **Config**: Validates required fields (baseUrl, token for REST; host, certificates for gRPC)
+- **Locations**: UN/LOCODEs are automatically normalized to uppercase
+
+```typescript
+// Invalid input will throw an error
+try {
+  const criteria = AvailabilityCriteria.make({
+    pickupLocode: '', // Error: pickupLocode is required
+    returnLocode: 'PKLHE',
+    pickupAt: new Date('2025-11-03'),
+    returnAt: new Date('2025-11-01'), // Error: returnAt must be after pickupAt
+    driverAge: 17, // Error: driverAge must be between 18 and 100
+    currency: 'USD',
+    agreementRefs: [], // Error: agreementRefs must be a non-empty array
+  });
+} catch (error) {
+  console.error('Validation error:', error.message);
+}
+```
+
+## Location Support
+
+Location validation is automatically performed during availability submit. The `isLocationSupported()` method currently returns `false` as a safe default because the backend requires agreement ID (not ref) to check coverage, and there's no direct endpoint to resolve agreementRef to ID.
+
+```typescript
+// Location validation happens automatically during availability search
+// The isLocationSupported() method is informational only
+const supported = await client.getLocations().isSupported('AGR-001', 'GBMAN');
+// Returns false (safe default) - use availability submit for actual validation
+```
 
 ## Error Handling
 

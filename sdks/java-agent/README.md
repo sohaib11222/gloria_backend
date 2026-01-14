@@ -57,9 +57,9 @@ client.getAvailability().search(criteria).forEach(chunkFuture -> {
 });
 
 // Create booking
+// Note: supplier_id is not required - backend resolves source_id from agreement_ref
 Map<String, Object> booking = new HashMap<>();
 booking.put("agreement_ref", "AGR-001");
-booking.put("supplier_id", "SRC-AVIS");
 booking.put("offer_id", "off_123");
 
 Map<String, Object> result = client.getBooking().create(booking, "idem-123").join();

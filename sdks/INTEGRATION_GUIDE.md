@@ -77,9 +77,9 @@ for await (const chunk of stream) {
 
 ```typescript
 // 1. Create booking with idempotency
+// Note: supplier_id is not required - backend resolves source_id from agreement_ref
 const booking = BookingCreate.fromOffer({
   agreement_ref: 'AGR-001',
-  supplier_id: 'SRC-AVIS',
   offer_id: 'off_123',
 });
 
@@ -148,9 +148,11 @@ try {
    - Ensure correct agreement reference
 
 3. **Location Not Supported**
-   - Check agreement location coverage
-   - Verify UN/LOCODE format
-   - Check source location sync
+   - Location validation is automatically performed during availability submit
+   - The `isLocationSupported()` method currently returns `false` as a safe default
+   - To check locations, use availability submit which validates locations automatically
+   - Verify UN/LOCODE format (5 characters, e.g., "GBMAN")
+   - Check source location sync via admin endpoints
 
 4. **Timeout Errors**
    - Increase timeout settings
@@ -162,6 +164,33 @@ try {
    - Don't reuse keys for different bookings
    - Store keys for retry scenarios
 
+## Input Validation
+
+The SDKs automatically validate inputs before sending requests. Invalid inputs will throw errors immediately, allowing you to catch validation errors before making API calls.
+
+**Validated Fields:**
+- AvailabilityCriteria: dates, locodes, driver age (18-100), currency, agreement refs
+- BookingCreate: required fields (agreement_ref)
+- Config: required fields and timeout values
+
+**Example:**
+```typescript
+try {
+  const criteria = AvailabilityCriteria.make({
+    pickupLocode: '', // Error: pickupLocode is required
+    returnLocode: 'PKLHE',
+    pickupAt: new Date('2025-11-03'),
+    returnAt: new Date('2025-11-01'), // Error: returnAt must be after pickupAt
+    driverAge: 17, // Error: driverAge must be between 18 and 100
+    currency: 'USD',
+    agreementRefs: [], // Error: agreementRefs must be a non-empty array
+  });
+} catch (error) {
+  console.error('Validation error:', error.message);
+  // Handle validation error before making API call
+}
+```
+
 ## Best Practices
 
 1. **Always use idempotency keys** for booking operations
@@ -171,6 +200,9 @@ try {
 5. **Implement circuit breakers** for unreliable sources
 6. **Log all operations** for debugging
 7. **Use correlation IDs** for request tracking
+8. **Validate inputs early** - SDKs validate inputs, but validate in your code too
+9. **Handle validation errors** before making API calls
+10. **Use availability submit for location validation** - it validates locations automatically
 
 ## Performance Optimization
 

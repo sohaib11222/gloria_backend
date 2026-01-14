@@ -23,9 +23,7 @@ sub create {
     unless ($dto->{agreement_ref}) {
         die "agreement_ref required";
     }
-    unless ($dto->{supplier_id}) {
-        die "supplier_id required";
-    }
+    # Note: supplier_id is not required - backend resolves source_id from agreement_ref
     return $self->{transport}->booking_create($dto, $idempotency_key);
 }
 

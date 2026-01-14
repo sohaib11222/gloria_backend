@@ -20,8 +20,7 @@ class BookingClient:
         payload = dto.to_dict()
         if not payload.get("agreement_ref"):
             raise ValueError("agreement_ref required")
-        if not payload.get("supplier_id"):
-            raise ValueError("supplier_id required")
+        # Note: supplier_id is not required - backend resolves source_id from agreement_ref
         return await self.transport.booking_create(payload, idempotency_key)
 
     async def modify(

@@ -12,7 +12,8 @@ final class BookingCreate
     public static function fromOffer(array $offer): self
     {
         // Minimal validation; middleware will enforce full schema
-        foreach (['agreement_ref','supplier_id','offer_id'] as $k) {
+        // Note: supplier_id is not required - backend resolves source_id from agreement_ref
+        foreach (['agreement_ref'] as $k) {
             if (empty($offer[$k])) throw new \InvalidArgumentException("$k required");
         }
         return new self($offer);
