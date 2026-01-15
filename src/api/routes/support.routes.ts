@@ -363,7 +363,32 @@ supportRouter.get("/support/tickets/:id/messages", requireAuth(), async (req: an
 supportRouter.post(
   "/support/tickets/:id/messages",
   requireAuth(),
+  // Add debug middleware before multer to see what's coming in
+  (req: any, res: any, next: any) => {
+    console.log('[Support Route] Before multer:', {
+      method: req.method,
+      url: req.url,
+      contentType: req.headers['content-type'],
+      contentLength: req.headers['content-length'],
+      hasBody: !!req.body,
+      bodyType: typeof req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : [],
+    });
+    next();
+  },
   upload.single('image'),
+  // Add debug middleware after multer to see what multer parsed
+  (req: any, res: any, next: any) => {
+    console.log('[Support Route] After multer:', {
+      hasBody: !!req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : [],
+      bodyContent: req.body,
+      hasFile: !!req.file,
+      fileName: req.file?.originalname,
+      fileSize: req.file?.size,
+    });
+    next();
+  },
   async (req: any, res, next) => {
     try {
       const ticketId = req.params.id;
@@ -390,11 +415,62 @@ supportRouter.post(
         return res.status(400).json({ error: "BAD_REQUEST", message: "Cannot send messages to closed tickets" });
       }
 
-      const content = req.body.content as string | undefined;
+      // Debug logging BEFORE parsing to see raw request
+      console.log('[Support Route] Raw request:', {
+        method: req.method,
+        url: req.url,
+        headers: {
+          'content-type': req.headers['content-type'],
+          'content-length': req.headers['content-length'],
+          'authorization': req.headers['authorization'] ? 'present' : 'missing',
+        },
+        bodyType: typeof req.body,
+        bodyIsEmpty: !req.body || Object.keys(req.body || {}).length === 0,
+      });
+
+      const content = req.body?.content as string | undefined;
       const file = req.file;
 
-      if (!content && !file) {
-        return res.status(400).json({ error: "BAD_REQUEST", message: "Either content or image is required" });
+      // Debug logging to understand what's being received
+      console.log('[Support Route] Parsed request:', {
+        hasContent: content !== undefined,
+        contentValue: content,
+        contentType: typeof content,
+        contentLength: content?.length,
+        hasFile: !!file,
+        fileName: file?.originalname,
+        fileSize: file?.size,
+        fileMimetype: file?.mimetype,
+        bodyKeys: Object.keys(req.body || {}),
+        bodyContent: req.body,
+        rawBody: req.body,
+      });
+
+      // Check if we have content (even empty string is valid) or file
+      // Empty string IS valid content when we have a file
+      // We only need content OR file, not both
+      const hasContent = content !== undefined && content !== null;
+      const hasFile = !!file;
+
+      // Accept if we have either content (even empty string) or file
+      if (!hasContent && !hasFile) {
+        return res.status(400).json({ 
+          error: "BAD_REQUEST", 
+          message: "Either content or image is required",
+          debug: {
+            hasContent,
+            hasFile,
+            contentValue: content,
+            contentType: typeof content,
+            bodyKeys: Object.keys(req.body || {}),
+            bodyContent: req.body,
+            fileInfo: file ? {
+              name: file.originalname,
+              size: file.size,
+              mimetype: file.mimetype,
+            } : null,
+          }
+        });
       }
 
       let imageUrl: string | undefined;

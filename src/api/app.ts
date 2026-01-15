@@ -64,7 +64,20 @@ export function buildApp() {
     next();
   });
 
-  app.use(express.json({ limit: "2mb" }));
+  // JSON parser - skip for multipart/form-data (handled by multer)
+  // Create the JSON parser middleware
+  const jsonParser = express.json({ limit: "2mb" });
+  
+  // Apply JSON parser conditionally - skip for multipart/form-data
+  app.use((req: any, res: any, next: any) => {
+    const contentType = req.headers['content-type'] || '';
+    // Skip JSON parsing for multipart/form-data (multer will handle it)
+    if (contentType && contentType.includes('multipart/form-data')) {
+      return next();
+    }
+    // Apply JSON parser for other content types
+    jsonParser(req, res, next);
+  });
   
   // Helmet with relaxed CSP for development - AFTER CORS
   app.use(helmet({
