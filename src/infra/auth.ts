@@ -80,12 +80,20 @@ export function requireAuth() {
           
           if (!user || !user.company) {
             console.log('[requireAuth] User not found for email:', agentEmail);
+            // Set CORS headers before sending error response
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
             return res.status(401).json({ error: "AUTH_ERROR", message: "Agent not found" });
           }
           
           // Verify it's an AGENT type company
           if (user.company.type !== "AGENT") {
             console.log('[requireAuth] User is not an agent:', user.company.type);
+            // Set CORS headers before sending error response
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
             return res.status(403).json({ error: "FORBIDDEN", message: "Only agents can access booking test endpoints" });
           }
           
@@ -99,6 +107,10 @@ export function requireAuth() {
           return next();
         } catch (e: any) {
           console.error('[requireAuth] Email-based auth error:', e);
+          // Set CORS headers before sending error response
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
           return res.status(401).json({ error: "AUTH_ERROR", message: "Authentication failed" });
         }
       } else {
@@ -112,7 +124,13 @@ export function requireAuth() {
         const hashed = crypto.createHmac("sha512", process.env.API_KEY_SALT || "").update(apiKey).digest("hex");
         // [AUTO-AUDIT] Updated to use keyHash column
         const keyRow = await prisma.apiKey.findFirst({ where: { keyHash: hashed, status: "active" } });
-        if (!keyRow) return res.status(401).json({ error: "AUTH_ERROR", message: "Invalid API key" });
+        if (!keyRow) {
+          // Set CORS headers before sending error response
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
+          return res.status(401).json({ error: "AUTH_ERROR", message: "Invalid API key" });
+        }
         req.user = {
           companyId: keyRow.ownerId,
           role: keyRow.ownerType === "admin" ? "ADMIN" : "USER",
@@ -122,18 +140,32 @@ export function requireAuth() {
         };
         return next();
       } catch (e) {
+        // Set CORS headers before sending error response
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
         return res.status(401).json({ error: "AUTH_ERROR", message: "Invalid API key" });
       }
     }
 
     const h = req.headers.authorization || "";
     const token = h.startsWith("Bearer ") ? h.slice(7) : null;
-    if (!token) return res.status(401).json({ error: "AUTH_ERROR", message: "Missing token" });
+    if (!token) {
+      // Set CORS headers before sending error response
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
+      return res.status(401).json({ error: "AUTH_ERROR", message: "Missing token" });
+    }
     try {
       const decoded = Auth.verify(token) as any;
       req.user = decoded;
       next();
     } catch (e) {
+      // Set CORS headers before sending error response
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
       return res.status(401).json({ error: "AUTH_ERROR", message: "Invalid token" });
     }
   };

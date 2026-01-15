@@ -136,6 +136,43 @@ try {
 }
 ```
 
+## Testing Locally
+
+### Prerequisites
+1. Backend running on `http://localhost:8080`
+2. Agent account created and verified
+3. Active agreement with a source
+4. JWT token from agent login
+
+### Quick Test
+1. Copy `.env.example` to `.env` and fill in your credentials:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your credentials
+   ```
+
+2. Set environment variables (Java doesn't have built-in .env support):
+   ```bash
+   export BASE_URL=http://localhost:8080
+   export JWT_TOKEN=your_access_token_here
+   export AGENT_ID=your_agent_id_here
+   export AGREEMENT_REF=AGR-001
+   ```
+
+3. Compile and run:
+   ```bash
+   mvn compile
+   javac -cp "target/classes:$(mvn dependency:build-classpath -q -Dmdep.outputFile=/dev/stdout)" examples/TestAvailability.java
+   java -cp ".:target/classes:$(mvn dependency:build-classpath -q -Dmdep.outputFile=/dev/stdout)" examples.TestAvailability
+   ```
+
+4. See [TESTING_GUIDE.md](../TESTING_GUIDE.md) for detailed instructions.
+
+### Example Test Scenarios
+- Availability search: `examples/TestAvailability.java`
+- Booking operations: `examples/TestBooking.java`
+- Quick start: `examples/QuickStart.java`
+
 ## Requirements
 
 - Java 11+

@@ -74,13 +74,50 @@ The SDK uses the following REST endpoints (aligned with middleware):
 
 ## gRPC Transport
 
-gRPC transport is available but requires proto file generation:
+gRPC transport is **fully implemented** and production-ready! The SDK uses `@grpc/proto-loader` to dynamically load the proto file, so no code generation is required.
 
-```bash
-npm run proto:gen
+### Quickstart (gRPC)
+
+```typescript
+import { CarHireClient, Config } from '@carhire/nodejs-sdk';
+import * as fs from 'fs';
+
+// Insecure connection (development/default - matches backend)
+const config = Config.forGrpc({
+  host: 'localhost:50052', // Backend default port
+  token: 'your-jwt-token', // Required for Bearer authentication
+  agentId: 'ag_123', // Optional
+  callTimeoutMs: 10000,
+});
+
+// Secure connection (production with mTLS)
+const config = Config.forGrpc({
+  host: 'api.example.com:50052',
+  token: 'your-jwt-token',
+  caCert: fs.readFileSync('./certs/ca.pem', 'utf8'),
+  clientCert: fs.readFileSync('./certs/client.pem', 'utf8'),
+  clientKey: fs.readFileSync('./certs/client.key', 'utf8'),
+  agentId: 'ag_123',
+  callTimeoutMs: 10000,
+});
+
+const client = new CarHireClient(config);
+
+// Use the same API as REST
+for await (const chunk of client.getAvailability().search(criteria)) {
+  console.log(`[${chunk.status}] items=${chunk.items.length}`);
+}
 ```
 
-Then implement the methods in `GrpcTransport.ts` using the generated stubs.
+### Proto File Location
+
+The SDK automatically searches for `agent_ingress.proto` in:
+1. `protos/agent_ingress.proto` (relative to SDK)
+2. `../../protos/agent_ingress.proto` (relative to SDK)
+3. `process.cwd()/protos/agent_ingress.proto`
+4. `process.cwd()/sdks/../protos/agent_ingress.proto`
+
+Ensure the proto file is accessible from your application.
 
 ## Configuration
 
@@ -102,17 +139,29 @@ Config.forRest({
 ### gRPC Configuration
 
 ```typescript
+// Insecure connection (development - matches backend default)
 Config.forGrpc({
-  host: 'api.example.com:50051', // Required
-  caCert: '<CA_CERT>', // Required
-  clientCert: '<CLIENT_CERT>', // Required
-  clientKey: '<CLIENT_KEY>', // Required
+  host: 'api.example.com:50052', // Required (default backend port is 50052)
+  token: 'your-jwt-token', // Required for Bearer authentication
   agentId: 'ag_123', // Optional
   callTimeoutMs: 10000, // Default: 10000
   availabilitySlaMs: 120000, // Default: 120000
   longPollWaitMs: 10000, // Default: 10000
 });
+
+// Secure connection (production with mTLS)
+Config.forGrpc({
+  host: 'api.example.com:50052', // Required
+  token: 'your-jwt-token', // Required
+  caCert: '<CA_CERT>', // Optional - enables mTLS
+  clientCert: '<CLIENT_CERT>', // Optional - enables mTLS
+  clientKey: '<CLIENT_KEY>', // Optional - enables mTLS
+  agentId: 'ag_123', // Optional
+  callTimeoutMs: 10000,
+});
 ```
+
+**Note**: Certificates are optional. If not provided, the SDK uses an insecure connection (matches backend default). For production, enable mTLS on the backend (`GRPC_TLS_ENABLED=true`) and provide certificates.
 
 ## Features
 
@@ -176,6 +225,38 @@ try {
   throw error;
 }
 ```
+
+## Testing Locally
+
+### Prerequisites
+1. Backend running on `http://localhost:8080`
+2. Agent account created and verified
+3. Active agreement with a source
+4. JWT token from agent login
+
+### Quick Test
+1. Copy `.env.example` to `.env` and fill in your credentials:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your credentials
+   ```
+
+2. Install dependencies (if using dotenv):
+   ```bash
+   npm install dotenv
+   ```
+
+3. Run the test script:
+   ```bash
+   node examples/test-availability.js
+   ```
+
+4. See [TESTING_GUIDE.md](../TESTING_GUIDE.md) for detailed instructions.
+
+### Example Test Scenarios
+- Availability search: `examples/test-availability.js`
+- Booking operations: `examples/test-booking.js`
+- Quick start: `examples/quickstart.js`
 
 ## Examples
 

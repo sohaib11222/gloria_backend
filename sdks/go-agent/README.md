@@ -220,6 +220,38 @@ Note: Import `errors` package for error handling utilities.
 - Standard library: `net/http`, `encoding/json`, `context`, `time`, `fmt`
 - For gRPC: `google.golang.org/grpc` and generated proto stubs (not yet implemented)
 
+## Testing Locally
+
+### Prerequisites
+1. Backend running on `http://localhost:8080`
+2. Agent account created and verified
+3. Active agreement with a source
+4. JWT token from agent login
+
+### Quick Test
+1. Copy `.env.example` to `.env` and fill in your credentials:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your credentials
+   ```
+
+2. Install dependencies (if using godotenv):
+   ```bash
+   go get github.com/joho/godotenv
+   ```
+
+3. Run the test script:
+   ```bash
+   go run examples/test-availability.go
+   ```
+
+4. See [TESTING_GUIDE.md](../TESTING_GUIDE.md) for detailed instructions.
+
+### Example Test Scenarios
+- Availability search: `examples/test-availability.go`
+- Booking operations: `examples/test-booking.go`
+- Quick start: `examples/quickstart.go`
+
 ## Package Structure
 
 - `config.go` - Configuration management with factory methods (`ForRest`, `ForGrpc`)

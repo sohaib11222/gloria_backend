@@ -1,0 +1,66 @@
+syntax = "proto3";
+package agent;
+
+message SubmitReq {
+  string pickup_unlocode = 1;
+  string dropoff_unlocode = 2;
+  string pickup_iso = 3;
+  string dropoff_iso = 4;
+  int32  driver_age = 5;
+  string residency_country = 6;
+  repeated string vehicle_classes = 7;
+  repeated string agreement_refs = 8;
+}
+message SubmitRes {
+  string request_id = 1;
+  int32 expected_sources = 2;
+  int32 recommended_poll_ms = 3;
+}
+message PollReq { string request_id = 1; int32 since_seq = 2; int32 wait_ms = 3; }
+message PollRes { bool complete = 1; int32 last_seq = 2; repeated Offer offers = 3; }
+
+message Offer {
+  string source_id = 1;
+  string agreement_ref = 2;
+  string vehicle_class = 3;
+  string vehicle_make_model = 4;
+  string rate_plan_code = 5;
+  string currency = 6;
+  double total_price = 7;
+  string supplier_offer_ref = 8;
+}
+
+message CreateReq {
+  string source_id = 1;
+  string agreement_ref = 2;
+  string supplier_offer_ref = 3;
+  string idempotency_key = 4;
+  string agent_booking_ref = 5;
+}
+message BookingRef { 
+  string supplier_booking_ref = 1; 
+  string source_id = 2; 
+}
+message BookingRes {
+  string supplier_booking_ref = 1;
+  string status = 2;
+  string agreement_ref = 3;
+  string source_id = 4;
+}
+
+message ListAgreementsReq { string status = 1; }
+message ListAgreementsRes { repeated string agreement_ids = 1; }
+
+service AgentIngressService {
+  rpc SubmitAvailability (SubmitReq) returns (SubmitRes);
+  rpc PollAvailability   (PollReq)   returns (PollRes);
+
+  rpc CreateBooking (CreateReq) returns (BookingRes);
+  rpc ModifyBooking (BookingRef) returns (BookingRes);
+  rpc CancelBooking (BookingRef) returns (BookingRes);
+  rpc CheckBooking  (BookingRef) returns (BookingRes);
+
+  // optional helpers
+  rpc ListAgreements (ListAgreementsReq) returns (ListAgreementsRes);
+}
+

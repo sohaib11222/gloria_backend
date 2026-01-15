@@ -6,6 +6,13 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
   const code = err?.status || 500;
   const requestId = (req as any).requestId;
   
+  // Set CORS headers for all error responses
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
+  res.setHeader('Access-Control-Allow-Credentials', 'false');
+  res.setHeader('Access-Control-Expose-Headers', '*');
+  
   // Log the error for debugging
   logger.error({ 
     err, 

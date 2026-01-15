@@ -5,8 +5,22 @@ import { resolveProtoPath } from '../../grpc/util/resolveProtoPath.js';
 
 const router = Router();
 
+// Handle OPTIONS preflight for all docs routes
+router.options('*', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  res.sendStatus(204);
+});
+
 // GET /docs → all docs
 router.get('/', (req, res) => {
+  // Set CORS headers explicitly
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.setHeader('Access-Control-Expose-Headers', '*');
   res.json(DOCS);
 });
 
@@ -58,6 +72,12 @@ router.get('/proto/source_provider.proto', (req, res) => {
 // GET /docs/:role → filter by role = admin | agent | source
 // IMPORTANT: This route must come AFTER /proto/* routes
 router.get('/:role', (req, res) => {
+  // Set CORS headers explicitly
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.setHeader('Access-Control-Expose-Headers', '*');
+  
   const role = req.params.role as 'admin' | 'agent' | 'source';
   if (!['admin', 'agent', 'source'].includes(role)) {
     return res.status(400).json({ error: 'Invalid role. Must be admin, agent, or source' });

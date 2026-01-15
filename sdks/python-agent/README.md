@@ -174,6 +174,40 @@ except TransportException as e:
     raise
 ```
 
+## Testing Locally
+
+### Prerequisites
+1. Backend running on `http://localhost:8080`
+2. Agent account created and verified
+3. Active agreement with a source
+4. JWT token from agent login
+
+### Quick Test
+1. Copy `.env.example` to `.env` and fill in your credentials:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your credentials
+   ```
+
+2. Install dependencies (if using python-dotenv):
+   ```bash
+   pip install python-dotenv
+   ```
+
+3. Run the test script:
+   ```bash
+   python examples/test-availability.py
+   ```
+
+4. See [TESTING_GUIDE.md](../TESTING_GUIDE.md) for detailed instructions.
+
+### Example Test Scenarios
+- Availability search: `examples/test-availability.py`
+- Booking operations: `examples/test-booking.py`
+- Quick start: `examples/quickstart.py`
+
+**Note:** The client uses async HTTP (httpx) for non-blocking requests. For proper cleanup, use async context manager or manually close the transport.
+
 ## Requirements
 
 - Python 3.8+

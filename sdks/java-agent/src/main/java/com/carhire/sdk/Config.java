@@ -28,10 +28,96 @@ public class Config {
     }
 
     public static Config forGrpc(Map<String, Object> data) {
+        // Validation
+        if (!data.containsKey("host") || data.get("host") == null || 
+            !(data.get("host") instanceof String) || ((String) data.get("host")).trim().isEmpty()) {
+            throw new IllegalArgumentException("host is required for gRPC configuration");
+        }
+        if (!data.containsKey("caCert") || data.get("caCert") == null || 
+            !(data.get("caCert") instanceof String) || ((String) data.get("caCert")).trim().isEmpty()) {
+            throw new IllegalArgumentException("caCert is required for gRPC configuration");
+        }
+        if (!data.containsKey("clientCert") || data.get("clientCert") == null || 
+            !(data.get("clientCert") instanceof String) || ((String) data.get("clientCert")).trim().isEmpty()) {
+            throw new IllegalArgumentException("clientCert is required for gRPC configuration");
+        }
+        if (!data.containsKey("clientKey") || data.get("clientKey") == null || 
+            !(data.get("clientKey") instanceof String) || ((String) data.get("clientKey")).trim().isEmpty()) {
+            throw new IllegalArgumentException("clientKey is required for gRPC configuration");
+        }
+        
+        // Validate timeouts if provided
+        if (data.containsKey("callTimeoutMs")) {
+            Object timeoutObj = data.get("callTimeoutMs");
+            if (timeoutObj instanceof Number) {
+                long timeout = ((Number) timeoutObj).longValue();
+                if (timeout < 1000) {
+                    throw new IllegalArgumentException("callTimeoutMs must be at least 1000ms");
+                }
+            }
+        }
+        if (data.containsKey("availabilitySlaMs")) {
+            Object timeoutObj = data.get("availabilitySlaMs");
+            if (timeoutObj instanceof Number) {
+                long timeout = ((Number) timeoutObj).longValue();
+                if (timeout < 1000) {
+                    throw new IllegalArgumentException("availabilitySlaMs must be at least 1000ms");
+                }
+            }
+        }
+        if (data.containsKey("longPollWaitMs")) {
+            Object timeoutObj = data.get("longPollWaitMs");
+            if (timeoutObj instanceof Number) {
+                long timeout = ((Number) timeoutObj).longValue();
+                if (timeout < 1000) {
+                    throw new IllegalArgumentException("longPollWaitMs must be at least 1000ms");
+                }
+            }
+        }
+        
         return new Config(true, data);
     }
 
     public static Config forRest(Map<String, Object> data) {
+        // Validation
+        if (!data.containsKey("baseUrl") || data.get("baseUrl") == null || 
+            !(data.get("baseUrl") instanceof String) || ((String) data.get("baseUrl")).trim().isEmpty()) {
+            throw new IllegalArgumentException("baseUrl is required for REST configuration");
+        }
+        if (!data.containsKey("token") || data.get("token") == null || 
+            !(data.get("token") instanceof String) || ((String) data.get("token")).trim().isEmpty()) {
+            throw new IllegalArgumentException("token is required for REST configuration");
+        }
+        
+        // Validate timeouts if provided
+        if (data.containsKey("callTimeoutMs")) {
+            Object timeoutObj = data.get("callTimeoutMs");
+            if (timeoutObj instanceof Number) {
+                long timeout = ((Number) timeoutObj).longValue();
+                if (timeout < 1000) {
+                    throw new IllegalArgumentException("callTimeoutMs must be at least 1000ms");
+                }
+            }
+        }
+        if (data.containsKey("availabilitySlaMs")) {
+            Object timeoutObj = data.get("availabilitySlaMs");
+            if (timeoutObj instanceof Number) {
+                long timeout = ((Number) timeoutObj).longValue();
+                if (timeout < 1000) {
+                    throw new IllegalArgumentException("availabilitySlaMs must be at least 1000ms");
+                }
+            }
+        }
+        if (data.containsKey("longPollWaitMs")) {
+            Object timeoutObj = data.get("longPollWaitMs");
+            if (timeoutObj instanceof Number) {
+                long timeout = ((Number) timeoutObj).longValue();
+                if (timeout < 1000) {
+                    throw new IllegalArgumentException("longPollWaitMs must be at least 1000ms");
+                }
+            }
+        }
+        
         return new Config(false, data);
     }
 

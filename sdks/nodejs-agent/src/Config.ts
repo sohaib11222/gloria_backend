@@ -43,14 +43,19 @@ export class Config {
     if (!data.host || data.host.trim().length === 0) {
       throw new Error('host is required for gRPC configuration');
     }
-    if (!data.caCert || data.caCert.trim().length === 0) {
-      throw new Error('caCert is required for gRPC configuration');
+    // Certificates are optional - if not provided, uses insecure connection (matches backend default)
+    // Token is required for authentication
+    if (!data.token || data.token.trim().length === 0) {
+      throw new Error('token is required for gRPC configuration (used for Bearer authentication)');
     }
-    if (!data.clientCert || data.clientCert.trim().length === 0) {
-      throw new Error('clientCert is required for gRPC configuration');
+    if (data.callTimeoutMs !== undefined && data.callTimeoutMs < 1000) {
+      throw new Error('callTimeoutMs must be at least 1000ms');
     }
-    if (!data.clientKey || data.clientKey.trim().length === 0) {
-      throw new Error('clientKey is required for gRPC configuration');
+    if (data.availabilitySlaMs !== undefined && data.availabilitySlaMs < 1000) {
+      throw new Error('availabilitySlaMs must be at least 1000ms');
+    }
+    if (data.longPollWaitMs !== undefined && data.longPollWaitMs < 1000) {
+      throw new Error('longPollWaitMs must be at least 1000ms');
     }
     return new Config(true, data);
   }

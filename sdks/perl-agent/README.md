@@ -139,6 +139,33 @@ if ($@) {
 }
 ```
 
+## Testing Locally
+
+### Prerequisites
+1. Backend running on `http://localhost:8080`
+2. Agent account created and verified
+3. Active agreement with a source
+4. JWT token from agent login
+
+### Quick Test
+1. Copy `.env.example` to `.env` and fill in your credentials:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your credentials
+   ```
+
+2. Run the test script:
+   ```bash
+   perl examples/test-availability.pl
+   ```
+
+3. See [TESTING_GUIDE.md](../TESTING_GUIDE.md) for detailed instructions.
+
+### Example Test Scenarios
+- Availability search: `examples/test-availability.pl`
+- Booking operations: `examples/test-booking.pl`
+- Quick start: `examples/quickstart.pl`
+
 ## Requirements
 
 - Perl 5.10+
