@@ -64,19 +64,19 @@ export function buildApp() {
     next();
   });
 
+  // Body parsing middleware - must be careful with multipart/form-data
   // JSON parser - skip for multipart/form-data (handled by multer)
-  // Create the JSON parser middleware
-  const jsonParser = express.json({ limit: "2mb" });
-  
-  // Apply JSON parser conditionally - skip for multipart/form-data
   app.use((req: any, res: any, next: any) => {
     const contentType = req.headers['content-type'] || '';
-    // Skip JSON parsing for multipart/form-data (multer will handle it)
-    if (contentType && contentType.includes('multipart/form-data')) {
+    
+    // Skip ALL body parsing for multipart/form-data - multer will handle it
+    if (contentType.includes('multipart/form-data')) {
+      console.log('[App Middleware] Skipping body parsing for multipart/form-data request');
       return next();
     }
-    // Apply JSON parser for other content types
-    jsonParser(req, res, next);
+    
+    // For other content types, use JSON parser
+    express.json({ limit: "2mb" })(req, res, next);
   });
   
   // Helmet with relaxed CSP for development - AFTER CORS

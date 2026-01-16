@@ -363,9 +363,9 @@ supportRouter.get("/support/tickets/:id/messages", requireAuth(), async (req: an
 supportRouter.post(
   "/support/tickets/:id/messages",
   requireAuth(),
-  // Add debug middleware before multer to see what's coming in
+  // Debug middleware before multer
   (req: any, res: any, next: any) => {
-    console.log('[Support Route] Before multer:', {
+    console.log('[Support Route] BEFORE multer:', {
       method: req.method,
       url: req.url,
       contentType: req.headers['content-type'],
@@ -373,19 +373,28 @@ supportRouter.post(
       hasBody: !!req.body,
       bodyType: typeof req.body,
       bodyKeys: req.body ? Object.keys(req.body) : [],
+      bodyValue: req.body,
+      // Check if body is a stream or buffer
+      bodyIsStream: req.body && typeof req.body.pipe === 'function',
+      bodyIsBuffer: Buffer.isBuffer(req.body),
     });
     next();
   },
+  // Multer middleware - this should parse multipart/form-data
   upload.single('image'),
-  // Add debug middleware after multer to see what multer parsed
+  // Debug middleware after multer
   (req: any, res: any, next: any) => {
-    console.log('[Support Route] After multer:', {
+    console.log('[Support Route] AFTER multer:', {
       hasBody: !!req.body,
       bodyKeys: req.body ? Object.keys(req.body) : [],
       bodyContent: req.body,
+      bodyType: typeof req.body,
       hasFile: !!req.file,
       fileName: req.file?.originalname,
       fileSize: req.file?.size,
+      fileMimetype: req.file?.mimetype,
+      // Check multer errors
+      multerError: (req as any).multerError,
     });
     next();
   },
