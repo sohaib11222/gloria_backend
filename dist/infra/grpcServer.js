@@ -2,7 +2,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import path from 'path';
 import fs from 'fs';
-import { logger } from './logger.js';
+import { logger } from './logger';
 const SERVING = 1; // grpc.health.v1.HealthCheckResponse.ServingStatus.SERVING
 const NOT_SERVING = 2; // grpc.health.v1.HealthCheckResponse.ServingStatus.NOT_SERVING
 export function loadProto(protoPath) {

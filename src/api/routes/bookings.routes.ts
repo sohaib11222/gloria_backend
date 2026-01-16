@@ -147,9 +147,27 @@ bookingsRouter.post("/", requireAuth(), async (req: any, res, next) => {
   try {
     const body = createSchema.parse(req.body);
     // Check for idempotency key in various header formats (case-insensitive)
+    // Express lowercases headers, so check lowercase version first
+    // Also check rawHeaders which preserves original case
+    const rawHeaders = (req as any).rawHeaders || [];
     const idempotencyKey = req.headers["idempotency-key"] || 
                           req.headers["Idempotency-Key"] || 
-                          req.headers["IDEMPOTENCY-KEY"];
+                          req.headers["IDEMPOTENCY-KEY"] ||
+                          // Check rawHeaders for original case
+                          (rawHeaders.findIndex((h: string) => h.toLowerCase() === 'idempotency-key') >= 0 
+                            ? rawHeaders[rawHeaders.findIndex((h: string) => h.toLowerCase() === 'idempotency-key') + 1]
+                            : undefined);
+    
+    console.log('[Booking.Create] 🔍 Checking idempotency key:', {
+      headers: Object.keys(req.headers).filter(k => k.toLowerCase().includes('idempotency')),
+      rawHeaders: rawHeaders.filter((h: string, i: number) => 
+        i % 2 === 0 && h.toLowerCase().includes('idempotency')
+      ),
+      idempotencyKey: idempotencyKey ? `${String(idempotencyKey).substring(0, 20)}...` : 'MISSING',
+      idempotencyKeyType: typeof idempotencyKey,
+      idempotencyKeyValue: idempotencyKey
+    });
+    
     if (!idempotencyKey) {
       const errorResponse = { 
         error: "SCHEMA_ERROR", 
@@ -323,6 +341,16 @@ bookingsRouter.post("/", requireAuth(), async (req: any, res, next) => {
       middleware_request_id: requestId,
       agent_company_id: req.user.companyId,
     };
+    
+    console.log('[Booking.Create] 📋 Booking payload prepared for gRPC:', {
+      agent_id: bookingPayload.agent_id,
+      source_id: bookingPayload.source_id,
+      agreement_ref: bookingPayload.agreement_ref,
+      supplier_offer_ref: bookingPayload.supplier_offer_ref,
+      idempotency_key: bookingPayload.idempotency_key ? `${bookingPayload.idempotency_key.substring(0, 20)}...` : 'MISSING',
+      hasIdempotencyKey: !!bookingPayload.idempotency_key,
+      payloadKeys: Object.keys(bookingPayload)
+    });
     
     // Add availability context if provided
     if (body.availability_request_id) {

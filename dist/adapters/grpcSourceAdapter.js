@@ -15,7 +15,9 @@ function createClient(address) {
     return new SourceProviderService(address, grpc.credentials.createInsecure());
 }
 export function makeGrpcSourceAdapter(address) {
+    console.log(`[GrpcSourceAdapter] Creating gRPC client for address: ${address}`);
     const client = createClient(address);
+    console.log(`[GrpcSourceAdapter] ✅ gRPC client created successfully`);
     return {
         async health() {
             return await new Promise((res, rej) => client.GetHealth({}, (e, r) => e ? rej(e) : res(r)));
@@ -39,9 +41,29 @@ export function makeGrpcSourceAdapter(address) {
                 residency_country: criteria.residency_country || "",
                 vehicle_classes: criteria.vehicle_classes || [],
             };
+            console.log(`[GrpcSourceAdapter] 🔌 Making gRPC GetAvailability call to ${address}:`, {
+                request,
+                address
+            });
+            const callStartTime = Date.now();
             return await new Promise((res, rej) => client.GetAvailability(request, (e, r) => {
-                if (e)
+                const callDuration = Date.now() - callStartTime;
+                if (e) {
+                    console.error(`[GrpcSourceAdapter] ❌ gRPC GetAvailability error (${callDuration}ms):`, {
+                        error: e.message || e,
+                        code: e.code,
+                        details: e.details,
+                        address,
+                        request
+                    });
                     return rej(e);
+                }
+                console.log(`[GrpcSourceAdapter] ✅ gRPC GetAvailability response (${callDuration}ms):`, {
+                    vehiclesCount: r.vehicles?.length || 0,
+                    hasVehicles: !!r.vehicles,
+                    vehicles: r.vehicles,
+                    fullResponse: r
+                });
                 // Transform response to internal format (matching source_provider.proto VehicleOffer)
                 const offers = (r.vehicles || []).map((v) => ({
                     source_id: criteria.source_id || "",
@@ -54,6 +76,7 @@ export function makeGrpcSourceAdapter(address) {
                     supplier_offer_ref: v.supplier_offer_ref || "",
                     availability_status: v.availability_status || "AVAILABLE",
                 }));
+                console.log(`[GrpcSourceAdapter] 📦 Transformed ${offers.length} offers from gRPC response`);
                 res(offers);
             }));
         },

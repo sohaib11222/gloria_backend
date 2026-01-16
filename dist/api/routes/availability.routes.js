@@ -7,16 +7,17 @@ import { metaFromReq } from "../../grpc/meta.js";
 import { auditLog } from "../../services/audit.js";
 import { prisma } from "../../data/prisma.js";
 import { LocationsService } from "../../services/locations.js";
+import { unlocodeSchema, isoDateSchema } from "../../services/validation.js";
 export const availabilityRouter = Router();
 // [AUTO-AUDIT] agreement_refs required; downstream will validate ACTIVE set per agent
 // For admins, agent_id and agreement_refs are optional (for testing purposes)
 const submitSchema = z.object({
-    pickup_unlocode: z.string(),
-    dropoff_unlocode: z.string(),
-    pickup_iso: z.string(),
-    dropoff_iso: z.string(),
-    driver_age: z.number().int().min(18).optional().default(30),
-    residency_country: z.string().length(2).optional().default("US"),
+    pickup_unlocode: unlocodeSchema,
+    dropoff_unlocode: unlocodeSchema,
+    pickup_iso: isoDateSchema,
+    dropoff_iso: isoDateSchema,
+    driver_age: z.number().int().min(18).max(100).optional().default(30),
+    residency_country: z.string().length(2).regex(/^[A-Z]{2}$/).optional().default("US"),
     vehicle_classes: z.array(z.string()).optional().default([]),
     agreement_refs: z.array(z.string()).optional(), // Optional for admins, required for agents
     agent_id: z.string().optional(), // For admin testing - allows specifying which agent to test as
@@ -238,7 +239,16 @@ availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), a
                     response: resp,
                     durationMs: duration,
                 });
-                res.json(resp);
+                // Return gRPC response directly (contains offers, last_seq, complete, status)
+                // Frontend expects: { offers: [], last_seq: number, complete: boolean, status: string }
+                res.json({
+                    request_id: resp.request_id || pollRequestId,
+                    offers: resp.offers || [],
+                    last_seq: resp.last_seq || 0,
+                    complete: resp.complete || false,
+                    status: resp.complete ? 'COMPLETE' : 'IN_PROGRESS',
+                    timed_out_sources: resp.timed_out_sources || 0,
+                });
             }
         });
     }

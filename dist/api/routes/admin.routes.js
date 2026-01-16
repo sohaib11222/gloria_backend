@@ -565,27 +565,14 @@ adminRouter.post("/admin/companies/:id/approve", requireAuth(), requireRole("ADM
             });
             return res.status(404).json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
         }
-        if (!company.emailVerified) {
-            // Log failed approval (email not verified)
-            await auditLog({
-                direction: "IN",
-                endpoint: "admin.companies.approve",
-                requestId,
-                companyId: id,
-                httpStatus: 400,
-                request: { companyId: id },
-                response: { error: "EMAIL_NOT_VERIFIED", message: "Company email must be verified before approval" },
-                durationMs: Date.now() - startTime,
-            });
-            return res.status(400).json({
-                error: "EMAIL_NOT_VERIFIED",
-                message: "Company email must be verified before approval"
-            });
-        }
-        // Update approval status
+        // Update approval status and automatically verify email
+        // When admin approves, we also verify the email automatically
         const updatedCompany = await prisma.company.update({
             where: { id },
-            data: { approvalStatus: "APPROVED" },
+            data: {
+                approvalStatus: "APPROVED",
+                emailVerified: true // Automatically verify email when admin approves
+            },
             include: {
                 users: true,
                 agentAgreements: true,
@@ -594,7 +581,7 @@ adminRouter.post("/admin/companies/:id/approve", requireAuth(), requireRole("ADM
             }
         });
         const duration = Date.now() - startTime;
-        // Log successful approval
+        // Log successful approval (with email verification)
         await auditLog({
             direction: "IN",
             endpoint: "admin.companies.approve",
@@ -602,11 +589,17 @@ adminRouter.post("/admin/companies/:id/approve", requireAuth(), requireRole("ADM
             companyId: id,
             httpStatus: 200,
             request: { companyId: id },
-            response: { message: "Company approved successfully", companyId: id, companyName: company.companyName },
+            response: {
+                message: "Company approved and email verified successfully",
+                companyId: id,
+                companyName: company.companyName,
+                emailVerified: true,
+                approvalStatus: "APPROVED"
+            },
             durationMs: duration,
         });
         res.json({
-            message: "Company approved successfully",
+            message: "Company approved and email verified successfully",
             company: updatedCompany
         });
     }
@@ -2359,6 +2352,172 @@ adminRouter.post("/admin/sources/:sourceId/import-branches", requireAuth(), requ
 /**
  * @openapi
  * /admin/branches:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Create a new branch
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [sourceId, branchCode, name]
+ *             properties:
+ *               sourceId:
+ *                 type: string
+ *                 description: Source company ID
+ *               branchCode:
+ *                 type: string
+ *                 description: Unique branch code for this source
+ *               name:
+ *                 type: string
+ *                 description: Branch name
+ *               status:
+ *                 type: string
+ *               locationType:
+ *                 type: string
+ *               collectionType:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               phone:
+ *                 type: string
+ *               latitude:
+ *                 type: number
+ *               longitude:
+ *                 type: number
+ *               addressLine:
+ *                 type: string
+ *               city:
+ *                 type: string
+ *               postalCode:
+ *                 type: string
+ *               country:
+ *                 type: string
+ *               countryCode:
+ *                 type: string
+ *               natoLocode:
+ *                 type: string
+ */
+const createBranchSchema = z.object({
+    sourceId: z.string().min(1, "Source ID is required"),
+    branchCode: z.string().min(1, "Branch code is required"),
+    name: z.string().min(1, "Name is required"),
+    status: z.string().optional().nullable(),
+    locationType: z.string().optional().nullable(),
+    collectionType: z.string().optional().nullable(),
+    email: z.string().email().optional().nullable(),
+    phone: z.string().optional().nullable(),
+    latitude: z.number().optional().nullable(),
+    longitude: z.number().optional().nullable(),
+    addressLine: z.string().optional().nullable(),
+    city: z.string().optional().nullable(),
+    postalCode: z.string().optional().nullable(),
+    country: z.string().optional().nullable(),
+    countryCode: z.string().optional().nullable(),
+    natoLocode: z.string().optional().nullable(),
+});
+adminRouter.post("/admin/branches", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+    try {
+        const body = createBranchSchema.parse(req.body);
+        // Verify source exists and is a SOURCE type
+        const source = await prisma.company.findUnique({
+            where: { id: body.sourceId },
+            select: { id: true, type: true, companyName: true },
+        });
+        if (!source) {
+            return res.status(404).json({
+                error: "SOURCE_NOT_FOUND",
+                message: "Source not found",
+            });
+        }
+        if (source.type !== "SOURCE") {
+            return res.status(400).json({
+                error: "INVALID_TYPE",
+                message: "Company must be a SOURCE type",
+            });
+        }
+        // Check if branch code already exists for this source
+        const existing = await prisma.branch.findUnique({
+            where: {
+                sourceId_branchCode: {
+                    sourceId: body.sourceId,
+                    branchCode: body.branchCode,
+                },
+            },
+        });
+        if (existing) {
+            return res.status(409).json({
+                error: "BRANCH_CODE_EXISTS",
+                message: `Branch with code ${body.branchCode} already exists for this source`,
+            });
+        }
+        // Validate natoLocode if provided
+        if (body.natoLocode) {
+            const locode = await prisma.uNLocode.findUnique({
+                where: { unlocode: body.natoLocode },
+            });
+            if (!locode) {
+                return res.status(400).json({
+                    error: "INVALID_UNLOCODE",
+                    message: `UN/LOCODE ${body.natoLocode} not found`,
+                });
+            }
+        }
+        // Create branch
+        const branch = await prisma.branch.create({
+            data: {
+                sourceId: body.sourceId,
+                branchCode: body.branchCode,
+                name: body.name,
+                status: body.status || null,
+                locationType: body.locationType || null,
+                collectionType: body.collectionType || null,
+                email: body.email || null,
+                phone: body.phone || null,
+                latitude: body.latitude || null,
+                longitude: body.longitude || null,
+                addressLine: body.addressLine || null,
+                city: body.city || null,
+                postalCode: body.postalCode || null,
+                country: body.country || null,
+                countryCode: body.countryCode || null,
+                natoLocode: body.natoLocode || null,
+            },
+            include: {
+                source: {
+                    select: {
+                        id: true,
+                        companyName: true,
+                        companyCode: true,
+                    },
+                },
+            },
+        });
+        res.status(201).json(branch);
+    }
+    catch (e) {
+        if (e.name === "ZodError") {
+            return res.status(400).json({
+                error: "VALIDATION_ERROR",
+                message: "Invalid request data",
+                details: e.errors,
+            });
+        }
+        if (e.code === "P2002") {
+            return res.status(409).json({
+                error: "BRANCH_CODE_EXISTS",
+                message: "Branch code already exists for this source",
+            });
+        }
+        next(e);
+    }
+});
+/**
+ * @openapi
+ * /admin/branches:
  *   get:
  *     tags: [Admin]
  *     summary: List all branches with pagination and filters
@@ -3372,7 +3531,7 @@ adminRouter.get("/admin/notifications", requireAuth(), requireRole("ADMIN"), asy
                     message: `${company.companyName} (${company.type}) - ${company.email}`,
                     timestamp: company.createdAt.toISOString(),
                     read: isRead,
-                    actionUrl: '/companies',
+                    actionUrl: `/companies?status=PENDING_VERIFICATION&highlight=${company.id}`,
                 });
             }
         });
@@ -3801,36 +3960,82 @@ adminRouter.patch("/admin/smtp", requireAuth(), requireRole("ADMIN"), async (req
 adminRouter.post("/admin/smtp/test", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
     try {
         const { to } = z.object({ to: z.string().email() }).parse(req.body);
-        const { sendMail } = await import("../../infra/mailer.js");
-        await sendMail({
-            to,
-            subject: "SMTP Test Email - Car Hire Middleware",
-            html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <title>SMTP Test Email</title>
-        </head>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-          <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #2563eb;">SMTP Configuration Test</h2>
-            <p>This is a test email to verify your SMTP configuration is working correctly.</p>
-            <p><strong>Sent at:</strong> ${new Date().toISOString()}</p>
-            <p>If you received this email, your SMTP settings are configured correctly!</p>
-            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
-            <p style="color: #6b7280; font-size: 12px;">
-              This is an automated test email from the Car Hire Middleware system.
-            </p>
-          </div>
-        </body>
-        </html>
-      `,
+        const { sendMail, getMailer } = await import("../../infra/mailer.js");
+        // Check configuration before sending
+        const smtpConfig = await prisma.smtpConfig.findFirst({
+            where: { enabled: true },
+            orderBy: { updatedAt: 'desc' },
         });
-        res.json({
-            success: true,
-            message: `Test email sent successfully to ${to}`,
-        });
+        const hasEnvVars = !!(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
+        const isConfigured = !!smtpConfig || hasEnvVars;
+        if (!isConfigured) {
+            return res.status(400).json({
+                error: "SMTP_NOT_CONFIGURED",
+                message: "SMTP is not configured. Please configure SMTP via admin panel or environment variables.",
+                hint: "Use POST /admin/smtp to configure SMTP, or set EMAIL_HOST, EMAIL_USER, EMAIL_PASS in .env file"
+            });
+        }
+        // Try to verify connection first
+        let connectionVerified = false;
+        let connectionError = null;
+        try {
+            const transporter = await getMailer();
+            await transporter.verify();
+            connectionVerified = true;
+        }
+        catch (verifyError) {
+            connectionError = verifyError.message;
+        }
+        // Attempt to send email
+        let emailSent = false;
+        let sendError = null;
+        try {
+            await sendMail({
+                to,
+                subject: "SMTP Test Email - Car Hire Middleware",
+                html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>SMTP Test Email</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+              <h2 style="color: #2563eb;">SMTP Configuration Test</h2>
+              <p>This is a test email to verify your SMTP configuration is working correctly.</p>
+              <p><strong>Sent at:</strong> ${new Date().toISOString()}</p>
+              <p>If you received this email, your SMTP settings are configured correctly!</p>
+              <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+              <p style="color: #6b7280; font-size: 12px;">
+                This is an automated test email from the Car Hire Middleware system.
+              </p>
+            </div>
+          </body>
+          </html>
+        `,
+            });
+            emailSent = true;
+        }
+        catch (sendErr) {
+            sendError = sendErr.message;
+        }
+        if (emailSent) {
+            res.json({
+                success: true,
+                message: `Test email sent successfully to ${to}`,
+                connectionVerified,
+            });
+        }
+        else {
+            res.status(500).json({
+                error: "EMAIL_SEND_FAILED",
+                message: `Failed to send test email: ${sendError || 'Unknown error'}`,
+                connectionVerified,
+                connectionError,
+                hint: connectionError ? "SMTP connection verification failed. Check your credentials." : "Email sending failed. Check server logs for details."
+            });
+        }
     }
     catch (e) {
         if (e instanceof z.ZodError) {
@@ -3846,6 +4051,72 @@ adminRouter.post("/admin/smtp/test", requireAuth(), requireRole("ADMIN"), async 
             error: "EMAIL_SEND_FAILED",
             message: `Failed to send test email: ${errorMessage}`,
         });
+    }
+});
+/**
+ * @openapi
+ * /admin/smtp/status:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get SMTP configuration status and diagnostics
+ *     security:
+ *       - bearerAuth: []
+ *     description: Returns detailed information about SMTP configuration including what's configured and connection status
+ */
+adminRouter.get("/admin/smtp/status", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+    try {
+        const smtpConfig = await prisma.smtpConfig.findFirst({
+            where: { enabled: true },
+            orderBy: { updatedAt: 'desc' },
+        });
+        const hasEnvVars = !!(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
+        let connectionStatus = 'unknown';
+        let connectionError = null;
+        // Try to verify connection if we have config
+        if (smtpConfig || hasEnvVars) {
+            try {
+                const { getMailer } = await import("../../infra/mailer.js");
+                const transporter = await getMailer();
+                await transporter.verify();
+                connectionStatus = 'verified';
+            }
+            catch (error) {
+                connectionStatus = 'failed';
+                connectionError = error.message;
+            }
+        }
+        else {
+            connectionStatus = 'not_configured';
+        }
+        const status = {
+            configured: !!smtpConfig,
+            usingEnvVars: hasEnvVars && !smtpConfig,
+            usingAdminConfig: !!smtpConfig,
+            connectionStatus,
+            config: null,
+            envVars: {
+                EMAIL_HOST: process.env.EMAIL_HOST ? '✓ Set' : '✗ Not set',
+                EMAIL_USER: process.env.EMAIL_USER ? '✓ Set' : '✗ Not set',
+                EMAIL_PASS: process.env.EMAIL_PASS ? '✓ Set (hidden)' : '✗ Not set',
+                EMAIL_PORT: process.env.EMAIL_PORT || '587 (default)',
+                EMAIL_SECURE: process.env.EMAIL_SECURE || 'false (default)',
+                EMAIL_FROM: process.env.EMAIL_FROM || 'not set',
+            }
+        };
+        if (smtpConfig) {
+            const { password, ...configWithoutPassword } = smtpConfig;
+            status.config = {
+                ...configWithoutPassword,
+                password: password ? '***' : null,
+            };
+        }
+        if (connectionError) {
+            status.connectionError = connectionError;
+        }
+        res.json(status);
+    }
+    catch (e) {
+        next(e);
     }
 });
 /**

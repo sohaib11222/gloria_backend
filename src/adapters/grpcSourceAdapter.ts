@@ -1,11 +1,48 @@
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
-import path from "path";
+import { resolveProtoPath } from "../grpc/util/resolveProtoPath.js";
 
-const PROTO_PATH = process.env.SOURCE_PROVIDER_PROTO_PATH || path.resolve(process.cwd(), "../protos/source_provider.proto");
+/**
+ * Normalize address for gRPC client connection.
+ * 0.0.0.0 is a bind address (listen on all interfaces) but not valid for client connections.
+ * Convert it to localhost for local connections.
+ */
+function normalizeAddressForClient(address: string): string {
+  // If address is 0.0.0.0:port, convert to localhost:port for client connection
+  if (address.startsWith('0.0.0.0:')) {
+    const port = address.split(':')[1];
+    const normalized = `localhost:${port}`;
+    console.log(`[GrpcSourceAdapter] 🔄 Normalizing address: ${address} → ${normalized} (0.0.0.0 is bind address, using localhost for client)`);
+    return normalized;
+  }
+  return address;
+}
 
 function createClient(address: string) {
-  const def = protoLoader.loadSync(PROTO_PATH, { 
+  const normalizedAddress = normalizeAddressForClient(address);
+  console.log(`[GrpcSourceAdapter] 🔌 Creating gRPC client with address: ${normalizedAddress} (original: ${address})`);
+  
+  // Resolve proto file path
+  const { path: protoPath, tried } = resolveProtoPath(
+    "source_provider.proto",
+    process.env.SOURCE_PROVIDER_PROTO_PATH
+  );
+  
+  if (!protoPath) {
+    const errorMsg = [
+      "Unable to locate source_provider.proto.",
+      "Set env SOURCE_PROVIDER_PROTO_PATH to the full file path, or place the file in one of:",
+      "- <repo-root>/protos/source_provider.proto",
+      "- <middleware-backend>/protos/source_provider.proto",
+      `Tried: ${tried.join(" | ")}`
+    ].join("\n");
+    console.error(`[GrpcSourceAdapter] ❌ ${errorMsg}`);
+    throw new Error(errorMsg);
+  }
+  
+  console.log(`[GrpcSourceAdapter] 📄 Using proto file: ${protoPath}`);
+  
+  const def = protoLoader.loadSync(protoPath, { 
     keepCase: true, 
     longs: String, 
     enums: String, 
@@ -14,11 +51,13 @@ function createClient(address: string) {
   });
   // @ts-ignore
   const { SourceProviderService } = grpc.loadPackageDefinition(def).source_provider;
-  return new SourceProviderService(address, grpc.credentials.createInsecure());
+  return new SourceProviderService(normalizedAddress, grpc.credentials.createInsecure());
 }
 
 export function makeGrpcSourceAdapter(address: string) {
+  console.log(`[GrpcSourceAdapter] 📍 Using exact endpoint as configured by source: ${address}`);
   const client = createClient(address);
+  console.log(`[GrpcSourceAdapter] ✅ gRPC client created successfully`);
   
   return {
     async health() { 
@@ -50,21 +89,71 @@ export function makeGrpcSourceAdapter(address: string) {
         vehicle_classes: criteria.vehicle_classes || [],
       };
       
+      console.log(`[GrpcSourceAdapter] 🔌 Making gRPC GetAvailability call:`, {
+        originalEndpoint: address,
+        request
+      });
+      
+      const callStartTime = Date.now();
+      
       return await new Promise((res, rej) => 
         client.GetAvailability(request, (e: any, r: any) => {
-          if (e) return rej(e);
+          const callDuration = Date.now() - callStartTime;
+          
+          if (e) {
+            console.error(`[GrpcSourceAdapter] ❌ gRPC GetAvailability error (${callDuration}ms):`, {
+              error: e.message || e,
+              code: e.code,
+              details: e.details,
+              address,
+              request
+            });
+            return rej(e);
+          }
+          
+          console.log(`[GrpcSourceAdapter] ✅ gRPC GetAvailability response (${callDuration}ms):`, {
+            vehiclesCount: r.vehicles?.length || 0,
+            hasVehicles: !!r.vehicles,
+            vehicles: r.vehicles,
+            fullResponse: r
+          });
+          
           // Transform response to internal format (matching source_provider.proto VehicleOffer)
-          const offers = (r.vehicles || []).map((v: any) => ({
-            source_id: criteria.source_id || "",
-            agreement_ref: criteria.agreement_ref,
-            vehicle_class: v.vehicle_class || "",
-            vehicle_make_model: v.make_model || "", // proto field is make_model
-            rate_plan_code: "", // Not in proto response, will be empty
-            currency: v.currency || "",
-            total_price: v.total_price || 0,
-            supplier_offer_ref: v.supplier_offer_ref || "",
-            availability_status: v.availability_status || "AVAILABLE",
-          }));
+          const offers = (r.vehicles || []).map((v: any, index: number) => {
+            // Generate supplier_offer_ref if missing
+            let supplier_offer_ref = v.supplier_offer_ref || "";
+            if (!supplier_offer_ref) {
+              // Generate a unique reference based on offer characteristics
+              // Format: GEN-{agreement_ref}-{source_id_short}-{index}-{hash}
+              const sourceIdShort = (criteria.source_id || "").substring(0, 8);
+              const agreementRefShort = (criteria.agreement_ref || "").substring(0, 10);
+              const offerHash = Buffer.from(
+                `${criteria.agreement_ref}-${v.vehicle_class || ""}-${v.make_model || ""}-${v.total_price || 0}-${index}`
+              ).toString('base64').substring(0, 8).replace(/[^A-Za-z0-9]/g, '');
+              supplier_offer_ref = `GEN-${agreementRefShort}-${sourceIdShort}-${index}-${offerHash}`;
+              
+              console.log(`[GrpcSourceAdapter] 🔧 Generated supplier_offer_ref for offer ${index}:`, {
+                original: v.supplier_offer_ref || "(missing)",
+                generated: supplier_offer_ref,
+                agreement_ref: criteria.agreement_ref,
+                source_id: criteria.source_id
+              });
+            }
+            
+            return {
+              source_id: criteria.source_id || "",
+              agreement_ref: criteria.agreement_ref,
+              vehicle_class: v.vehicle_class || "",
+              vehicle_make_model: v.make_model || "", // proto field is make_model
+              rate_plan_code: "", // Not in proto response, will be empty
+              currency: v.currency || "",
+              total_price: v.total_price || 0,
+              supplier_offer_ref: supplier_offer_ref,
+              availability_status: v.availability_status || "AVAILABLE",
+            };
+          });
+          
+          console.log(`[GrpcSourceAdapter] 📦 Transformed ${offers.length} offers from gRPC response`);
           res(offers);
         })
       ); 
@@ -75,14 +164,46 @@ export function makeGrpcSourceAdapter(address: string) {
      * REQUIRED: agreement_ref, supplier_offer_ref, idempotency_key
      */
     async bookingCreate(input: any) { 
+      // Validate required fields before making gRPC call
+      if (!input.agreement_ref) {
+        throw new Error("agreement_ref is required");
+      }
+      if (!input.supplier_offer_ref) {
+        throw new Error("supplier_offer_ref is required");
+      }
+      if (!input.idempotency_key && !input.idempotencyKey) {
+        throw new Error("idempotency_key is required");
+      }
+      
+      // Check if supplier_offer_ref is generated (starts with "GEN-")
+      const isGeneratedRef = input.supplier_offer_ref?.startsWith("GEN-");
+      
+      console.log(`[GrpcSourceAdapter] 📋 Creating booking with validated fields:`, {
+        agreement_ref: input.agreement_ref,
+        supplier_offer_ref: input.supplier_offer_ref,
+        idempotency_key: input.idempotency_key || input.idempotencyKey,
+        hasAllRequired: true,
+        isGeneratedRef: isGeneratedRef,
+        note: isGeneratedRef ? "Using generated supplier_offer_ref (source did not provide one)" : "Using source-provided supplier_offer_ref"
+      });
+      
       // Transform to source_provider.proto BookingCreateRequest format
       // Include all available booking fields for full OTA compliance
       const request: any = {
-        agreement_ref: input.agreement_ref || "",
-        supplier_offer_ref: input.supplier_offer_ref || "",
+        agreement_ref: input.agreement_ref,
+        supplier_offer_ref: input.supplier_offer_ref,
         agent_booking_ref: input.agent_booking_ref || "",
-        idempotency_key: input.idempotency_key || input.idempotencyKey || "",
+        idempotency_key: input.idempotency_key || input.idempotencyKey,
       };
+      
+      console.log(`[GrpcSourceAdapter] 📤 Sending CreateBooking request to source backend:`, {
+        agreement_ref: request.agreement_ref,
+        supplier_offer_ref: request.supplier_offer_ref,
+        idempotency_key: request.idempotency_key ? `${request.idempotency_key.substring(0, 20)}...` : 'MISSING',
+        hasIdempotencyKey: !!request.idempotency_key,
+        requestKeys: Object.keys(request),
+        fullRequest: request
+      });
       
       // Add location details if available
       if (input.pickup_unlocode) request.pickup_unlocode = input.pickup_unlocode;
@@ -105,7 +226,23 @@ export function makeGrpcSourceAdapter(address: string) {
       
       return await new Promise((res, rej) => 
         client.CreateBooking(request, (e: any, r: any) => {
-          if (e) return rej(e);
+          if (e) {
+            console.error(`[GrpcSourceAdapter] ❌ Source backend CreateBooking error:`, {
+              code: e.code,
+              message: e.message,
+              details: e.details,
+              request: {
+                agreement_ref: request.agreement_ref,
+                supplier_offer_ref: request.supplier_offer_ref,
+                idempotency_key: request.idempotency_key ? `${request.idempotency_key.substring(0, 20)}...` : 'MISSING'
+              }
+            });
+            return rej(e);
+          }
+          console.log(`[GrpcSourceAdapter] ✅ Source backend CreateBooking success:`, {
+            supplier_booking_ref: r.supplier_booking_ref,
+            status: r.status
+          });
           // Transform response to internal format
           res({
             supplier_booking_ref: r.supplier_booking_ref || "",

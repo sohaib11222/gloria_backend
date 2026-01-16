@@ -26,6 +26,7 @@ import uiRoutes from "./routes/ui.routes.js";
 import { adminGrpcRouter as newAdminGrpcRouter } from "../routes/admin/grpc.routes.js";
 import { adminSourcesRouter } from "../routes/admin/sources.routes.js";
 import docsRouter from "./routes/docs.routes.js";
+import sdkRouter from "./routes/sdk.routes.js";
 import { mountSwagger } from "./swagger.js";
 import { register } from "../services/metrics.js";
 import { otaMapper } from "./middleware/otaMapper.js";
@@ -35,7 +36,7 @@ export function buildApp() {
     app.use(cors({
         origin: '*',
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Idempotency-Key', 'X-Agent-Email', 'X-Api-Key'],
         credentials: false,
         preflightContinue: false,
         optionsSuccessStatus: 204
@@ -44,7 +45,7 @@ export function buildApp() {
     app.options('*', (req, res) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
         res.setHeader('Access-Control-Allow-Credentials', 'false');
         res.sendStatus(204);
     });
@@ -52,12 +53,23 @@ export function buildApp() {
     app.use((req, res, next) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
         res.setHeader('Access-Control-Allow-Credentials', 'false');
         res.setHeader('Access-Control-Expose-Headers', '*');
         next();
     });
-    app.use(express.json({ limit: "2mb" }));
+    // Body parsing middleware - must be careful with multipart/form-data
+    // JSON parser - skip for multipart/form-data (handled by multer)
+    app.use((req, res, next) => {
+        const contentType = req.headers['content-type'] || '';
+        // Skip ALL body parsing for multipart/form-data - multer will handle it
+        if (contentType.includes('multipart/form-data')) {
+            console.log('[App Middleware] Skipping body parsing for multipart/form-data request');
+            return next();
+        }
+        // For other content types, use JSON parser
+        express.json({ limit: "2mb" })(req, res, next);
+    });
     // Helmet with relaxed CSP for development - AFTER CORS
     app.use(helmet({
         crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -105,6 +117,7 @@ export function buildApp() {
     app.use("/api/admin/test", adminTestRoutes);
     app.use("/ui", uiRoutes);
     app.use("/docs", docsRouter);
+    app.use("/docs", sdkRouter);
     // Prometheus metrics endpoint
     app.get('/metrics', async (req, res) => {
         try {

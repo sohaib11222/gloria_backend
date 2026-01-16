@@ -7,7 +7,7 @@ import pLimit from "p-limit";
 import crypto from "crypto";
 const CONCURRENT_LIMIT = 10;
 const ECHO_TIMEOUT_MS = 120000; // 120 seconds
-const MAX_POLL_WAIT_MS = 15000; // 15 seconds max wait
+const MAX_POLL_WAIT_MS = 10000; // 10 seconds max wait (client requirement)
 /**
  * Submit an Echo request and dispatch to eligible sources
  */

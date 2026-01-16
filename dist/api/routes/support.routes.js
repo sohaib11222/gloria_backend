@@ -318,7 +318,42 @@ supportRouter.get("/support/tickets/:id/messages", requireAuth(), async (req, re
  *     security:
  *       - bearerAuth: []
  */
-supportRouter.post("/support/tickets/:id/messages", requireAuth(), upload.single('image'), async (req, res, next) => {
+supportRouter.post("/support/tickets/:id/messages", requireAuth(), 
+// Debug middleware before multer
+(req, res, next) => {
+    console.log('[Support Route] BEFORE multer:', {
+        method: req.method,
+        url: req.url,
+        contentType: req.headers['content-type'],
+        contentLength: req.headers['content-length'],
+        hasBody: !!req.body,
+        bodyType: typeof req.body,
+        bodyKeys: req.body ? Object.keys(req.body) : [],
+        bodyValue: req.body,
+        // Check if body is a stream or buffer
+        bodyIsStream: req.body && typeof req.body.pipe === 'function',
+        bodyIsBuffer: Buffer.isBuffer(req.body),
+    });
+    next();
+}, 
+// Multer middleware - this should parse multipart/form-data
+upload.single('image'), 
+// Debug middleware after multer
+(req, res, next) => {
+    console.log('[Support Route] AFTER multer:', {
+        hasBody: !!req.body,
+        bodyKeys: req.body ? Object.keys(req.body) : [],
+        bodyContent: req.body,
+        bodyType: typeof req.body,
+        hasFile: !!req.file,
+        fileName: req.file?.originalname,
+        fileSize: req.file?.size,
+        fileMimetype: req.file?.mimetype,
+        // Check multer errors
+        multerError: req.multerError,
+    });
+    next();
+}, async (req, res, next) => {
     try {
         const ticketId = req.params.id;
         const isAdmin = req.user.role === "ADMIN";
@@ -339,10 +374,58 @@ supportRouter.post("/support/tickets/:id/messages", requireAuth(), upload.single
         if (ticket.status === 'CLOSED') {
             return res.status(400).json({ error: "BAD_REQUEST", message: "Cannot send messages to closed tickets" });
         }
-        const content = req.body.content;
+        // Debug logging BEFORE parsing to see raw request
+        console.log('[Support Route] Raw request:', {
+            method: req.method,
+            url: req.url,
+            headers: {
+                'content-type': req.headers['content-type'],
+                'content-length': req.headers['content-length'],
+                'authorization': req.headers['authorization'] ? 'present' : 'missing',
+            },
+            bodyType: typeof req.body,
+            bodyIsEmpty: !req.body || Object.keys(req.body || {}).length === 0,
+        });
+        const content = req.body?.content;
         const file = req.file;
-        if (!content && !file) {
-            return res.status(400).json({ error: "BAD_REQUEST", message: "Either content or image is required" });
+        // Debug logging to understand what's being received
+        console.log('[Support Route] Parsed request:', {
+            hasContent: content !== undefined,
+            contentValue: content,
+            contentType: typeof content,
+            contentLength: content?.length,
+            hasFile: !!file,
+            fileName: file?.originalname,
+            fileSize: file?.size,
+            fileMimetype: file?.mimetype,
+            bodyKeys: Object.keys(req.body || {}),
+            bodyContent: req.body,
+            rawBody: req.body,
+        });
+        // Check if we have content (even empty string is valid) or file
+        // Empty string IS valid content when we have a file
+        // We only need content OR file, not both
+        const hasContent = content !== undefined && content !== null;
+        const hasFile = !!file;
+        // Accept if we have either content (even empty string) or file
+        if (!hasContent && !hasFile) {
+            return res.status(400).json({
+                error: "BAD_REQUEST",
+                message: "Either content or image is required",
+                debug: {
+                    hasContent,
+                    hasFile,
+                    contentValue: content,
+                    contentType: typeof content,
+                    bodyKeys: Object.keys(req.body || {}),
+                    bodyContent: req.body,
+                    fileInfo: file ? {
+                        name: file.originalname,
+                        size: file.size,
+                        mimetype: file.mimetype,
+                    } : null,
+                }
+            });
         }
         let imageUrl;
         if (file) {

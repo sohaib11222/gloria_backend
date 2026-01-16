@@ -71,7 +71,6 @@ export function buildApp() {
     
     // Skip ALL body parsing for multipart/form-data - multer will handle it
     if (contentType.includes('multipart/form-data')) {
-      console.log('[App Middleware] Skipping body parsing for multipart/form-data request');
       return next();
     }
     
@@ -87,7 +86,17 @@ export function buildApp() {
   }));
   
   app.use(requestId());
-  app.use(pinoHttp({ logger } as any));
+  // Only log availability routes to reduce noise
+  app.use(pinoHttp({ 
+    logger,
+    autoLogging: {
+      ignore: (req) => {
+        // Only log availability routes
+        const path = req.url || '';
+        return !path.includes('/availability');
+      }
+    }
+  } as any));
 
   // [AUTO-AUDIT] Enforce IP whitelist globally (can be disabled via env)
   // app.use(ipWhitelist());
