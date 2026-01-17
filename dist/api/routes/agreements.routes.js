@@ -634,7 +634,7 @@ agreementsRouter.post("/agreements/:id/:action", requireAuth(), requireRole("ADM
  *         schema: { type: string }
  */
 agreementsRouter.get("/agreements", requireAuth(), async (req, res, next) => {
-    console.log("This is the agreements router");
+    // console.log("This is the agreements router");
     try {
         const scope = req.query.scope ? String(req.query.scope) : "";
         const status = req.query.status ? String(req.query.status) : "";
@@ -712,6 +712,7 @@ agreementsRouter.get("/agreements", requireAuth(), async (req, res, next) => {
             });
         }
         else {
+            // Debug logging for agent agreements
             client.ListByAgent({ agent_id: req.user.companyId, status }, metaFromReq(req), (err, resp) => {
                 if (err) {
                     // Handle gRPC errors
@@ -765,22 +766,15 @@ agreementsRouter.get("/agreements/offers", requireAuth(), requireCompanyType("AG
     try {
         const status = req.query.status ? String(req.query.status) : "";
         // Debug logging
-        console.log('🔍 Agent Offers Debug:');
-        console.log(`- User companyId: ${req.user.companyId}`);
-        console.log(`- Status filter: ${status}`);
-        console.log(`- User type: ${req.user.type}`);
         const client = agreementClient();
         client.ListByAgent({ agent_id: req.user.companyId, status }, metaFromReq(req), (err, resp) => {
             if (err) {
-                console.log('❌ gRPC Error:', err);
                 return next(err);
             }
-            console.log('✅ gRPC Response:', resp);
             res.json({ items: resp.items.map(toAgreementCamelCase), total: resp.items.length });
         });
     }
     catch (e) {
-        console.log('❌ Route Error:', e);
         next(e);
     }
 });

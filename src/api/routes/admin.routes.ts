@@ -560,29 +560,14 @@ adminRouter.post("/admin/companies/:id/approve", requireAuth(), requireRole("ADM
       return res.status(404).json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
     }
 
-    if (!company.emailVerified) {
-      // Log failed approval (email not verified)
-      await auditLog({
-        direction: "IN",
-        endpoint: "admin.companies.approve",
-        requestId,
-        companyId: id,
-        httpStatus: 400,
-        request: { companyId: id },
-        response: { error: "EMAIL_NOT_VERIFIED", message: "Company email must be verified before approval" },
-        durationMs: Date.now() - startTime,
-      });
-      
-      return res.status(400).json({
-        error: "EMAIL_NOT_VERIFIED",
-        message: "Company email must be verified before approval"
-      });
-    }
-    
-    // Update approval status
+    // Update approval status and automatically verify email
+    // When admin approves, we also verify the email automatically
     const updatedCompany = await prisma.company.update({
       where: { id },
-      data: { approvalStatus: "APPROVED" },
+      data: { 
+        approvalStatus: "APPROVED",
+        emailVerified: true  // Automatically verify email when admin approves
+      },
       include: {
         users: true,
         agentAgreements: true,
@@ -593,7 +578,7 @@ adminRouter.post("/admin/companies/:id/approve", requireAuth(), requireRole("ADM
     
     const duration = Date.now() - startTime;
     
-    // Log successful approval
+    // Log successful approval (with email verification)
     await auditLog({
       direction: "IN",
       endpoint: "admin.companies.approve",
@@ -601,12 +586,18 @@ adminRouter.post("/admin/companies/:id/approve", requireAuth(), requireRole("ADM
       companyId: id,
       httpStatus: 200,
       request: { companyId: id },
-      response: { message: "Company approved successfully", companyId: id, companyName: company.companyName },
+      response: { 
+        message: "Company approved and email verified successfully", 
+        companyId: id, 
+        companyName: company.companyName,
+        emailVerified: true,
+        approvalStatus: "APPROVED"
+      },
       durationMs: duration,
     });
     
     res.json({
-      message: "Company approved successfully",
+      message: "Company approved and email verified successfully",
       company: updatedCompany
     });
   } catch (e) { next(e); }
@@ -2426,6 +2417,181 @@ adminRouter.post("/admin/sources/:sourceId/import-branches", requireAuth(), requ
 /**
  * @openapi
  * /admin/branches:
+ *   post:
+ *     tags: [Admin]
+ *     summary: Create a new branch
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [sourceId, branchCode, name]
+ *             properties:
+ *               sourceId:
+ *                 type: string
+ *                 description: Source company ID
+ *               branchCode:
+ *                 type: string
+ *                 description: Unique branch code for this source
+ *               name:
+ *                 type: string
+ *                 description: Branch name
+ *               status:
+ *                 type: string
+ *               locationType:
+ *                 type: string
+ *               collectionType:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               phone:
+ *                 type: string
+ *               latitude:
+ *                 type: number
+ *               longitude:
+ *                 type: number
+ *               addressLine:
+ *                 type: string
+ *               city:
+ *                 type: string
+ *               postalCode:
+ *                 type: string
+ *               country:
+ *                 type: string
+ *               countryCode:
+ *                 type: string
+ *               natoLocode:
+ *                 type: string
+ */
+const createBranchSchema = z.object({
+  sourceId: z.string().min(1, "Source ID is required"),
+  branchCode: z.string().min(1, "Branch code is required"),
+  name: z.string().min(1, "Name is required"),
+  status: z.string().optional().nullable(),
+  locationType: z.string().optional().nullable(),
+  collectionType: z.string().optional().nullable(),
+  email: z.string().email().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  latitude: z.number().optional().nullable(),
+  longitude: z.number().optional().nullable(),
+  addressLine: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  postalCode: z.string().optional().nullable(),
+  country: z.string().optional().nullable(),
+  countryCode: z.string().optional().nullable(),
+  natoLocode: z.string().optional().nullable(),
+});
+
+adminRouter.post("/admin/branches", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const body = createBranchSchema.parse(req.body);
+
+    // Verify source exists and is a SOURCE type
+    const source = await prisma.company.findUnique({
+      where: { id: body.sourceId },
+      select: { id: true, type: true, companyName: true },
+    });
+
+    if (!source) {
+      return res.status(404).json({
+        error: "SOURCE_NOT_FOUND",
+        message: "Source not found",
+      });
+    }
+
+    if (source.type !== "SOURCE") {
+      return res.status(400).json({
+        error: "INVALID_TYPE",
+        message: "Company must be a SOURCE type",
+      });
+    }
+
+    // Check if branch code already exists for this source
+    const existing = await prisma.branch.findUnique({
+      where: {
+        sourceId_branchCode: {
+          sourceId: body.sourceId,
+          branchCode: body.branchCode,
+        },
+      },
+    });
+
+    if (existing) {
+      return res.status(409).json({
+        error: "BRANCH_CODE_EXISTS",
+        message: `Branch with code ${body.branchCode} already exists for this source`,
+      });
+    }
+
+    // Validate natoLocode if provided
+    if (body.natoLocode) {
+      const locode = await prisma.uNLocode.findUnique({
+        where: { unlocode: body.natoLocode },
+      });
+      if (!locode) {
+        return res.status(400).json({
+          error: "INVALID_UNLOCODE",
+          message: `UN/LOCODE ${body.natoLocode} not found`,
+        });
+      }
+    }
+
+    // Create branch
+    const branch = await prisma.branch.create({
+      data: {
+        sourceId: body.sourceId,
+        branchCode: body.branchCode,
+        name: body.name,
+        status: body.status || null,
+        locationType: body.locationType || null,
+        collectionType: body.collectionType || null,
+        email: body.email || null,
+        phone: body.phone || null,
+        latitude: body.latitude || null,
+        longitude: body.longitude || null,
+        addressLine: body.addressLine || null,
+        city: body.city || null,
+        postalCode: body.postalCode || null,
+        country: body.country || null,
+        countryCode: body.countryCode || null,
+        natoLocode: body.natoLocode || null,
+      },
+      include: {
+        source: {
+          select: {
+            id: true,
+            companyName: true,
+            companyCode: true,
+          },
+        },
+      },
+    });
+
+    res.status(201).json(branch);
+  } catch (e: any) {
+    if (e.name === "ZodError") {
+      return res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Invalid request data",
+        details: e.errors,
+      });
+    }
+    if (e.code === "P2002") {
+      return res.status(409).json({
+        error: "BRANCH_CODE_EXISTS",
+        message: "Branch code already exists for this source",
+      });
+    }
+    next(e);
+  }
+});
+
+/**
+ * @openapi
+ * /admin/branches:
  *   get:
  *     tags: [Admin]
  *     summary: List all branches with pagination and filters
@@ -3508,7 +3674,7 @@ adminRouter.get("/admin/notifications", requireAuth(), requireRole("ADMIN"), asy
           message: `${company.companyName} (${company.type}) - ${company.email}`,
           timestamp: company.createdAt.toISOString(),
           read: isRead,
-          actionUrl: '/companies',
+          actionUrl: `/companies?status=PENDING_VERIFICATION&highlight=${company.id}`,
         });
       }
     });

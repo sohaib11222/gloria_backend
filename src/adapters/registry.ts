@@ -127,29 +127,66 @@ async function loadGrpcAdapter() {
 }
 
 export async function getAdapterForSource(sourceId: string): Promise<SourceAdapter> {
-  const src = await prisma.company.findUnique({ where: { id: sourceId } });
-  if (!src) throw new Error("SOURCE_NOT_FOUND");
-
-  // Check for gRPC usage
-  const useGrpc = (src as any).use_grpc === true;
+  console.log(`[AdapterRegistry] 🔍 Getting adapter for source: ${sourceId}`);
+  console.log(`[AdapterRegistry] 📋 Querying source company from database...`);
   
-  // Or detect from api_base_url: grpc://host:port → extract address
+  const src = await prisma.company.findUnique({ where: { id: sourceId } });
+  
+  if (!src) {
+    console.error(`[AdapterRegistry] ❌ Source ${sourceId} not found in database`);
+    throw new Error("SOURCE_NOT_FOUND");
+  }
+  
+  console.log(`[AdapterRegistry] 📊 Source company found:`, {
+    id: src.id,
+    adapterType: src.adapterType,
+    grpcEndpoint: src.grpcEndpoint,
+    httpEndpoint: src.httpEndpoint,
+    use_grpc: (src as any).use_grpc,
+    api_base_url: (src as any).api_base_url
+  });
+
+  // Check for gRPC usage (real gRPC protocol)
+  const useGrpc = (src as any).use_grpc === true;
+  console.log(`[AdapterRegistry] 🔍 Checking gRPC flags: use_grpc=${useGrpc}`);
+  
+  // Detect from api_base_url: grpc://host:port → extract address
   let grpcAddr: string | null = null;
   if (typeof (src as any).api_base_url === "string" && (src as any).api_base_url.startsWith("grpc://")) {
     grpcAddr = (src as any).api_base_url.replace("grpc://", "");
+    console.log(`[AdapterRegistry] 📍 Found grpc:// in api_base_url: ${grpcAddr}`);
+  }
+  
+  // Also check grpcEndpoint for grpc:// prefix (workaround since api_base_url might not exist in schema)
+  if (!grpcAddr && src.grpcEndpoint && src.grpcEndpoint.startsWith("grpc://")) {
+    grpcAddr = src.grpcEndpoint.replace("grpc://", "");
+    console.log(`[AdapterRegistry] 📍 Found grpc:// prefix in grpcEndpoint, extracted: ${grpcAddr}`);
+  }
+  
+  // If grpcEndpoint is just host:port (no protocol), assume it's gRPC (not HTTP)
+  // This is the most common case for gRPC servers
+  if (!grpcAddr && src.grpcEndpoint && !src.grpcEndpoint.startsWith("http://") && !src.grpcEndpoint.startsWith("https://")) {
+    grpcAddr = src.grpcEndpoint;
+    console.log(`[AdapterRegistry] 📍 grpcEndpoint is host:port format (no protocol), assuming gRPC: ${grpcAddr}`);
+  } else if (src.grpcEndpoint && (src.grpcEndpoint.startsWith("http://") || src.grpcEndpoint.startsWith("https://"))) {
+    console.log(`[AdapterRegistry] ⚠️ grpcEndpoint has http/https protocol: ${src.grpcEndpoint}`);
   }
 
   if (useGrpc || grpcAddr) {
     const addr = grpcAddr || `${(src as any).grpc_host || "localhost"}:${(src as any).grpc_port || 50061}`;
-    console.log(`🔌 Using gRPC adapter for source ${sourceId} at ${addr}`);
+    console.log(`[AdapterRegistry] ✅ Selected: gRPC adapter (real gRPC protocol) for source ${sourceId} at ${addr}`);
+    console.log(`[AdapterRegistry] 🔧 Creating GrpcSourceAdapter instance...`);
     return makeGrpcSourceAdapter(addr) as any;
   }
 
-  if (src.adapterType === "grpc" && src.grpcEndpoint) {
+  // HTTP-based adapter (confusingly named "GrpcAdapter" but it's HTTP REST)
+  // Only use this if grpcEndpoint explicitly has http:// or https://
+  if (src.adapterType === "grpc" && src.grpcEndpoint && (src.grpcEndpoint.startsWith("http://") || src.grpcEndpoint.startsWith("https://"))) {
     const GrpcAdapter = await loadGrpcAdapter();
+    console.log(`[AdapterRegistry] ✅ Selected: HTTP adapter (GrpcAdapter) for source ${sourceId} at ${src.grpcEndpoint}`);
     return new GrpcAdapter({ endpoint: src.grpcEndpoint, authHeader: process.env.SUPPLIER_GRPC_AUTH || "", sourceId });
   }
 
-  console.log(`🌐 Using HTTP adapter for source ${sourceId}`);
+  console.log(`[AdapterRegistry] ✅ Selected: Mock adapter for source ${sourceId}`);
   return new MockAdapter();
 }

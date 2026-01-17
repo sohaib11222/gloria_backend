@@ -7,7 +7,10 @@ import { metaFromReq } from "../../grpc/meta.js";
 import { auditLog } from "../../services/audit.js";
 import { prisma } from "../../data/prisma.js";
 import { LocationsService } from "../../services/locations.js";
+<<<<<<< HEAD
 import { buildAvailabilityResponse } from "../../services/otaResponseBuilder.js";
+=======
+>>>>>>> fa252dd5bb55fd72f1abf8a948f6d61af9d3b991
 import { unlocodeSchema, isoDateSchema } from "../../services/validation.js";
 export const availabilityRouter = Router();
 // [AUTO-AUDIT] agreement_refs required; downstream will validate ACTIVE set per agent
@@ -42,9 +45,25 @@ const submitSchema = z.object({
 availabilityRouter.post("/submit", requireAuth(), requireCompanyStatus("ACTIVE"), async (req, res, next) => {
     const startTime = Date.now();
     const requestId = req.requestId;
+    console.log(`[Availability.Submit] 📥 Received submit request:`, {
+        requestId,
+        user: req.user?.email,
+        role: req.user?.role,
+        companyId: req.user?.companyId,
+        body: req.body
+    });
     try {
         const body = submitSchema.parse(req.body);
         const userRole = req.user?.role;
+        console.log(`[Availability.Submit] ✅ Request validated:`, {
+            requestId,
+            pickup: body.pickup_unlocode,
+            dropoff: body.dropoff_unlocode,
+            pickupDate: body.pickup_iso,
+            dropoffDate: body.dropoff_iso,
+            agreementRefs: body.agreement_refs,
+            userRole
+        });
         // For admins, allow specifying agent_id for testing, otherwise use their companyId
         let agent_id;
         if (userRole === "ADMIN" && body.agent_id) {
@@ -112,6 +131,12 @@ availabilityRouter.post("/submit", requireAuth(), requireCompanyStatus("ACTIVE")
         }
         // Update body with resolved agreement_refs for downstream processing
         body.agreement_refs = agreementRefs;
+        console.log(`[Availability.Submit] 🔍 Resolved agent and agreements:`, {
+            requestId,
+            agent_id,
+            agreementRefs,
+            userRole
+        });
         // Validate locations per agreement if provided
         if (Array.isArray(body.agreement_refs) && body.agreement_refs.length > 0) {
             // Resolve agreement id by ref for this agent
@@ -145,10 +170,27 @@ availabilityRouter.post("/submit", requireAuth(), requireCompanyStatus("ACTIVE")
             }
             // For admins, allow testing even if agreement doesn't exist (skip validation)
         }
+        console.log(`[Availability.Submit] 🚀 Calling gRPC Submit:`, {
+            requestId,
+            agent_id,
+            criteria: {
+                pickup_unlocode: body.pickup_unlocode,
+                dropoff_unlocode: body.dropoff_unlocode,
+                pickup_iso: body.pickup_iso,
+                dropoff_iso: body.dropoff_iso,
+                agreement_refs: body.agreement_refs
+            }
+        });
         const client = availabilityClient();
         client.Submit({ criteria: body, agent_id, request_id: req.requestId }, metaFromReq(req), async (err, resp) => {
             const duration = Date.now() - startTime;
             if (err) {
+                console.error(`[Availability.Submit] ❌ gRPC Submit error (${duration}ms):`, {
+                    requestId,
+                    error: err.message,
+                    code: err.code,
+                    details: err.details
+                });
                 // Log error
                 await auditLog({
                     direction: "IN",
@@ -164,6 +206,12 @@ availabilityRouter.post("/submit", requireAuth(), requireCompanyStatus("ACTIVE")
                 return next(err);
             }
             else {
+                console.log(`[Availability.Submit] ✅ gRPC Submit success (${duration}ms):`, {
+                    requestId: resp.request_id || req.requestId,
+                    expectedSources: resp.expected_sources,
+                    recommendedPollMs: resp.recommended_poll_ms,
+                    response: resp
+                });
                 // Log success
                 await auditLog({
                     direction: "IN",
@@ -181,6 +229,12 @@ availabilityRouter.post("/submit", requireAuth(), requireCompanyStatus("ACTIVE")
         });
     }
     catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[Availability.Submit] ❌ Validation/processing error:`, {
+            requestId,
+            error: errorMsg,
+            body: req.body
+        });
         // Log validation errors
         await auditLog({
             direction: "IN",
@@ -189,7 +243,7 @@ availabilityRouter.post("/submit", requireAuth(), requireCompanyStatus("ACTIVE")
             companyId: req.user?.companyId,
             httpStatus: 400,
             request: req.body,
-            response: { error: e instanceof Error ? e.message : String(e) },
+            response: { error: errorMsg },
             durationMs: Date.now() - startTime,
         });
         next(e);
@@ -205,9 +259,27 @@ availabilityRouter.post("/submit", requireAuth(), requireCompanyStatus("ACTIVE")
 availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), async (req, res, next) => {
     const startTime = Date.now();
     const requestId = req.requestId;
+    console.log(`[Availability.Poll] 📥 Received poll request:`, {
+        requestId,
+        user: req.user?.email,
+        companyId: req.user?.companyId,
+        query: req.query
+    });
     try {
         const { requestId: pollRequestId, sinceSeq = "0", waitMs = "1000" } = req.query;
+        console.log(`[Availability.Poll] 🔍 Poll parameters:`, {
+            requestId,
+            pollRequestId,
+            sinceSeq,
+            waitMs
+        });
         const client = availabilityClient();
+        console.log(`[Availability.Poll] 🚀 Calling gRPC Poll:`, {
+            requestId,
+            pollRequestId,
+            sinceSeq: Number(sinceSeq),
+            waitMs: Number(waitMs)
+        });
         client.Poll({
             request_id: String(pollRequestId),
             since_seq: Number(sinceSeq),
@@ -215,6 +287,13 @@ availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), a
         }, metaFromReq(req), async (err, resp) => {
             const duration = Date.now() - startTime;
             if (err) {
+                console.error(`[Availability.Poll] ❌ gRPC Poll error (${duration}ms):`, {
+                    requestId,
+                    pollRequestId,
+                    error: err.message,
+                    code: err.code,
+                    details: err.details
+                });
                 // Log error
                 await auditLog({
                     direction: "IN",
@@ -229,6 +308,7 @@ availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), a
                 return next(err);
             }
             else {
+<<<<<<< HEAD
                 // Get job to retrieve original criteria for OTA response
                 const job = await prisma.availabilityJob.findUnique({
                     where: { id: String(pollRequestId) },
@@ -237,6 +317,19 @@ availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), a
                 const criteria = job?.criteriaJson || {};
                 // Build OTA-compliant response structure
                 const otaResponse = await buildAvailabilityResponse(criteria, resp.offers || []);
+=======
+                const offersCount = resp.offers?.length || 0;
+                const isComplete = resp.complete || false;
+                console.log(`[Availability.Poll] ✅ gRPC Poll success (${duration}ms):`, {
+                    requestId,
+                    pollRequestId: resp.request_id || pollRequestId,
+                    offersCount,
+                    lastSeq: resp.last_seq || 0,
+                    complete: isComplete,
+                    status: isComplete ? 'COMPLETE' : 'IN_PROGRESS',
+                    timedOutSources: resp.timed_out_sources || 0
+                });
+>>>>>>> fa252dd5bb55fd72f1abf8a948f6d61af9d3b991
                 // Log success
                 await auditLog({
                     direction: "IN",
@@ -248,12 +341,38 @@ availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), a
                     response: otaResponse,
                     durationMs: duration,
                 });
+<<<<<<< HEAD
                 // Return OTA-compliant response
                 res.json(otaResponse);
+=======
+                // Return gRPC response directly (contains offers, last_seq, complete, status)
+                // Frontend expects: { offers: [], last_seq: number, complete: boolean, status: string }
+                const response = {
+                    request_id: resp.request_id || pollRequestId,
+                    offers: resp.offers || [],
+                    last_seq: resp.last_seq || 0,
+                    complete: isComplete,
+                    status: isComplete ? 'COMPLETE' : 'IN_PROGRESS',
+                    timed_out_sources: resp.timed_out_sources || 0,
+                };
+                console.log(`[Availability.Poll] 📤 Sending response:`, {
+                    requestId,
+                    offersCount: response.offers.length,
+                    lastSeq: response.last_seq,
+                    complete: response.complete
+                });
+                res.json(response);
+>>>>>>> fa252dd5bb55fd72f1abf8a948f6d61af9d3b991
             }
         });
     }
     catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[Availability.Poll] ❌ Validation/processing error:`, {
+            requestId,
+            error: errorMsg,
+            query: req.query
+        });
         // Log validation errors
         await auditLog({
             direction: "IN",
@@ -262,7 +381,7 @@ availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), a
             companyId: req.user?.companyId,
             httpStatus: 400,
             request: req.query,
-            response: { error: e instanceof Error ? e.message : String(e) },
+            response: { error: errorMsg },
             durationMs: Date.now() - startTime,
         });
         next(e);

@@ -58,7 +58,17 @@ export function buildApp() {
         res.setHeader('Access-Control-Expose-Headers', '*');
         next();
     });
-    app.use(express.json({ limit: "2mb" }));
+    // Body parsing middleware - must be careful with multipart/form-data
+    // JSON parser - skip for multipart/form-data (handled by multer)
+    app.use((req, res, next) => {
+        const contentType = req.headers['content-type'] || '';
+        // Skip ALL body parsing for multipart/form-data - multer will handle it
+        if (contentType.includes('multipart/form-data')) {
+            return next();
+        }
+        // For other content types, use JSON parser
+        express.json({ limit: "2mb" })(req, res, next);
+    });
     // Helmet with relaxed CSP for development - AFTER CORS
     app.use(helmet({
         crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -66,7 +76,17 @@ export function buildApp() {
         contentSecurityPolicy: false, // Disable CSP to avoid CORS-like restrictions
     }));
     app.use(requestId());
-    app.use(pinoHttp({ logger }));
+    // Only log availability routes to reduce noise
+    app.use(pinoHttp({
+        logger,
+        autoLogging: {
+            ignore: (req) => {
+                // Only log availability routes
+                const path = req.url || '';
+                return !path.includes('/availability');
+            }
+        }
+    }));
     // [AUTO-AUDIT] Enforce IP whitelist globally (can be disabled via env)
     // app.use(ipWhitelist());
     app.use(defaultLimiter);

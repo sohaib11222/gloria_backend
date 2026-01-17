@@ -19,9 +19,6 @@ export async function auditLog(params: {
     const requestData = params.request ? redactPII(params.request) : null;
     const responseData = params.response ? redactPII(params.response) : null;
     
-    // Log the data sizes for debugging
-    console.log(`Audit Log - Request size: ${requestData?.length || 0} chars, Response size: ${responseData?.length || 0} chars`);
-    
     await prisma.auditLog.create({
       data: {
         direction: params.direction,
@@ -37,11 +34,9 @@ export async function auditLog(params: {
         durationMs: params.durationMs || null
       }
     });
-    
-    console.log(`✅ Audit log created successfully for ${params.endpoint}`);
   } catch (error) {
-    console.error('❌ Failed to create audit log:', error);
     // Don't throw - we don't want audit logging failures to break the main flow
+    // Silently fail audit logging
   }
 }
 

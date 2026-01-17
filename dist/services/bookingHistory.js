@@ -9,12 +9,21 @@ export async function createBookingHistory(entry) {
             data: {
                 bookingId: entry.bookingId,
                 eventType: entry.eventType,
+<<<<<<< HEAD
                 changes: entry.changes || null,
                 beforeState: entry.beforeState || null,
                 afterState: entry.afterState || null,
                 userId: entry.userId || null,
                 source: entry.source || "SYSTEM",
                 metadata: entry.metadata || null,
+=======
+                changes: entry.changes || undefined,
+                beforeState: entry.beforeState || undefined,
+                afterState: entry.afterState || undefined,
+                userId: entry.userId || null,
+                source: entry.source || "SYSTEM",
+                metadata: entry.metadata || undefined,
+>>>>>>> fa252dd5bb55fd72f1abf8a948f6d61af9d3b991
             },
         });
         logger.debug({

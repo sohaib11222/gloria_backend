@@ -7,7 +7,22 @@ export class GrpcAdapter {
         this.config = config;
     }
     async makeRequest(method, path, data, useXml = false) {
-        const url = `${this.config.endpoint}${path}`;
+        // Note: GrpcAdapter is actually HTTP-based (despite the name)
+        // It makes HTTP REST requests, so it needs http:// or https://
+        // IMPORTANT: If endpoint starts with grpc://, this adapter should NOT be used!
+        // The registry should route grpc:// endpoints to GrpcSourceAdapter instead.
+        let endpoint = this.config.endpoint;
+        // If endpoint has grpc:// prefix, this is wrong - should use GrpcSourceAdapter
+        if (endpoint.startsWith('grpc://')) {
+            throw new Error(`GrpcAdapter (HTTP-based) cannot handle grpc:// endpoint. Use GrpcSourceAdapter instead. Endpoint: ${endpoint}`);
+        }
+        // For HTTP-based adapter, ensure protocol is present
+        if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
+            // If endpoint is just host:port, assume http:// for HTTP-based adapter
+            endpoint = `http://${endpoint}`;
+            console.log(`[GrpcAdapter] Added http:// protocol to endpoint: ${endpoint}`);
+        }
+        const url = `${endpoint}${path}`;
         const headers = {
             'Content-Type': useXml ? 'application/xml' : 'application/json'
         };
@@ -23,6 +38,12 @@ export class GrpcAdapter {
                 body = JSON.stringify(data);
             }
         }
+        console.log(`[GrpcAdapter] Making ${method} request:`, {
+            url,
+            hasBody: !!body,
+            bodySize: body?.length || 0,
+            headers: Object.keys(headers)
+        });
         try {
             const response = await fetch(url, {
                 method,
@@ -30,22 +51,38 @@ export class GrpcAdapter {
                 headers,
                 signal: AbortSignal.timeout(30000)
             });
+            console.log(`[GrpcAdapter] Response status: ${response.status} ${response.statusText}`);
             if (!response.ok) {
                 const errorText = await response.text().catch(() => 'Unknown error');
+                console.error(`[GrpcAdapter] HTTP error ${response.status}:`, errorText);
                 throw new Error(`HTTP ${response.status}: ${errorText}`);
             }
             // Try to parse as JSON first, fall back to text
             const contentType = response.headers.get('content-type') || '';
+            console.log(`[GrpcAdapter] Response content-type: ${contentType}`);
             if (contentType.includes('application/json')) {
-                return await response.json();
+                const jsonData = await response.json();
+                console.log(`[GrpcAdapter] Parsed JSON response:`, {
+                    type: Array.isArray(jsonData) ? 'array' : typeof jsonData,
+                    length: Array.isArray(jsonData) ? jsonData.length : 'N/A'
+                });
+                return jsonData;
             }
             else {
-                return await response.text();
+                const textData = await response.text();
+                console.log(`[GrpcAdapter] Text response (${textData.length} chars)`);
+                return textData;
             }
         }
         catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            console.error(`HTTP Adapter error for ${method} ${path}:`, errorMessage);
+            const errorStack = error instanceof Error ? error.stack : undefined;
+            console.error(`[GrpcAdapter] HTTP Adapter error for ${method} ${url}:`, {
+                error: errorMessage,
+                stack: errorStack,
+                endpoint: this.config.endpoint,
+                finalUrl: url
+            });
             throw error;
         }
     }
@@ -72,23 +109,72 @@ export class GrpcAdapter {
                 DriverAge: criteria.driver_age,
                 ResidencyCountry: criteria.residency_country
             };
+            const url = `${this.config.endpoint}/availability`;
+            console.log(`[GrpcAdapter] Making availability request to: ${url}`, {
+                sourceId: this.config.sourceId,
+                criteria: otaCriteria,
+                endpoint: this.config.endpoint
+            });
             const response = await this.makeRequest('POST', '/availability', otaCriteria);
+            console.log(`[GrpcAdapter] Availability response:`, {
+                sourceId: this.config.sourceId,
+                responseType: Array.isArray(response) ? 'array' : typeof response,
+                responseLength: Array.isArray(response) ? response.length : 'N/A',
+                response: response
+            });
+            // Handle case where response is not an array
+            if (!Array.isArray(response)) {
+                console.warn(`[GrpcAdapter] Expected array response, got:`, typeof response, response);
+                return [];
+            }
             // Convert OTA response to internal format
-            return response.map((offer) => ({
-                source_id: this.config.sourceId,
-                agreement_ref: criteria.agreement_ref,
-                vehicle_class: offer.VehicleClass,
-                vehicle_make_model: offer.VehicleMakeModel,
-                rate_plan_code: offer.RatePlanCode,
-                currency: offer.Currency,
-                total_price: offer.TotalPrice,
-                supplier_offer_ref: offer.SupplierOfferRef,
-                availability_status: offer.AvailabilityStatus
-            }));
+            const offers = response.map((offer, index) => {
+                // Generate supplier_offer_ref if missing
+                let supplier_offer_ref = offer.SupplierOfferRef || offer.supplier_offer_ref || "";
+                if (!supplier_offer_ref) {
+                    // Generate a unique reference based on offer characteristics
+                    // Format: GEN-{agreement_ref}-{source_id_short}-{index}-{hash}
+                    const sourceIdShort = (this.config.sourceId || "").substring(0, 8);
+                    const agreementRefShort = (criteria.agreement_ref || "").substring(0, 10);
+                    const offerHash = Buffer.from(`${criteria.agreement_ref}-${offer.VehicleClass || offer.vehicle_class || ""}-${offer.VehicleMakeModel || offer.vehicle_make_model || ""}-${offer.TotalPrice || offer.total_price || 0}-${index}`).toString('base64').substring(0, 8).replace(/[^A-Za-z0-9]/g, '');
+                    supplier_offer_ref = `GEN-${agreementRefShort}-${sourceIdShort}-${index}-${offerHash}`;
+                    console.log(`[GrpcAdapter] 🔧 Generated supplier_offer_ref for offer ${index}:`, {
+                        original: offer.SupplierOfferRef || offer.supplier_offer_ref || "(missing)",
+                        generated: supplier_offer_ref,
+                        agreement_ref: criteria.agreement_ref,
+                        source_id: this.config.sourceId
+                    });
+                }
+                return {
+                    source_id: this.config.sourceId,
+                    agreement_ref: criteria.agreement_ref,
+                    vehicle_class: offer.VehicleClass || offer.vehicle_class,
+                    vehicle_make_model: offer.VehicleMakeModel || offer.vehicle_make_model,
+                    rate_plan_code: offer.RatePlanCode || offer.rate_plan_code,
+                    currency: offer.Currency || offer.currency,
+                    total_price: offer.TotalPrice || offer.total_price || 0,
+                    supplier_offer_ref: supplier_offer_ref,
+                    availability_status: offer.AvailabilityStatus || offer.availability_status
+                };
+            });
+            console.log(`[GrpcAdapter] Converted ${offers.length} offers for source ${this.config.sourceId}`);
+            return offers;
         }
         catch (error) {
-            console.error('Failed to fetch availability:', error);
-            return [];
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorStack = error instanceof Error ? error.stack : undefined;
+            console.error(`[GrpcAdapter] Failed to fetch availability for source ${this.config.sourceId}:`, {
+                error: errorMessage,
+                stack: errorStack,
+                endpoint: this.config.endpoint,
+                criteria: {
+                    pickup: criteria.pickup_unlocode,
+                    dropoff: criteria.dropoff_unlocode,
+                    agreement_ref: criteria.agreement_ref
+                }
+            });
+            // Re-throw error so it can be handled upstream (don't silently return empty array)
+            throw error;
         }
     }
     async bookingCreate(input) {

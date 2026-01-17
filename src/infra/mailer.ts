@@ -171,6 +171,7 @@ async function createTransporter(): Promise<nodemailer.Transporter> {
   console.warn("=".repeat(80) + "\n");
   
   cachedTransporter = nodemailer.createTransport({
+    // Use stream transport for development (console output)
     streamTransport: true,
     newline: "unix",
     buffer: true,
@@ -185,7 +186,7 @@ async function createTransporter(): Promise<nodemailer.Transporter> {
       error: console.error,
       debug: () => {} // Suppress debug logs
     }
-  });
+  } as any);
   transporterCacheTime = now;
   return cachedTransporter;
 }
