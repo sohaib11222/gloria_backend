@@ -1,3 +1,5 @@
+// CRITICAL: Load environment variables FIRST before ANY other imports
+// This ensures DATABASE_URL is available when Prisma Client modules are loaded
 import "dotenv/config";
 import dotenv from "dotenv";
 import path from "path";
@@ -5,13 +7,37 @@ import { fileURLToPath } from "url";
 // ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-// CRITICAL: Load .env file FIRST before any other imports
-// This ensures DATABASE_URL is available when Prisma Client modules are loaded
-const envPath = path.resolve(__dirname, '../.env');
-dotenv.config({ path: envPath });
-// Ensure DATABASE_URL is set in process.env for Prisma Client
-if (!process.env.DATABASE_URL) {
-    console.error("ERROR: DATABASE_URL not found in environment!");
+// CRITICAL: Load .env file from multiple possible locations
+// This ensures DATABASE_URL is available regardless of where the code runs
+const envPaths = [
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(__dirname, '../.env'),
+    path.resolve(__dirname, '../../.env'),
+];
+// Try loading from each path until one succeeds
+let databaseUrl = process.env.DATABASE_URL;
+for (const envPath of envPaths) {
+    const result = dotenv.config({ path: envPath });
+    if (!result.error && result.parsed) {
+        // Update databaseUrl if it was loaded from this file
+        if (result.parsed.DATABASE_URL) {
+            databaseUrl = result.parsed.DATABASE_URL;
+        }
+        break;
+    }
+}
+// CRITICAL: Force set DATABASE_URL in process.env IMMEDIATELY
+// This MUST happen before ANY Prisma-related imports
+if (databaseUrl) {
+    process.env.DATABASE_URL = databaseUrl;
+    console.log("✓ DATABASE_URL loaded from .env file");
+}
+else if (!process.env.DATABASE_URL) {
+    console.error("⚠️  WARNING: DATABASE_URL not found in .env file");
+    console.error("   Tried paths:", envPaths.join(", "));
+    console.error("   Current working directory:", process.cwd());
+    console.error("   __dirname:", __dirname);
+    // Don't exit - let prisma.ts handle the error
 }
 import { buildApp } from "./api/app.js";
 import { logger } from "./infra/logger.js";

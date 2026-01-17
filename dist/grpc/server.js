@@ -14,6 +14,7 @@ import { auditLog } from "../services/audit.js";
 import { SourceHealthService } from "../services/health.js";
 import { VerificationRunner } from "../services/verificationRunner.js";
 import { AvailabilityStore } from "../services/availabilityStore.js";
+import { buildAvailabilityResponse, buildBookingResponse, buildCheckBookingResponse } from "../services/otaResponseBuilder.js";
 import { adapterLatency, bookingOperationsTotal, verificationOperationsTotal, } from "../services/metrics.js";
 import pLimit from "p-limit";
 import { submitEcho, getEchoResults } from "../services/echoService.js";
@@ -235,16 +236,27 @@ export async function startGrpcServers() {
                 if (!request_id)
                     return cb({ code: 3, message: "Missing request_id" });
                 const out = await AvailabilityStore.getJobSince(String(request_id), Number(since_seq), Number(wait_ms));
+                // Get job to retrieve original criteria
+                const job = await prisma.availabilityJob.findUnique({
+                    where: { id: request_id },
+                    select: { criteriaJson: true },
+                });
+                const criteria = job?.criteriaJson || {};
                 // Add availability_request_id to each offer for booking context
                 const offersWithRequestId = out.new_items.map((offer) => ({
                     ...offer,
                     availability_request_id: request_id, // Add request_id to each offer
                 }));
+                // Build OTA-compliant response structure
+                const otaResponse = await buildAvailabilityResponse(criteria, offersWithRequestId);
                 // gRPC proto expects: complete, last_seq, offers
+                // For backward compatibility, also include flat offers array
+                // But the OTA structure is now available in the response
                 cb(null, {
                     complete: out.status !== "IN_PROGRESS",
                     last_seq: out.last_seq,
-                    offers: offersWithRequestId,
+                    offers: offersWithRequestId, // Keep flat array for backward compatibility
+                    ota_response: otaResponse, // Add OTA-compliant structure
                 });
             }
             catch (e) {
@@ -480,11 +492,38 @@ export async function startGrpcServers() {
                         responseHash: booking.id,
                     },
                 });
+                // Record booking creation in history
+                const { recordBookingCreated } = await import("../services/bookingHistory.js");
+                await recordBookingCreated(booking, agent_id);
+                // Build OTA-compliant booking response
+                const bookingData = {
+                    supplier_booking_ref: booking.supplierBookingRef || "",
+                    agent_booking_ref: booking.agentBookingRef || "",
+                    agreement_ref: booking.agreementRef,
+                    source_id,
+                    status: booking.status,
+                    pickup_unlocode: booking.pickupUnlocode || pickup_unlocode,
+                    dropoff_unlocode: booking.dropoffUnlocode || dropoff_unlocode,
+                    pickup_iso: booking.pickupDateTime?.toISOString() || pickup_iso,
+                    dropoff_iso: booking.dropoffDateTime?.toISOString() || dropoff_iso,
+                    vehicle_class: booking.vehicleClass || vehicle_class,
+                    vehicle_make_model: booking.vehicleMakeModel || vehicle_make_model,
+                    rate_plan_code: booking.ratePlanCode || rate_plan_code,
+                    currency: supplierResp.currency,
+                    total_price: supplierResp.total_price,
+                    driver_age: booking.driverAge || driver_age,
+                    residency_country: booking.residencyCountry || residency_country,
+                    customer_info: customerInfo,
+                    payment_info: paymentInfo,
+                };
+                const otaResponse = await buildBookingResponse(bookingData, supplierResp);
+                // For backward compatibility, also return flat structure
                 const resp = {
                     supplier_booking_ref: booking.supplierBookingRef || "",
                     status: booking.status,
                     agreement_ref: booking.agreementRef,
                     source_id,
+                    ota_response: otaResponse, // Add OTA-compliant structure
                 };
                 await auditLog({
                     direction: "IN",
@@ -494,7 +533,7 @@ export async function startGrpcServers() {
                     sourceId: source_id,
                     grpcStatus: 0,
                     request: req,
-                    response: resp,
+                    response: otaResponse,
                     durationMs: Date.now() - t0,
                 });
                 cb(null, resp);
@@ -518,7 +557,9 @@ export async function startGrpcServers() {
             const t0 = Date.now();
             const req = call.request;
             try {
-                const { supplier_booking_ref, source_id, agreement_ref } = req;
+                const { supplier_booking_ref, source_id, agreement_ref, 
+                // Modification fields
+                pickup_unlocode, dropoff_unlocode, pickup_iso, dropoff_iso, vehicle_class, vehicle_make_model, rate_plan_code, driver_age, residency_country, customer_info_json, payment_info_json, special_equip_prefs, option_change_indicator, } = req;
                 if (!supplier_booking_ref || !source_id) {
                     return cb({ code: 3, message: "supplier_booking_ref and source_id are required" });
                 }
@@ -567,18 +608,140 @@ export async function startGrpcServers() {
                 if (!ag) {
                     return cb({ code: 9, message: "AGREEMENT_INACTIVE or not found" });
                 }
-                const adapter = await getAdapterForSource(source_id);
-                const resp = await adapter.bookingModify({
+                // Build modification payload with all fields
+                const modifyPayload = {
                     supplier_booking_ref,
                     agreement_ref: agreementRef,
+                };
+                // Add modification fields if provided
+                if (pickup_unlocode)
+                    modifyPayload.pickup_unlocode = pickup_unlocode;
+                if (dropoff_unlocode)
+                    modifyPayload.dropoff_unlocode = dropoff_unlocode;
+                if (pickup_iso)
+                    modifyPayload.pickup_iso = pickup_iso;
+                if (dropoff_iso)
+                    modifyPayload.dropoff_iso = dropoff_iso;
+                if (vehicle_class)
+                    modifyPayload.vehicle_class = vehicle_class;
+                if (vehicle_make_model)
+                    modifyPayload.vehicle_make_model = vehicle_make_model;
+                if (rate_plan_code)
+                    modifyPayload.rate_plan_code = rate_plan_code;
+                if (driver_age !== undefined)
+                    modifyPayload.driver_age = driver_age;
+                if (residency_country)
+                    modifyPayload.residency_country = residency_country;
+                if (customer_info_json)
+                    modifyPayload.customer_info_json = customer_info_json;
+                if (payment_info_json)
+                    modifyPayload.payment_info_json = payment_info_json;
+                if (special_equip_prefs)
+                    modifyPayload.special_equip_prefs = special_equip_prefs;
+                if (option_change_indicator !== undefined)
+                    modifyPayload.option_change_indicator = option_change_indicator;
+                // Get booking before modification for history
+                const bookingBefore = await prisma.booking.findFirst({
+                    where: {
+                        supplierBookingRef: supplier_booking_ref,
+                        sourceId: source_id,
+                        agreementRef: agreementRef,
+                    },
                 });
+                if (!bookingBefore) {
+                    return cb({ code: 5, message: "BOOKING_NOT_FOUND" });
+                }
+                const adapter = await getAdapterForSource(source_id);
+                const resp = await adapter.bookingModify(modifyPayload);
+                // Update booking with modification data if provided
+                const updateData = { status: resp.status, payloadJson: resp };
+                if (pickup_unlocode)
+                    updateData.pickupUnlocode = pickup_unlocode;
+                if (dropoff_unlocode)
+                    updateData.dropoffUnlocode = dropoff_unlocode;
+                if (pickup_iso)
+                    updateData.pickupDateTime = new Date(pickup_iso);
+                if (dropoff_iso)
+                    updateData.dropoffDateTime = new Date(dropoff_iso);
+                if (vehicle_class)
+                    updateData.vehicleClass = vehicle_class;
+                if (vehicle_make_model)
+                    updateData.vehicleMakeModel = vehicle_make_model;
+                if (rate_plan_code)
+                    updateData.ratePlanCode = rate_plan_code;
+                if (driver_age !== undefined)
+                    updateData.driverAge = driver_age;
+                if (residency_country)
+                    updateData.residencyCountry = residency_country;
+                if (customer_info_json) {
+                    try {
+                        updateData.customerInfoJson = typeof customer_info_json === 'string'
+                            ? JSON.parse(customer_info_json)
+                            : customer_info_json;
+                    }
+                    catch (e) {
+                        updateData.customerInfoJson = customer_info_json;
+                    }
+                }
+                if (payment_info_json) {
+                    try {
+                        updateData.paymentInfoJson = typeof payment_info_json === 'string'
+                            ? JSON.parse(payment_info_json)
+                            : payment_info_json;
+                    }
+                    catch (e) {
+                        updateData.paymentInfoJson = payment_info_json;
+                    }
+                }
                 await prisma.booking.updateMany({
                     where: {
                         supplierBookingRef: supplier_booking_ref,
                         sourceId: source_id,
                     },
-                    data: { status: resp.status, payloadJson: resp },
+                    data: updateData,
                 });
+                // Build OTA-compliant response
+                const booking = await prisma.booking.findFirst({
+                    where: {
+                        supplierBookingRef: supplier_booking_ref,
+                        sourceId: source_id,
+                        agreementRef: agreementRef,
+                    },
+                });
+                // Record booking modification in history
+                if (booking) {
+                    const { recordBookingModified } = await import("../services/bookingHistory.js");
+                    const modifiedFields = Object.keys(updateData).filter(k => k !== 'status' && k !== 'payloadJson');
+                    await recordBookingModified(bookingBefore, booking, agent_id, modifiedFields);
+                }
+                let finalResp = {
+                    supplier_booking_ref,
+                    agreement_ref: agreementRef,
+                    status: resp.status,
+                    source_id,
+                };
+                if (booking) {
+                    const bookingData = {
+                        supplier_booking_ref: booking.supplierBookingRef || "",
+                        agent_booking_ref: booking.agentBookingRef || "",
+                        agreement_ref: booking.agreementRef,
+                        source_id,
+                        status: booking.status,
+                        pickup_unlocode: booking.pickupUnlocode,
+                        dropoff_unlocode: booking.dropoffUnlocode,
+                        pickup_iso: booking.pickupDateTime?.toISOString(),
+                        dropoff_iso: booking.dropoffDateTime?.toISOString(),
+                        vehicle_class: booking.vehicleClass,
+                        vehicle_make_model: booking.vehicleMakeModel,
+                        rate_plan_code: booking.ratePlanCode,
+                        driver_age: booking.driverAge,
+                        residency_country: booking.residencyCountry,
+                        customer_info: booking.customerInfoJson,
+                        payment_info: booking.paymentInfoJson,
+                    };
+                    const otaResponse = await buildBookingResponse(bookingData, resp);
+                    finalResp.ota_response = otaResponse;
+                }
                 await auditLog({
                     direction: "IN",
                     endpoint: "booking.modify",
@@ -587,15 +750,10 @@ export async function startGrpcServers() {
                     agreementRef: agreementRef,
                     grpcStatus: 0,
                     request: req,
-                    response: resp,
+                    response: finalResp.ota_response || finalResp,
                     durationMs: Date.now() - t0,
                 });
-                cb(null, {
-                    supplier_booking_ref,
-                    agreement_ref: agreementRef,
-                    status: resp.status,
-                    source_id,
-                });
+                cb(null, finalResp);
             }
             catch (e) {
                 await auditLog({
@@ -663,6 +821,17 @@ export async function startGrpcServers() {
                 if (!ag) {
                     return cb({ code: 9, message: "AGREEMENT_INACTIVE or not found" });
                 }
+                // Get booking before cancellation for history
+                const bookingBefore = await prisma.booking.findFirst({
+                    where: {
+                        supplierBookingRef: supplier_booking_ref,
+                        sourceId: source_id,
+                        agreementRef: agreementRef,
+                    },
+                });
+                if (!bookingBefore) {
+                    return cb({ code: 5, message: "BOOKING_NOT_FOUND" });
+                }
                 const adapter = await getAdapterForSource(source_id);
                 const resp = await adapter.bookingCancel(supplier_booking_ref, agreementRef);
                 await prisma.booking.updateMany({
@@ -672,6 +841,9 @@ export async function startGrpcServers() {
                     },
                     data: { status: resp.status, payloadJson: resp },
                 });
+                // Record booking cancellation in history
+                const { recordBookingCancelled } = await import("../services/bookingHistory.js");
+                await recordBookingCancelled(bookingBefore, agentId, req.cancellation_reason);
                 await auditLog({
                     direction: "IN",
                     endpoint: "booking.cancel",
@@ -758,6 +930,60 @@ export async function startGrpcServers() {
                 }
                 const adapter = await getAdapterForSource(source_id);
                 const resp = await adapter.bookingCheck(supplier_booking_ref, agreementRef);
+                // Get booking(s) from database - handle single or multiple matches
+                const bookings = await prisma.booking.findMany({
+                    where: {
+                        supplierBookingRef: supplier_booking_ref,
+                        sourceId: source_id,
+                        agreementRef: agreementRef,
+                    },
+                    select: {
+                        supplierBookingRef: true,
+                        agentBookingRef: true,
+                        agreementRef: true,
+                        status: true,
+                        pickupUnlocode: true,
+                        dropoffUnlocode: true,
+                        pickupDateTime: true,
+                        dropoffDateTime: true,
+                        vehicleClass: true,
+                        vehicleMakeModel: true,
+                        ratePlanCode: true,
+                        driverAge: true,
+                        residencyCountry: true,
+                        customerInfoJson: true,
+                        paymentInfoJson: true,
+                    },
+                });
+                // Build booking data array
+                const bookingDataArray = bookings.map(booking => ({
+                    supplier_booking_ref: booking.supplierBookingRef || "",
+                    agent_booking_ref: booking.agentBookingRef || "",
+                    agreement_ref: booking.agreementRef,
+                    source_id,
+                    status: booking.status,
+                    pickup_unlocode: booking.pickupUnlocode,
+                    dropoff_unlocode: booking.dropoffUnlocode,
+                    pickup_iso: booking.pickupDateTime?.toISOString(),
+                    dropoff_iso: booking.dropoffDateTime?.toISOString(),
+                    vehicle_class: booking.vehicleClass,
+                    vehicle_make_model: booking.vehicleMakeModel,
+                    rate_plan_code: booking.ratePlanCode,
+                    driver_age: booking.driverAge,
+                    residency_country: booking.residencyCountry,
+                    customer_info: booking.customerInfoJson,
+                    payment_info: booking.paymentInfoJson,
+                }));
+                // Build OTA-compliant check response (single or multiple matches)
+                const isSingleMatch = bookingDataArray.length === 1;
+                const otaResponse = await buildCheckBookingResponse(bookingDataArray, isSingleMatch);
+                const finalResp = {
+                    supplier_booking_ref,
+                    agreement_ref: agreementRef,
+                    status: resp.status,
+                    source_id,
+                    ota_response: otaResponse,
+                };
                 await auditLog({
                     direction: "IN",
                     endpoint: "booking.check",
@@ -766,15 +992,10 @@ export async function startGrpcServers() {
                     agreementRef: agreementRef,
                     grpcStatus: 0,
                     request: req,
-                    response: resp,
+                    response: otaResponse,
                     durationMs: Date.now() - t0,
                 });
-                cb(null, {
-                    supplier_booking_ref,
-                    agreement_ref: agreementRef,
-                    status: resp.status,
-                    source_id,
-                });
+                cb(null, finalResp);
             }
             catch (e) {
                 await auditLog({

@@ -126,6 +126,19 @@ agreementsRouter.post("/agreements", requireAuth(), requireCompanyType("SOURCE")
                 },
             });
         }
+        // Check for duplicate agreement reference before creating
+        const existing = await prisma.agreement.findFirst({
+            where: {
+                sourceId: body.source_id,
+                agentId: body.agent_id,
+                agreementRef: body.agreement_ref
+            },
+            select: { id: true, status: true },
+        });
+        const warnings = [];
+        if (existing) {
+            warnings.push(`Duplicate agreement reference detected: "${body.agreement_ref}" already exists for this agent/source pair (existing agreement ID: ${existing.id}, status: ${existing.status}).`);
+        }
         const startTime = Date.now();
         const requestId = req.requestId;
         const client = agreementClient();
@@ -186,7 +199,12 @@ agreementsRouter.post("/agreements", requireAuth(), requireCompanyType("SOURCE")
                 console.error("Failed to send draft notification:", emailErr);
                 // Don't fail the request if email fails
             }
-            res.json(toAgreementCamelCase(resp));
+            // Include warnings in response if duplicate detected
+            const response = toAgreementCamelCase(resp);
+            if (warnings.length > 0) {
+                response.warnings = warnings;
+            }
+            res.json(response);
         });
     }
     catch (e) {

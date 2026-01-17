@@ -3801,36 +3801,82 @@ adminRouter.patch("/admin/smtp", requireAuth(), requireRole("ADMIN"), async (req
 adminRouter.post("/admin/smtp/test", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
     try {
         const { to } = z.object({ to: z.string().email() }).parse(req.body);
-        const { sendMail } = await import("../../infra/mailer.js");
-        await sendMail({
-            to,
-            subject: "SMTP Test Email - Car Hire Middleware",
-            html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <title>SMTP Test Email</title>
-        </head>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-          <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #2563eb;">SMTP Configuration Test</h2>
-            <p>This is a test email to verify your SMTP configuration is working correctly.</p>
-            <p><strong>Sent at:</strong> ${new Date().toISOString()}</p>
-            <p>If you received this email, your SMTP settings are configured correctly!</p>
-            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
-            <p style="color: #6b7280; font-size: 12px;">
-              This is an automated test email from the Car Hire Middleware system.
-            </p>
-          </div>
-        </body>
-        </html>
-      `,
+        const { sendMail, getMailer } = await import("../../infra/mailer.js");
+        // Check configuration before sending
+        const smtpConfig = await prisma.smtpConfig.findFirst({
+            where: { enabled: true },
+            orderBy: { updatedAt: 'desc' },
         });
-        res.json({
-            success: true,
-            message: `Test email sent successfully to ${to}`,
-        });
+        const hasEnvVars = !!(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
+        const isConfigured = !!smtpConfig || hasEnvVars;
+        if (!isConfigured) {
+            return res.status(400).json({
+                error: "SMTP_NOT_CONFIGURED",
+                message: "SMTP is not configured. Please configure SMTP via admin panel or environment variables.",
+                hint: "Use POST /admin/smtp to configure SMTP, or set EMAIL_HOST, EMAIL_USER, EMAIL_PASS in .env file"
+            });
+        }
+        // Try to verify connection first
+        let connectionVerified = false;
+        let connectionError = null;
+        try {
+            const transporter = await getMailer();
+            await transporter.verify();
+            connectionVerified = true;
+        }
+        catch (verifyError) {
+            connectionError = verifyError.message;
+        }
+        // Attempt to send email
+        let emailSent = false;
+        let sendError = null;
+        try {
+            await sendMail({
+                to,
+                subject: "SMTP Test Email - Car Hire Middleware",
+                html: `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>SMTP Test Email</title>
+          </head>
+          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+              <h2 style="color: #2563eb;">SMTP Configuration Test</h2>
+              <p>This is a test email to verify your SMTP configuration is working correctly.</p>
+              <p><strong>Sent at:</strong> ${new Date().toISOString()}</p>
+              <p>If you received this email, your SMTP settings are configured correctly!</p>
+              <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+              <p style="color: #6b7280; font-size: 12px;">
+                This is an automated test email from the Car Hire Middleware system.
+              </p>
+            </div>
+          </body>
+          </html>
+        `,
+            });
+            emailSent = true;
+        }
+        catch (sendErr) {
+            sendError = sendErr.message;
+        }
+        if (emailSent) {
+            res.json({
+                success: true,
+                message: `Test email sent successfully to ${to}`,
+                connectionVerified,
+            });
+        }
+        else {
+            res.status(500).json({
+                error: "EMAIL_SEND_FAILED",
+                message: `Failed to send test email: ${sendError || 'Unknown error'}`,
+                connectionVerified,
+                connectionError,
+                hint: connectionError ? "SMTP connection verification failed. Check your credentials." : "Email sending failed. Check server logs for details."
+            });
+        }
     }
     catch (e) {
         if (e instanceof z.ZodError) {
@@ -3846,6 +3892,72 @@ adminRouter.post("/admin/smtp/test", requireAuth(), requireRole("ADMIN"), async 
             error: "EMAIL_SEND_FAILED",
             message: `Failed to send test email: ${errorMessage}`,
         });
+    }
+});
+/**
+ * @openapi
+ * /admin/smtp/status:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get SMTP configuration status and diagnostics
+ *     security:
+ *       - bearerAuth: []
+ *     description: Returns detailed information about SMTP configuration including what's configured and connection status
+ */
+adminRouter.get("/admin/smtp/status", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+    try {
+        const smtpConfig = await prisma.smtpConfig.findFirst({
+            where: { enabled: true },
+            orderBy: { updatedAt: 'desc' },
+        });
+        const hasEnvVars = !!(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
+        let connectionStatus = 'unknown';
+        let connectionError = null;
+        // Try to verify connection if we have config
+        if (smtpConfig || hasEnvVars) {
+            try {
+                const { getMailer } = await import("../../infra/mailer.js");
+                const transporter = await getMailer();
+                await transporter.verify();
+                connectionStatus = 'verified';
+            }
+            catch (error) {
+                connectionStatus = 'failed';
+                connectionError = error.message;
+            }
+        }
+        else {
+            connectionStatus = 'not_configured';
+        }
+        const status = {
+            configured: !!smtpConfig,
+            usingEnvVars: hasEnvVars && !smtpConfig,
+            usingAdminConfig: !!smtpConfig,
+            connectionStatus,
+            config: null,
+            envVars: {
+                EMAIL_HOST: process.env.EMAIL_HOST ? '✓ Set' : '✗ Not set',
+                EMAIL_USER: process.env.EMAIL_USER ? '✓ Set' : '✗ Not set',
+                EMAIL_PASS: process.env.EMAIL_PASS ? '✓ Set (hidden)' : '✗ Not set',
+                EMAIL_PORT: process.env.EMAIL_PORT || '587 (default)',
+                EMAIL_SECURE: process.env.EMAIL_SECURE || 'false (default)',
+                EMAIL_FROM: process.env.EMAIL_FROM || 'not set',
+            }
+        };
+        if (smtpConfig) {
+            const { password, ...configWithoutPassword } = smtpConfig;
+            status.config = {
+                ...configWithoutPassword,
+                password: password ? '***' : null,
+            };
+        }
+        if (connectionError) {
+            status.connectionError = connectionError;
+        }
+        res.json(status);
+    }
+    catch (e) {
+        next(e);
     }
 });
 /**

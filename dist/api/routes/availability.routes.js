@@ -7,16 +7,18 @@ import { metaFromReq } from "../../grpc/meta.js";
 import { auditLog } from "../../services/audit.js";
 import { prisma } from "../../data/prisma.js";
 import { LocationsService } from "../../services/locations.js";
+import { buildAvailabilityResponse } from "../../services/otaResponseBuilder.js";
+import { unlocodeSchema, isoDateSchema } from "../../services/validation.js";
 export const availabilityRouter = Router();
 // [AUTO-AUDIT] agreement_refs required; downstream will validate ACTIVE set per agent
 // For admins, agent_id and agreement_refs are optional (for testing purposes)
 const submitSchema = z.object({
-    pickup_unlocode: z.string(),
-    dropoff_unlocode: z.string(),
-    pickup_iso: z.string(),
-    dropoff_iso: z.string(),
-    driver_age: z.number().int().min(18).optional().default(30),
-    residency_country: z.string().length(2).optional().default("US"),
+    pickup_unlocode: unlocodeSchema,
+    dropoff_unlocode: unlocodeSchema,
+    pickup_iso: isoDateSchema,
+    dropoff_iso: isoDateSchema,
+    driver_age: z.number().int().min(18).max(100).optional().default(30),
+    residency_country: z.string().length(2).regex(/^[A-Z]{2}$/).optional().default("US"),
     vehicle_classes: z.array(z.string()).optional().default([]),
     agreement_refs: z.array(z.string()).optional(), // Optional for admins, required for agents
     agent_id: z.string().optional(), // For admin testing - allows specifying which agent to test as
@@ -227,6 +229,14 @@ availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), a
                 return next(err);
             }
             else {
+                // Get job to retrieve original criteria for OTA response
+                const job = await prisma.availabilityJob.findUnique({
+                    where: { id: String(pollRequestId) },
+                    select: { criteriaJson: true },
+                });
+                const criteria = job?.criteriaJson || {};
+                // Build OTA-compliant response structure
+                const otaResponse = await buildAvailabilityResponse(criteria, resp.offers || []);
                 // Log success
                 await auditLog({
                     direction: "IN",
@@ -235,10 +245,11 @@ availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), a
                     companyId: req.user.companyId,
                     httpStatus: 200,
                     request: { requestId: pollRequestId, sinceSeq, waitMs },
-                    response: resp,
+                    response: otaResponse,
                     durationMs: duration,
                 });
-                res.json(resp);
+                // Return OTA-compliant response
+                res.json(otaResponse);
             }
         });
     }

@@ -6,6 +6,7 @@ import { bookingClient } from "../../grpc/clients/core.js";
 import { metaFromReq } from "../../grpc/meta.js";
 import { prisma } from "../../data/prisma.js";
 import { auditLog, logBooking } from "../../services/audit.js";
+import { getBookingHistory } from "../../services/bookingHistory.js";
 export const bookingsRouter = Router();
 // List bookings for current agent (or all for admin)
 bookingsRouter.get("/", requireAuth(), async (req, res, next) => {
@@ -872,6 +873,71 @@ bookingsRouter.get("/test/verification", requireAuth(), async (req, res, next) =
             message: "Complete all test verifications to access live agreements"
         };
         res.json(verificationStatus);
+    }
+    catch (e) {
+        next(e);
+    }
+});
+/**
+ * @openapi
+ * /bookings/{ref}/history:
+ *   get:
+ *     tags: [Bookings]
+ *     summary: Get booking history
+ *     description: Retrieve complete history of changes for a booking
+ *     parameters:
+ *       - in: path
+ *         name: ref
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Supplier booking reference
+ *       - in: query
+ *         name: eventType
+ *         schema:
+ *           type: string
+ *           enum: [CREATED, MODIFIED, CANCELLED, STATUS_CHANGED, PAYMENT_UPDATED, CUSTOMER_UPDATED]
+ *         description: Filter by event type
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *         description: Maximum number of history entries to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Number of entries to skip
+ */
+bookingsRouter.get("/:ref/history", requireAuth(), requireCompanyStatus("ACTIVE"), async (req, res, next) => {
+    try {
+        const { ref } = req.params;
+        const eventType = req.query.eventType;
+        const limit = Math.max(1, Math.min(1000, Number(req.query.limit || 100)));
+        const offset = Math.max(0, Number(req.query.offset || 0));
+        // Find booking by supplier_booking_ref
+        const booking = await prisma.booking.findFirst({
+            where: {
+                supplierBookingRef: ref,
+                agentId: req.user.companyId, // Ensure booking belongs to agent
+            },
+            select: { id: true },
+        });
+        if (!booking) {
+            return res.status(404).json({
+                error: "BOOKING_NOT_FOUND",
+                message: "Booking not found or does not belong to this agent",
+            });
+        }
+        // Get history
+        const history = await getBookingHistory(booking.id, {
+            eventType: eventType,
+            limit,
+            offset,
+        });
+        res.json(history);
     }
     catch (e) {
         next(e);

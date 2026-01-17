@@ -19472,3 +19472,73 @@
 2026-01-13 19:51:32 +00:00:   port: 587,
 2026-01-13 19:51:32 +00:00:   command: 'CONN'
 2026-01-13 19:51:32 +00:00: }
+2026-01-14 12:00:02 +00:00: [2026-01-14T12:00:02.241Z] [PID: 583134] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Wed Jan 14 2026 12:00:00 GMT+0000 (Greenwich Mean Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
+2026-01-15 18:34:16 +00:00: (node:719285) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-15 18:34:16 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-15 18:43:35 +00:00: (node:720033) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-15 18:43:35 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-15 18:54:09 +00:00: (node:721205) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-15 18:54:09 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-15 19:11:40 +00:00: (node:722419) DeprecationWarning: Calling start() is no longer necessary. It can be safely omitted.
+2026-01-15 19:11:40 +00:00: (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-01-15 19:23:47 +00:00: Database error in login: PrismaClientKnownRequestError: 
+2026-01-15 19:23:47 +00:00: Invalid `prisma.user.findUnique()` invocation:
+2026-01-15 19:23:47 +00:00: 
+2026-01-15 19:23:47 +00:00: 
+2026-01-15 19:23:47 +00:00: Can't reach database server at `localhost:3306`
+2026-01-15 19:23:47 +00:00: 
+2026-01-15 19:23:47 +00:00: Please make sure your database server is running at `localhost:3306`.
+2026-01-15 19:23:47 +00:00:     at $n.handleRequestError (/var/www/gloriaconnect/backend/node_modules/@prisma/client/runtime/library.js:121:7315)
+2026-01-15 19:23:47 +00:00:     at $n.handleAndLogRequestError (/var/www/gloriaconnect/backend/node_modules/@prisma/client/runtime/library.js:121:6623)
+2026-01-15 19:23:47 +00:00:     at $n.request (/var/www/gloriaconnect/backend/node_modules/@prisma/client/runtime/library.js:121:6307)
+2026-01-15 19:23:47 +00:00:     at async l (/var/www/gloriaconnect/backend/node_modules/@prisma/client/runtime/library.js:130:9633)
+2026-01-15 19:23:47 +00:00:     at async file:///var/www/gloriaconnect/backend/dist/api/routes/auth.routes.js:199:26 {
+2026-01-15 19:23:47 +00:00:   code: 'P1001',
+2026-01-15 19:23:47 +00:00:   clientVersion: '5.22.0',
+2026-01-15 19:23:47 +00:00:   meta: {
+2026-01-15 19:23:47 +00:00:     modelName: 'User',
+2026-01-15 19:23:47 +00:00:     database_host: 'localhost',
+2026-01-15 19:23:47 +00:00:     database_port: 3306
+2026-01-15 19:23:47 +00:00:   }
+2026-01-15 19:23:47 +00:00: }
+2026-01-15 19:23:50 +00:00: Database error in login: PrismaClientKnownRequestError: 
+2026-01-15 19:23:50 +00:00: Invalid `prisma.user.findUnique()` invocation:
+2026-01-15 19:23:50 +00:00: 
+2026-01-15 19:23:50 +00:00: 
+2026-01-15 19:23:50 +00:00: Can't reach database server at `localhost:3306`
+2026-01-15 19:23:50 +00:00: 
+2026-01-15 19:23:50 +00:00: Please make sure your database server is running at `localhost:3306`.
+2026-01-15 19:23:50 +00:00:     at $n.handleRequestError (/var/www/gloriaconnect/backend/node_modules/@prisma/client/runtime/library.js:121:7315)
+2026-01-15 19:23:50 +00:00:     at $n.handleAndLogRequestError (/var/www/gloriaconnect/backend/node_modules/@prisma/client/runtime/library.js:121:6623)
+2026-01-15 19:23:50 +00:00:     at $n.request (/var/www/gloriaconnect/backend/node_modules/@prisma/client/runtime/library.js:121:6307)
+2026-01-15 19:23:50 +00:00:     at async l (/var/www/gloriaconnect/backend/node_modules/@prisma/client/runtime/library.js:130:9633)
+2026-01-15 19:23:50 +00:00:     at async file:///var/www/gloriaconnect/backend/dist/api/routes/auth.routes.js:199:26 {
+2026-01-15 19:23:50 +00:00:   code: 'P1001',
+2026-01-15 19:23:50 +00:00:   clientVersion: '5.22.0',
+2026-01-15 19:23:50 +00:00:   meta: {
+2026-01-15 19:23:50 +00:00:     modelName: 'User',
+2026-01-15 19:23:50 +00:00:     database_host: 'localhost',
+2026-01-15 19:23:50 +00:00:     database_port: 3306
+2026-01-15 19:23:50 +00:00:   }
+2026-01-15 19:23:50 +00:00: }
+2026-01-15 19:23:51 +00:00: Database error in login: PrismaClientKnownRequestError: 
+2026-01-15 19:23:51 +00:00: Invalid `prisma.user.findUnique()` invocation:
+2026-01-15 19:23:51 +00:00: 
+2026-01-15 19:23:51 +00:00: 
+2026-01-15 19:23:51 +00:00: Can't reach database server at `localhost:3306`
+2026-01-15 19:23:51 +00:00: 
+2026-01-15 19:23:51 +00:00: Please make sure your database server is running at `localhost:3306`.
+2026-01-15 19:23:51 +00:00:     at $n.handleRequestError (/var/www/gloriaconnect/backend/node_modules/@prisma/client/runtime/library.js:121:7315)
+2026-01-15 19:23:51 +00:00:     at $n.handleAndLogRequestError (/var/www/gloriaconnect/backend/node_modules/@prisma/client/runtime/library.js:121:6623)
+2026-01-15 19:23:51 +00:00:     at $n.request (/var/www/gloriaconnect/backend/node_modules/@prisma/client/runtime/library.js:121:6307)
+2026-01-15 19:23:51 +00:00:     at async l (/var/www/gloriaconnect/backend/node_modules/@prisma/client/runtime/library.js:130:9633)
+2026-01-15 19:23:51 +00:00:     at async file:///var/www/gloriaconnect/backend/dist/api/routes/auth.routes.js:199:26 {
+2026-01-15 19:23:51 +00:00:   code: 'P1001',
+2026-01-15 19:23:51 +00:00:   clientVersion: '5.22.0',
+2026-01-15 19:23:51 +00:00:   meta: {
+2026-01-15 19:23:51 +00:00:     modelName: 'User',
+2026-01-15 19:23:51 +00:00:     database_host: 'localhost',
+2026-01-15 19:23:51 +00:00:     database_port: 3306
+2026-01-15 19:23:51 +00:00:   }
+2026-01-15 19:23:51 +00:00: }
+2026-01-17 00:00:03 +00:00: [2026-01-17T00:00:03.228Z] [PID: 722419] [32m[NODE-CRON][32m [33m[WARN][0m missed execution at Sat Jan 17 2026 00:00:00 GMT+0000 (Greenwich Mean Time)! Possible blocking IO or high CPU user at the same process used by node-cron.
