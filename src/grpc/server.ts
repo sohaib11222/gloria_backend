@@ -751,8 +751,8 @@ export async function startGrpcServers() {
           vehicle_class: booking.vehicleClass || vehicle_class,
           vehicle_make_model: booking.vehicleMakeModel || vehicle_make_model,
           rate_plan_code: booking.ratePlanCode || rate_plan_code,
-          currency: supplierResp.currency,
-          total_price: supplierResp.total_price,
+          currency: (supplierResp as any).currency,
+          total_price: (supplierResp as any).total_price,
           driver_age: booking.driverAge || driver_age,
           residency_country: booking.residencyCountry || residency_country,
           customer_info: customerInfo,
@@ -964,10 +964,10 @@ export async function startGrpcServers() {
         });
         
         // Record booking modification in history
-        if (booking) {
+        if (booking && agentId) {
           const { recordBookingModified } = await import("../services/bookingHistory.js");
           const modifiedFields = Object.keys(updateData).filter(k => k !== 'status' && k !== 'payloadJson');
-          await recordBookingModified(bookingBefore, booking, agent_id, modifiedFields);
+          await recordBookingModified(bookingBefore, booking, agentId, modifiedFields);
         }
         
         let finalResp: any = {
@@ -984,15 +984,15 @@ export async function startGrpcServers() {
             agreement_ref: booking.agreementRef,
             source_id,
             status: booking.status,
-            pickup_unlocode: booking.pickupUnlocode,
-            dropoff_unlocode: booking.dropoffUnlocode,
+            pickup_unlocode: booking.pickupUnlocode || undefined,
+            dropoff_unlocode: booking.dropoffUnlocode || undefined,
             pickup_iso: booking.pickupDateTime?.toISOString(),
             dropoff_iso: booking.dropoffDateTime?.toISOString(),
-            vehicle_class: booking.vehicleClass,
-            vehicle_make_model: booking.vehicleMakeModel,
-            rate_plan_code: booking.ratePlanCode,
-            driver_age: booking.driverAge,
-            residency_country: booking.residencyCountry,
+            vehicle_class: booking.vehicleClass || undefined,
+            vehicle_make_model: booking.vehicleMakeModel || undefined,
+            rate_plan_code: booking.ratePlanCode || undefined,
+            driver_age: booking.driverAge || undefined,
+            residency_country: booking.residencyCountry || undefined,
             customer_info: booking.customerInfoJson,
             payment_info: booking.paymentInfoJson,
           };
@@ -1247,15 +1247,15 @@ export async function startGrpcServers() {
           agreement_ref: booking.agreementRef,
           source_id,
           status: booking.status,
-          pickup_unlocode: booking.pickupUnlocode,
-          dropoff_unlocode: booking.dropoffUnlocode,
+          pickup_unlocode: booking.pickupUnlocode || undefined,
+          dropoff_unlocode: booking.dropoffUnlocode || undefined,
           pickup_iso: booking.pickupDateTime?.toISOString(),
           dropoff_iso: booking.dropoffDateTime?.toISOString(),
-          vehicle_class: booking.vehicleClass,
-          vehicle_make_model: booking.vehicleMakeModel,
-          rate_plan_code: booking.ratePlanCode,
-          driver_age: booking.driverAge,
-          residency_country: booking.residencyCountry,
+          vehicle_class: booking.vehicleClass || undefined,
+          vehicle_make_model: booking.vehicleMakeModel || undefined,
+          rate_plan_code: booking.ratePlanCode || undefined,
+          driver_age: booking.driverAge || undefined,
+          residency_country: booking.residencyCountry || undefined,
           customer_info: booking.customerInfoJson,
           payment_info: booking.paymentInfoJson,
         }));

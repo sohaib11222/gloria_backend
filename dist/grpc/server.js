@@ -64,8 +64,18 @@ export async function startGrpcServers() {
     server.addService(AvailabilityService, {
         Submit: async (call, cb) => {
             // mTLS infrastructure available but disabled by default
+            console.log(`[Availability.Submit] 🎯 gRPC Submit handler called:`, {
+                agent_id: call.request?.agent_id,
+                hasCriteria: !!call.request?.criteria,
+                requestId: call.request?.request_id
+            });
             try {
                 const { criteria: raw, agent_id } = call.request;
+                console.log(`[Availability.Submit] 📋 Raw request received:`, {
+                    agent_id,
+                    criteria: raw,
+                    request_id: call.request?.request_id
+                });
                 // 1) Normalize criteria (accept camel or snake)
                 const pick = (a, b) => (a !== undefined ? a : b);
                 const c = { ...(raw || {}) };
@@ -88,6 +98,17 @@ export async function startGrpcServers() {
                     c.agreement_refs = rows.map((r) => r.agreementRef);
                 }
                 // 3) Resolve eligible agreements/sources
+                console.log(`[Availability.Submit] 🔍 Querying agreements:`, {
+                    agent_id,
+                    status: "ACTIVE",
+                    agreementRefs: c.agreement_refs,
+                    criteria: {
+                        pickup: c.pickup_unlocode,
+                        dropoff: c.dropoff_unlocode,
+                        pickupDate: c.pickup_iso,
+                        dropoffDate: c.dropoff_iso
+                    }
+                });
                 const agreements = await prisma.agreement.findMany({
                     where: {
                         agentId: agent_id,
@@ -96,8 +117,17 @@ export async function startGrpcServers() {
                     },
                     select: { id: true, agreementRef: true, sourceId: true },
                 });
+                console.log(`[Availability.Submit] 📊 Agreements found:`, {
+                    count: agreements.length,
+                    agreements: agreements.map((a) => ({
+                        id: a.id,
+                        agreementRef: a.agreementRef,
+                        sourceId: a.sourceId
+                    }))
+                });
                 const expected_sources = new Set(agreements.map((a) => a.sourceId))
                     .size;
+                console.log(`[Availability.Submit] 📈 Expected sources: ${expected_sources} (unique source IDs)`);
                 // 4) Always create a job (even if 0 sources), so we can return a request_id
                 const jobId = await AvailabilityStore.createJob({
                     agentId: agent_id,
@@ -108,6 +138,12 @@ export async function startGrpcServers() {
                 logger.debug({ jobId, expected_sources, refs: c.agreement_refs }, "[Availability.Submit]");
                 // 5) If no eligible sources, finish early with a valid request_id
                 if (expected_sources === 0) {
+                    console.log(`[Availability.Submit] ⚠️ No sources found, returning early:`, {
+                        jobId,
+                        agent_id,
+                        agreementRefs: c.agreement_refs,
+                        agreementsFound: agreements.length
+                    });
                     return cb(null, {
                         request_id: jobId,
                         expected_sources: 0,
@@ -115,16 +151,27 @@ export async function startGrpcServers() {
                     });
                 }
                 // 6) Per-agreement coverage check for pickup/dropoff + health filtering
+                console.log(`[Availability.Submit] 🔍 Checking ${agreements.length} agreements for location coverage and health...`);
                 const eligible = [];
                 for (const ag of agreements) {
                     const okPick = await isLocationAllowedForAgreement(ag.id, c.pickup_unlocode);
                     const okDrop = await isLocationAllowedForAgreement(ag.id, c.dropoff_unlocode);
                     const isExcluded = await SourceHealthService.isSourceExcluded(ag.sourceId);
+                    console.log(`[Availability.Submit] 📍 Agreement ${ag.agreementRef} (source: ${ag.sourceId}):`, {
+                        pickup: c.pickup_unlocode,
+                        dropoff: c.dropoff_unlocode,
+                        okPick,
+                        okDrop,
+                        isExcluded,
+                        eligible: okPick && okDrop && !isExcluded
+                    });
                     if (okPick && okDrop && !isExcluded) {
                         eligible.push({ ag });
                     }
                 }
+                console.log(`[Availability.Submit] ✅ Eligible agreements after filtering: ${eligible.length} out of ${agreements.length}`);
                 if (eligible.length === 0) {
+                    console.log(`[Availability.Submit] ⚠️ No eligible agreements after location/health checks, marking job complete`);
                     await prisma.availabilityJob.update({
                         where: { id: jobId },
                         data: { status: "COMPLETE" },
@@ -136,14 +183,23 @@ export async function startGrpcServers() {
                     });
                 }
                 // 7) Parallel fan-out to adapters with health monitoring
+                console.log(`[Availability.Submit] 🚀 Starting parallel fan-out to ${eligible.length} eligible agreements`);
                 const TIMEOUT_MS = 10000;
                 const SLA_TIMEOUT_MS = 120000; // 120 seconds overall SLA
                 const limit = pLimit(10); // Max 10 concurrent
                 const runOne = async (ag) => {
+                    console.log(`[Availability.Submit] 🎬 runOne() called for agreement ${ag.agreementRef} (source: ${ag.sourceId})`);
                     const startTime = Date.now();
+                    console.log(`[Availability.Submit] 🔧 Getting adapter for source ${ag.sourceId} (agreement: ${ag.agreementRef})...`);
                     const adapter = await getAdapterForSource(ag.sourceId);
+                    console.log(`[Availability.Submit] ✅ Adapter obtained for source ${ag.sourceId}:`, {
+                        adapterType: adapter?.constructor?.name || 'unknown',
+                        hasAvailabilityMethod: typeof adapter?.availability === 'function',
+                        adapter: adapter ? 'exists' : 'null/undefined'
+                    });
                     const controller = new AbortController();
                     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+                    console.log(`[Availability.Submit] ⏱️ Timeout set to ${TIMEOUT_MS}ms for source ${ag.sourceId}`);
                     let timedOut = false;
                     try {
                         console.log(`[Availability.Submit] 📞 Calling adapter.availability() for source ${ag.sourceId}:`, {
@@ -152,8 +208,12 @@ export async function startGrpcServers() {
                             pickup: c.pickup_unlocode,
                             dropoff: c.dropoff_unlocode,
                             pickupDate: c.pickup_iso,
-                            dropoffDate: c.dropoff_iso
+                            dropoffDate: c.dropoff_iso,
+                            driverAge: c.driver_age,
+                            residencyCountry: c.residency_country,
+                            vehicleClasses: c.vehicle_classes
                         });
+                        console.log(`[Availability.Submit] 🔌 About to call adapter.availability() method...`);
                         const offers = await adapter.availability({
                             pickup_unlocode: c.pickup_unlocode,
                             dropoff_unlocode: c.dropoff_unlocode,
@@ -178,7 +238,9 @@ export async function startGrpcServers() {
                             operation: "availability",
                             status: "success",
                         }, latency / 1000);
+                        console.log(`[Availability.Submit] 💾 Storing ${offers.length} offers for source ${ag.sourceId} in job ${jobId}`);
                         await AvailabilityStore.appendPartial(jobId, ag.sourceId, offers);
+                        console.log(`[Availability.Submit] ✅ Successfully stored offers for source ${ag.sourceId}`);
                     }
                     catch (e) {
                         const latency = Date.now() - startTime;
@@ -224,7 +286,22 @@ export async function startGrpcServers() {
                     logger.warn({ jobId, timeout: SLA_TIMEOUT_MS }, "Availability SLA timeout reached");
                 }, SLA_TIMEOUT_MS);
                 try {
-                    await Promise.allSettled(eligible.map(({ ag }) => limit(() => runOne(ag))));
+                    console.log(`[Availability.Submit] 📋 About to execute Promise.allSettled for ${eligible.length} agreements`);
+                    const promises = eligible.map(({ ag }, index) => {
+                        console.log(`[Availability.Submit] 📝 Creating promise ${index + 1}/${eligible.length} for agreement ${ag.agreementRef} (source: ${ag.sourceId})`);
+                        return limit(() => {
+                            console.log(`[Availability.Submit] 🔄 limit() callback executing for agreement ${ag.agreementRef}`);
+                            return runOne(ag);
+                        });
+                    });
+                    console.log(`[Availability.Submit] ⏳ Waiting for ${promises.length} promises to complete...`);
+                    const results = await Promise.allSettled(promises);
+                    console.log(`[Availability.Submit] ✅ All promises settled:`, results.map((r, i) => ({
+                        index: i,
+                        status: r.status,
+                        agreement: eligible[i].ag.agreementRef,
+                        value: r.status === 'fulfilled' ? 'success' : r.reason?.message || 'error'
+                    })));
                 }
                 finally {
                     clearTimeout(slaTimer);
@@ -289,13 +366,26 @@ export async function startGrpcServers() {
             const t0 = Date.now();
             const req = call.request;
             try {
+                console.log('[Booking.Create] 📥 Received gRPC booking request:', {
+                    hasRequest: !!req,
+                    requestKeys: req ? Object.keys(req) : [],
+                    idempotency_key: req?.idempotency_key ? `${req.idempotency_key.substring(0, 20)}...` : 'MISSING',
+                    agreement_ref: req?.agreement_ref,
+                    supplier_offer_ref: req?.supplier_offer_ref,
+                    source_id: req?.source_id
+                });
                 const { agent_id, source_id, agreement_ref, supplier_offer_ref, idempotency_key, agent_booking_ref, 
                 // New OTA fields
                 availability_request_id, pickup_unlocode, dropoff_unlocode, pickup_iso, dropoff_iso, vehicle_class, vehicle_make_model, rate_plan_code, driver_age, residency_country, customer_info_json, payment_info_json, } = req;
                 if (!source_id)
                     return cb({ code: 3, message: "source_id is required" });
-                if (!idempotency_key)
-                    return cb({ code: 3, message: "Idempotency-Key required" });
+                if (!idempotency_key) {
+                    console.error('[Booking.Create] ❌ Missing idempotency_key in gRPC request:', {
+                        requestKeys: Object.keys(req),
+                        request: req
+                    });
+                    return cb({ code: 3, message: "idempotency_key is required" });
+                }
                 // Validate agreement ACTIVE for this agent + source
                 const ag = await prisma.agreement.findFirst({
                     where: {
@@ -363,9 +453,16 @@ export async function startGrpcServers() {
                     agreement_ref,
                     supplier_offer_ref: supplier_offer_ref || "",
                     agent_booking_ref: agent_booking_ref || "",
+                    idempotency_key: idempotency_key, // REQUIRED: Pass idempotency_key to source backend
                     agent_id, // Add agent ID for OTA XML POS element
                     agent_company_name: agentCompanyName, // Add agent company name for OTA XML
                 };
+                console.log('[Booking.Create] 📦 Booking payload for adapter:', {
+                    agreement_ref: bookingPayload.agreement_ref,
+                    supplier_offer_ref: bookingPayload.supplier_offer_ref,
+                    idempotency_key: bookingPayload.idempotency_key ? `${bookingPayload.idempotency_key.substring(0, 20)}...` : 'MISSING',
+                    hasIdempotencyKey: !!bookingPayload.idempotency_key
+                });
                 // Add location details if provided
                 if (pickup_unlocode)
                     bookingPayload.pickup_unlocode = pickup_unlocode;
@@ -726,10 +823,10 @@ export async function startGrpcServers() {
                     },
                 });
                 // Record booking modification in history
-                if (booking) {
+                if (booking && agentId) {
                     const { recordBookingModified } = await import("../services/bookingHistory.js");
                     const modifiedFields = Object.keys(updateData).filter(k => k !== 'status' && k !== 'payloadJson');
-                    await recordBookingModified(bookingBefore, booking, agent_id, modifiedFields);
+                    await recordBookingModified(bookingBefore, booking, agentId, modifiedFields);
                 }
                 let finalResp = {
                     supplier_booking_ref,
@@ -744,15 +841,15 @@ export async function startGrpcServers() {
                         agreement_ref: booking.agreementRef,
                         source_id,
                         status: booking.status,
-                        pickup_unlocode: booking.pickupUnlocode,
-                        dropoff_unlocode: booking.dropoffUnlocode,
+                        pickup_unlocode: booking.pickupUnlocode || undefined,
+                        dropoff_unlocode: booking.dropoffUnlocode || undefined,
                         pickup_iso: booking.pickupDateTime?.toISOString(),
                         dropoff_iso: booking.dropoffDateTime?.toISOString(),
-                        vehicle_class: booking.vehicleClass,
-                        vehicle_make_model: booking.vehicleMakeModel,
-                        rate_plan_code: booking.ratePlanCode,
-                        driver_age: booking.driverAge,
-                        residency_country: booking.residencyCountry,
+                        vehicle_class: booking.vehicleClass || undefined,
+                        vehicle_make_model: booking.vehicleMakeModel || undefined,
+                        rate_plan_code: booking.ratePlanCode || undefined,
+                        driver_age: booking.driverAge || undefined,
+                        residency_country: booking.residencyCountry || undefined,
                         customer_info: booking.customerInfoJson,
                         payment_info: booking.paymentInfoJson,
                     };
@@ -979,15 +1076,15 @@ export async function startGrpcServers() {
                     agreement_ref: booking.agreementRef,
                     source_id,
                     status: booking.status,
-                    pickup_unlocode: booking.pickupUnlocode,
-                    dropoff_unlocode: booking.dropoffUnlocode,
+                    pickup_unlocode: booking.pickupUnlocode || undefined,
+                    dropoff_unlocode: booking.dropoffUnlocode || undefined,
                     pickup_iso: booking.pickupDateTime?.toISOString(),
                     dropoff_iso: booking.dropoffDateTime?.toISOString(),
-                    vehicle_class: booking.vehicleClass,
-                    vehicle_make_model: booking.vehicleMakeModel,
-                    rate_plan_code: booking.ratePlanCode,
-                    driver_age: booking.driverAge,
-                    residency_country: booking.residencyCountry,
+                    vehicle_class: booking.vehicleClass || undefined,
+                    vehicle_make_model: booking.vehicleMakeModel || undefined,
+                    rate_plan_code: booking.ratePlanCode || undefined,
+                    driver_age: booking.driverAge || undefined,
+                    residency_country: booking.residencyCountry || undefined,
                     customer_info: booking.customerInfoJson,
                     payment_info: booking.paymentInfoJson,
                 }));

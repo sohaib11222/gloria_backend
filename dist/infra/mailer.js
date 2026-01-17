@@ -161,6 +161,7 @@ async function createTransporter() {
     console.warn("   - Use the 16-character App Password (not your regular password)");
     console.warn("=".repeat(80) + "\n");
     cachedTransporter = nodemailer.createTransport({
+        // Use stream transport for development (console output)
         streamTransport: true,
         newline: "unix",
         buffer: true,

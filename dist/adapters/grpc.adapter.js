@@ -128,17 +128,35 @@ export class GrpcAdapter {
                 return [];
             }
             // Convert OTA response to internal format
-            const offers = response.map((offer) => ({
-                source_id: this.config.sourceId,
-                agreement_ref: criteria.agreement_ref,
-                vehicle_class: offer.VehicleClass || offer.vehicle_class,
-                vehicle_make_model: offer.VehicleMakeModel || offer.vehicle_make_model,
-                rate_plan_code: offer.RatePlanCode || offer.rate_plan_code,
-                currency: offer.Currency || offer.currency,
-                total_price: offer.TotalPrice || offer.TotalPrice || 0,
-                supplier_offer_ref: offer.SupplierOfferRef || offer.supplier_offer_ref,
-                availability_status: offer.AvailabilityStatus || offer.availability_status
-            }));
+            const offers = response.map((offer, index) => {
+                // Generate supplier_offer_ref if missing
+                let supplier_offer_ref = offer.SupplierOfferRef || offer.supplier_offer_ref || "";
+                if (!supplier_offer_ref) {
+                    // Generate a unique reference based on offer characteristics
+                    // Format: GEN-{agreement_ref}-{source_id_short}-{index}-{hash}
+                    const sourceIdShort = (this.config.sourceId || "").substring(0, 8);
+                    const agreementRefShort = (criteria.agreement_ref || "").substring(0, 10);
+                    const offerHash = Buffer.from(`${criteria.agreement_ref}-${offer.VehicleClass || offer.vehicle_class || ""}-${offer.VehicleMakeModel || offer.vehicle_make_model || ""}-${offer.TotalPrice || offer.total_price || 0}-${index}`).toString('base64').substring(0, 8).replace(/[^A-Za-z0-9]/g, '');
+                    supplier_offer_ref = `GEN-${agreementRefShort}-${sourceIdShort}-${index}-${offerHash}`;
+                    console.log(`[GrpcAdapter] 🔧 Generated supplier_offer_ref for offer ${index}:`, {
+                        original: offer.SupplierOfferRef || offer.supplier_offer_ref || "(missing)",
+                        generated: supplier_offer_ref,
+                        agreement_ref: criteria.agreement_ref,
+                        source_id: this.config.sourceId
+                    });
+                }
+                return {
+                    source_id: this.config.sourceId,
+                    agreement_ref: criteria.agreement_ref,
+                    vehicle_class: offer.VehicleClass || offer.vehicle_class,
+                    vehicle_make_model: offer.VehicleMakeModel || offer.vehicle_make_model,
+                    rate_plan_code: offer.RatePlanCode || offer.rate_plan_code,
+                    currency: offer.Currency || offer.currency,
+                    total_price: offer.TotalPrice || offer.total_price || 0,
+                    supplier_offer_ref: supplier_offer_ref,
+                    availability_status: offer.AvailabilityStatus || offer.availability_status
+                };
+            });
             console.log(`[GrpcAdapter] Converted ${offers.length} offers for source ${this.config.sourceId}`);
             return offers;
         }

@@ -35,12 +35,12 @@ export async function createBookingHistory(entry: BookingHistoryEntry): Promise<
       data: {
         bookingId: entry.bookingId,
         eventType: entry.eventType,
-        changes: entry.changes || null,
-        beforeState: entry.beforeState || null,
-        afterState: entry.afterState || null,
+        changes: entry.changes || undefined,
+        beforeState: entry.beforeState || undefined,
+        afterState: entry.afterState || undefined,
         userId: entry.userId || null,
         source: entry.source || "SYSTEM",
-        metadata: entry.metadata || null,
+        metadata: entry.metadata || undefined,
       },
     });
 

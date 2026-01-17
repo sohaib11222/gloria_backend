@@ -64,7 +64,6 @@ export function buildApp() {
         const contentType = req.headers['content-type'] || '';
         // Skip ALL body parsing for multipart/form-data - multer will handle it
         if (contentType.includes('multipart/form-data')) {
-            console.log('[App Middleware] Skipping body parsing for multipart/form-data request');
             return next();
         }
         // For other content types, use JSON parser
@@ -77,7 +76,17 @@ export function buildApp() {
         contentSecurityPolicy: false, // Disable CSP to avoid CORS-like restrictions
     }));
     app.use(requestId());
-    app.use(pinoHttp({ logger }));
+    // Only log availability routes to reduce noise
+    app.use(pinoHttp({
+        logger,
+        autoLogging: {
+            ignore: (req) => {
+                // Only log availability routes
+                const path = req.url || '';
+                return !path.includes('/availability');
+            }
+        }
+    }));
     // [AUTO-AUDIT] Enforce IP whitelist globally (can be disabled via env)
     // app.use(ipWhitelist());
     app.use(defaultLimiter);

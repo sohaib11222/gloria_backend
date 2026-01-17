@@ -313,7 +313,8 @@ export class SourceHealthService {
 
       return healthRecords.map((health: any) => {
         const isExcluded = health.excludedUntil && new Date(health.excludedUntil) > new Date();
-        const isSlow = health.slowRate > this.SLOW_RATE_THRESHOLD;
+        const SLOW_RATE_THRESHOLD = 0.5; // 50% slow rate threshold
+        const isSlow = health.slowRate > SLOW_RATE_THRESHOLD;
         const company = companyMap.get(health.sourceId);
         
         let status: 'HEALTHY' | 'SLOW' | 'EXCLUDED';

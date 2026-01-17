@@ -90,7 +90,7 @@ export function buildApp() {
   app.use(pinoHttp({ 
     logger,
     autoLogging: {
-      ignore: (req) => {
+      ignore: (req: any) => {
         // Only log availability routes
         const path = req.url || '';
         return !path.includes('/availability');
