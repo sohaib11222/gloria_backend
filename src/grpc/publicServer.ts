@@ -395,7 +395,10 @@ export async function startPublicGrpcServer(): Promise<void> {
   // mTLS infrastructure available but disabled by default
   // To enable: set GRPC_TLS_ENABLED=true and use createServerCredentials()
   server.bindAsync(`0.0.0.0:${PORT}`, grpc.ServerCredentials.createInsecure(), (err) => {
-    if (err) { console.error("Public gRPC bind error", err); return; }
+    if (err) { 
+      logger.error({ error: err.message, port: PORT }, "Public gRPC bind error (non-fatal)");
+      return; 
+    }
     logger.info({ port: PORT }, "Public gRPC (AgentIngress) listening");
     server.start();
   });

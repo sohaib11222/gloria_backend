@@ -823,17 +823,10 @@ export async function startGrpcServers() {
                     },
                 });
                 // Record booking modification in history
-<<<<<<< HEAD
-                if (booking) {
-                    const { recordBookingModified } = await import("../services/bookingHistory.js");
-                    const modifiedFields = Object.keys(updateData).filter(k => k !== 'status' && k !== 'payloadJson');
-                    await recordBookingModified(bookingBefore, booking, agent_id, modifiedFields);
-=======
                 if (booking && agentId) {
                     const { recordBookingModified } = await import("../services/bookingHistory.js");
                     const modifiedFields = Object.keys(updateData).filter(k => k !== 'status' && k !== 'payloadJson');
                     await recordBookingModified(bookingBefore, booking, agentId, modifiedFields);
->>>>>>> fa252dd5bb55fd72f1abf8a948f6d61af9d3b991
                 }
                 let finalResp = {
                     supplier_booking_ref,
@@ -848,17 +841,6 @@ export async function startGrpcServers() {
                         agreement_ref: booking.agreementRef,
                         source_id,
                         status: booking.status,
-<<<<<<< HEAD
-                        pickup_unlocode: booking.pickupUnlocode,
-                        dropoff_unlocode: booking.dropoffUnlocode,
-                        pickup_iso: booking.pickupDateTime?.toISOString(),
-                        dropoff_iso: booking.dropoffDateTime?.toISOString(),
-                        vehicle_class: booking.vehicleClass,
-                        vehicle_make_model: booking.vehicleMakeModel,
-                        rate_plan_code: booking.ratePlanCode,
-                        driver_age: booking.driverAge,
-                        residency_country: booking.residencyCountry,
-=======
                         pickup_unlocode: booking.pickupUnlocode || undefined,
                         dropoff_unlocode: booking.dropoffUnlocode || undefined,
                         pickup_iso: booking.pickupDateTime?.toISOString(),
@@ -868,7 +850,6 @@ export async function startGrpcServers() {
                         rate_plan_code: booking.ratePlanCode || undefined,
                         driver_age: booking.driverAge || undefined,
                         residency_country: booking.residencyCountry || undefined,
->>>>>>> fa252dd5bb55fd72f1abf8a948f6d61af9d3b991
                         customer_info: booking.customerInfoJson,
                         payment_info: booking.paymentInfoJson,
                     };
@@ -1095,17 +1076,6 @@ export async function startGrpcServers() {
                     agreement_ref: booking.agreementRef,
                     source_id,
                     status: booking.status,
-<<<<<<< HEAD
-                    pickup_unlocode: booking.pickupUnlocode,
-                    dropoff_unlocode: booking.dropoffUnlocode,
-                    pickup_iso: booking.pickupDateTime?.toISOString(),
-                    dropoff_iso: booking.dropoffDateTime?.toISOString(),
-                    vehicle_class: booking.vehicleClass,
-                    vehicle_make_model: booking.vehicleMakeModel,
-                    rate_plan_code: booking.ratePlanCode,
-                    driver_age: booking.driverAge,
-                    residency_country: booking.residencyCountry,
-=======
                     pickup_unlocode: booking.pickupUnlocode || undefined,
                     dropoff_unlocode: booking.dropoffUnlocode || undefined,
                     pickup_iso: booking.pickupDateTime?.toISOString(),
@@ -1115,7 +1085,6 @@ export async function startGrpcServers() {
                     rate_plan_code: booking.ratePlanCode || undefined,
                     driver_age: booking.driverAge || undefined,
                     residency_country: booking.residencyCountry || undefined,
->>>>>>> fa252dd5bb55fd72f1abf8a948f6d61af9d3b991
                     customer_info: booking.customerInfoJson,
                     payment_info: booking.paymentInfoJson,
                 }));
@@ -1810,8 +1779,10 @@ export async function startGrpcServers() {
     // mTLS infrastructure available but disabled by default
     // To enable: set GRPC_TLS_ENABLED=true and use createServerCredentials()
     server.bindAsync(`0.0.0.0:${CORE_PORT}`, grpc.ServerCredentials.createInsecure(), (err, port) => {
-        if (err)
-            throw err;
+        if (err) {
+            logger.error({ error: err.message, port: CORE_PORT }, "gRPC core server bind error (non-fatal)");
+            return;
+        }
         server.start();
         logger.info({ port }, "gRPC core server started");
     });

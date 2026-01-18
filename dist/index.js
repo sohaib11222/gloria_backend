@@ -86,26 +86,22 @@ async function main() {
         logger.error("Cannot start server without database connection");
         process.exit(1);
     }
-    // Start gRPC servers
-    await startGrpcServers();
-    await startPublicGrpcServer();
-    // Test gRPC client connectivity
-    try {
-        const sourceHealth = createHealthClient(config.sourceGrpcAddr);
-        await sourceHealth.check();
-        logger.info({ addr: config.sourceGrpcAddr }, "Source gRPC client connected");
-    }
-    catch (error) {
-        logger.warn({ addr: config.sourceGrpcAddr, error: error.message }, "Source gRPC client failed");
-    }
-    try {
-        const agentHealth = createHealthClient(config.agentGrpcAddr);
-        await agentHealth.check();
-        logger.info({ addr: config.agentGrpcAddr }, "Agent gRPC client connected");
-    }
-    catch (error) {
-        logger.warn({ addr: config.agentGrpcAddr, error: error.message }, "Agent gRPC client failed");
-    }
+    // Start gRPC servers (non-blocking - don't fail HTTP server if gRPC fails)
+    startGrpcServers().catch((err) => {
+        logger.error({ error: err.message }, "Failed to start gRPC core server (non-fatal)");
+    });
+    startPublicGrpcServer().catch((err) => {
+        logger.error({ error: err.message }, "Failed to start public gRPC server (non-fatal)");
+    });
+    // Test gRPC client connectivity (non-blocking)
+    setTimeout(() => {
+        createHealthClient(config.sourceGrpcAddr).check()
+            .then(() => logger.info({ addr: config.sourceGrpcAddr }, "Source gRPC client connected"))
+            .catch((error) => logger.warn({ addr: config.sourceGrpcAddr, error: error.message }, "Source gRPC client failed"));
+        createHealthClient(config.agentGrpcAddr).check()
+            .then(() => logger.info({ addr: config.agentGrpcAddr }, "Agent gRPC client connected"))
+            .catch((error) => logger.warn({ addr: config.agentGrpcAddr, error: error.message }, "Agent gRPC client failed"));
+    }, 2000); // Wait 2 seconds for gRPC servers to start
     const app = buildApp();
     // Add catch-all error handler to prevent crashes
     app.use((err, req, res, next) => {
@@ -127,6 +123,10 @@ async function main() {
     // Handle server errors
     server.on('error', (err) => {
         logger.error({ err }, "HTTP server error");
+        if (err.code === 'EADDRINUSE') {
+            logger.error({ port: PORT }, `Port ${PORT} is already in use. Please stop the process using this port or change PORT in .env`);
+            process.exit(1);
+        }
     });
     server.on('clientError', (err, socket) => {
         logger.warn({ err }, "HTTP client error");

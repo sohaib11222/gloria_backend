@@ -7,10 +7,6 @@ import { metaFromReq } from "../../grpc/meta.js";
 import { auditLog } from "../../services/audit.js";
 import { prisma } from "../../data/prisma.js";
 import { LocationsService } from "../../services/locations.js";
-<<<<<<< HEAD
-import { buildAvailabilityResponse } from "../../services/otaResponseBuilder.js";
-=======
->>>>>>> fa252dd5bb55fd72f1abf8a948f6d61af9d3b991
 import { unlocodeSchema, isoDateSchema } from "../../services/validation.js";
 export const availabilityRouter = Router();
 // [AUTO-AUDIT] agreement_refs required; downstream will validate ACTIVE set per agent
@@ -308,16 +304,6 @@ availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), a
                 return next(err);
             }
             else {
-<<<<<<< HEAD
-                // Get job to retrieve original criteria for OTA response
-                const job = await prisma.availabilityJob.findUnique({
-                    where: { id: String(pollRequestId) },
-                    select: { criteriaJson: true },
-                });
-                const criteria = job?.criteriaJson || {};
-                // Build OTA-compliant response structure
-                const otaResponse = await buildAvailabilityResponse(criteria, resp.offers || []);
-=======
                 const offersCount = resp.offers?.length || 0;
                 const isComplete = resp.complete || false;
                 console.log(`[Availability.Poll] ✅ gRPC Poll success (${duration}ms):`, {
@@ -329,7 +315,6 @@ availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), a
                     status: isComplete ? 'COMPLETE' : 'IN_PROGRESS',
                     timedOutSources: resp.timed_out_sources || 0
                 });
->>>>>>> fa252dd5bb55fd72f1abf8a948f6d61af9d3b991
                 // Log success
                 await auditLog({
                     direction: "IN",
@@ -338,13 +323,9 @@ availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), a
                     companyId: req.user.companyId,
                     httpStatus: 200,
                     request: { requestId: pollRequestId, sinceSeq, waitMs },
-                    response: otaResponse,
+                    response: resp,
                     durationMs: duration,
                 });
-<<<<<<< HEAD
-                // Return OTA-compliant response
-                res.json(otaResponse);
-=======
                 // Return gRPC response directly (contains offers, last_seq, complete, status)
                 // Frontend expects: { offers: [], last_seq: number, complete: boolean, status: string }
                 const response = {
@@ -362,7 +343,6 @@ availabilityRouter.get("/poll", requireAuth(), requireCompanyStatus("ACTIVE"), a
                     complete: response.complete
                 });
                 res.json(response);
->>>>>>> fa252dd5bb55fd72f1abf8a948f6d61af9d3b991
             }
         });
     }

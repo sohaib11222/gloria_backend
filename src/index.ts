@@ -97,26 +97,25 @@ async function main() {
     process.exit(1);
   }
   
-  // Start gRPC servers
-  await startGrpcServers();
-  await startPublicGrpcServer();
+  // Start gRPC servers (non-blocking - don't fail HTTP server if gRPC fails)
+  startGrpcServers().catch((err: any) => {
+    logger.error({ error: err.message }, "Failed to start gRPC core server (non-fatal)");
+  });
   
-  // Test gRPC client connectivity
-  try {
-    const sourceHealth = createHealthClient(config.sourceGrpcAddr);
-    await sourceHealth.check();
-    logger.info({ addr: config.sourceGrpcAddr }, "Source gRPC client connected");
-  } catch (error: any) {
-    logger.warn({ addr: config.sourceGrpcAddr, error: error.message }, "Source gRPC client failed");
-  }
+  startPublicGrpcServer().catch((err: any) => {
+    logger.error({ error: err.message }, "Failed to start public gRPC server (non-fatal)");
+  });
   
-  try {
-    const agentHealth = createHealthClient(config.agentGrpcAddr);
-    await agentHealth.check();
-    logger.info({ addr: config.agentGrpcAddr }, "Agent gRPC client connected");
-  } catch (error: any) {
-    logger.warn({ addr: config.agentGrpcAddr, error: error.message }, "Agent gRPC client failed");
-  }
+  // Test gRPC client connectivity (non-blocking)
+  setTimeout(() => {
+    createHealthClient(config.sourceGrpcAddr).check()
+      .then(() => logger.info({ addr: config.sourceGrpcAddr }, "Source gRPC client connected"))
+      .catch((error: any) => logger.warn({ addr: config.sourceGrpcAddr, error: error.message }, "Source gRPC client failed"));
+    
+    createHealthClient(config.agentGrpcAddr).check()
+      .then(() => logger.info({ addr: config.agentGrpcAddr }, "Agent gRPC client connected"))
+      .catch((error: any) => logger.warn({ addr: config.agentGrpcAddr, error: error.message }, "Agent gRPC client failed"));
+  }, 2000); // Wait 2 seconds for gRPC servers to start
   
   const app = buildApp();
   
@@ -143,6 +142,10 @@ async function main() {
   // Handle server errors
   server.on('error', (err: any) => {
     logger.error({ err }, "HTTP server error");
+    if (err.code === 'EADDRINUSE') {
+      logger.error({ port: PORT }, `Port ${PORT} is already in use. Please stop the process using this port or change PORT in .env`);
+      process.exit(1);
+    }
   });
   
   server.on('clientError', (err: any, socket: any) => {

@@ -2,7 +2,7 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import path from "path";
 import fs from "fs";
-import { logger } from "./logger";
+import { logger } from "./logger.js";
 export function loadProto(protoPath) {
     const pkgDef = protoLoader.loadSync(protoPath, {
         keepCase: true,

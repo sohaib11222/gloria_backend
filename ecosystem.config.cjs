@@ -2,44 +2,106 @@ const dotenv = require('dotenv');
 const path = require('path');
 const fs = require('fs');
 
-// Load .env file
-const envPath = path.resolve(__dirname, '.env');
+// Load .env file from multiple possible locations
+const envPaths = [
+  path.resolve(__dirname, '.env'),
+  path.resolve(__dirname, '../.env'),
+  '/var/www/gloriaconnect/backend/.env', // Absolute path
+];
+
 let envVars = {
   NODE_ENV: "production"
 };
 
-// Try to load .env file
-if (fs.existsSync(envPath)) {
-  const envConfig = dotenv.config({ path: envPath });
-  if (envConfig.error) {
-    console.warn('Warning: Could not load .env file:', envConfig.error.message);
-  } else if (envConfig.parsed) {
-    // Merge .env variables with PM2 config
-    envVars = {
-      ...envVars,
-      ...envConfig.parsed
-    };
-    console.log('Loaded .env file with', Object.keys(envConfig.parsed).length, 'variables');
+let databaseUrl = null;
+let envLoaded = false;
+
+// Try to load .env file from each path
+for (const envPath of envPaths) {
+  if (fs.existsSync(envPath)) {
+    try {
+      const envConfig = dotenv.config({ path: envPath });
+      if (envConfig.error) {
+        console.warn(`Warning: Could not load .env file from ${envPath}:`, envConfig.error.message);
+        continue;
+      }
+      
+      if (envConfig.parsed) {
+        // Merge .env variables with PM2 config
+        envVars = {
+          ...envVars,
+          ...envConfig.parsed
+        };
+        
+        // Extract DATABASE_URL
+        if (envConfig.parsed.DATABASE_URL) {
+          databaseUrl = envConfig.parsed.DATABASE_URL;
+          envLoaded = true;
+        }
+        
+        console.log(`✓ Loaded .env file from ${envPath} with ${Object.keys(envConfig.parsed).length} variables`);
+        break; // Stop after first successful load
+      }
+    } catch (err) {
+      console.warn(`Warning: Error loading .env from ${envPath}:`, err.message);
+      continue;
+    }
   }
-} else {
-  console.warn('Warning: .env file not found at', envPath);
+}
+
+// If dotenv didn't work, try reading .env file directly
+if (!databaseUrl) {
+  for (const envPath of envPaths) {
+    if (fs.existsSync(envPath)) {
+      try {
+        const envContent = fs.readFileSync(envPath, 'utf-8');
+        const lines = envContent.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed && !trimmed.startsWith('#') && trimmed.startsWith('DATABASE_URL=')) {
+            databaseUrl = trimmed.split('=').slice(1).join('=').trim();
+            // Remove quotes if present
+            if ((databaseUrl.startsWith('"') && databaseUrl.endsWith('"')) ||
+                (databaseUrl.startsWith("'") && databaseUrl.endsWith("'"))) {
+              databaseUrl = databaseUrl.slice(1, -1);
+            }
+            envLoaded = true;
+            console.log(`✓ Loaded DATABASE_URL from ${envPath} (direct read)`);
+            break;
+          }
+        }
+        if (envLoaded) break;
+      } catch (err) {
+        console.warn(`Warning: Error reading .env from ${envPath}:`, err.message);
+        continue;
+      }
+    }
+  }
 }
 
 // Ensure DATABASE_URL is set
-if (!envVars.DATABASE_URL) {
-  console.error('ERROR: DATABASE_URL is not set in environment variables!');
-} else {
-  // CRITICAL: Explicitly export DATABASE_URL for Prisma Client
-  // Prisma Client requires this at runtime for schema validation
-  process.env.DATABASE_URL = envVars.DATABASE_URL;
-  console.log('✓ DATABASE_URL is set for Prisma Client');
+if (!databaseUrl) {
+  databaseUrl = process.env.DATABASE_URL;
 }
 
-// CRITICAL: Ensure DATABASE_URL is ALWAYS set
-const databaseUrl = envVars.DATABASE_URL || process.env.DATABASE_URL;
 if (!databaseUrl) {
-  console.error('FATAL ERROR: DATABASE_URL is not set!');
+  console.error('❌ FATAL ERROR: DATABASE_URL is not set!');
+  console.error('   Tried paths:', envPaths.join(', '));
+  console.error('   Current working directory:', process.cwd());
+  console.error('   __dirname:', __dirname);
   process.exit(1);
+} else {
+  // CRITICAL: Explicitly set DATABASE_URL in process.env for Prisma Client
+  // Prisma Client requires this at runtime for schema validation
+  process.env.DATABASE_URL = databaseUrl;
+  envVars.DATABASE_URL = databaseUrl;
+  const safeUrl = databaseUrl.replace(/:([^:@]+)@/, ':****@');
+  console.log(`✓ DATABASE_URL is set for Prisma Client: ${safeUrl}`);
+}
+
+// CRITICAL: Ensure DATABASE_URL is ALWAYS set in envVars
+if (!envVars.DATABASE_URL) {
+  envVars.DATABASE_URL = databaseUrl;
 }
 
 module.exports = {
@@ -52,10 +114,13 @@ module.exports = {
       env: {
         ...envVars,
         // CRITICAL: Force DATABASE_URL to be set explicitly - Prisma Client requires this
+        // This MUST be set for Prisma schema validation at import time
         DATABASE_URL: databaseUrl,
         // Ensure Node.js can find it
         NODE_ENV: envVars.NODE_ENV || "production",
       },
+      // CRITICAL: Also set in env_file for PM2 to load
+      env_file: path.resolve(__dirname, '.env'),
       watch: false,
       error_file: "./logs/pm2-error.log",
       out_file: "./logs/pm2-out.log",
