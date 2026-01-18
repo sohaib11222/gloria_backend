@@ -1779,8 +1779,10 @@ export async function startGrpcServers() {
     // mTLS infrastructure available but disabled by default
     // To enable: set GRPC_TLS_ENABLED=true and use createServerCredentials()
     server.bindAsync(`0.0.0.0:${CORE_PORT}`, grpc.ServerCredentials.createInsecure(), (err, port) => {
-        if (err)
-            throw err;
+        if (err) {
+            logger.error({ error: err.message, port: CORE_PORT }, "gRPC core server bind error (non-fatal)");
+            return;
+        }
         server.start();
         logger.info({ port }, "gRPC core server started");
     });

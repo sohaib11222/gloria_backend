@@ -1,3 +1,5 @@
+// CRITICAL: Load environment variables FIRST before ANY other imports
+// This ensures DATABASE_URL is available when Prisma Client modules are loaded
 import "dotenv/config";
 import dotenv from "dotenv";
 import path from "path";
@@ -7,14 +9,38 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// CRITICAL: Load .env file FIRST before any other imports
-// This ensures DATABASE_URL is available when Prisma Client modules are loaded
-const envPath = path.resolve(__dirname, '../.env');
-dotenv.config({ path: envPath });
+// CRITICAL: Load .env file from multiple possible locations
+// This ensures DATABASE_URL is available regardless of where the code runs
+const envPaths = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(__dirname, '../.env'),
+  path.resolve(__dirname, '../../.env'),
+];
 
-// Ensure DATABASE_URL is set in process.env for Prisma Client
-if (!process.env.DATABASE_URL) {
-  console.error("ERROR: DATABASE_URL not found in environment!");
+// Try loading from each path until one succeeds
+let databaseUrl = process.env.DATABASE_URL;
+for (const envPath of envPaths) {
+  const result = dotenv.config({ path: envPath });
+  if (!result.error && result.parsed) {
+    // Update databaseUrl if it was loaded from this file
+    if (result.parsed.DATABASE_URL) {
+      databaseUrl = result.parsed.DATABASE_URL;
+    }
+    break;
+  }
+}
+
+// CRITICAL: Force set DATABASE_URL in process.env IMMEDIATELY
+// This MUST happen before ANY Prisma-related imports
+if (databaseUrl) {
+  process.env.DATABASE_URL = databaseUrl;
+  console.log("✓ DATABASE_URL loaded from .env file");
+} else if (!process.env.DATABASE_URL) {
+  console.error("⚠️  WARNING: DATABASE_URL not found in .env file");
+  console.error("   Tried paths:", envPaths.join(", "));
+  console.error("   Current working directory:", process.cwd());
+  console.error("   __dirname:", __dirname);
+  // Don't exit - let prisma.ts handle the error
 }
 
 import { buildApp } from "./api/app.js";
@@ -71,26 +97,25 @@ async function main() {
     process.exit(1);
   }
   
-  // Start gRPC servers
-  await startGrpcServers();
-  await startPublicGrpcServer();
+  // Start gRPC servers (non-blocking - don't fail HTTP server if gRPC fails)
+  startGrpcServers().catch((err: any) => {
+    logger.error({ error: err.message }, "Failed to start gRPC core server (non-fatal)");
+  });
   
-  // Test gRPC client connectivity
-  try {
-    const sourceHealth = createHealthClient(config.sourceGrpcAddr);
-    await sourceHealth.check();
-    logger.info({ addr: config.sourceGrpcAddr }, "Source gRPC client connected");
-  } catch (error: any) {
-    logger.warn({ addr: config.sourceGrpcAddr, error: error.message }, "Source gRPC client failed");
-  }
+  startPublicGrpcServer().catch((err: any) => {
+    logger.error({ error: err.message }, "Failed to start public gRPC server (non-fatal)");
+  });
   
-  try {
-    const agentHealth = createHealthClient(config.agentGrpcAddr);
-    await agentHealth.check();
-    logger.info({ addr: config.agentGrpcAddr }, "Agent gRPC client connected");
-  } catch (error: any) {
-    logger.warn({ addr: config.agentGrpcAddr, error: error.message }, "Agent gRPC client failed");
-  }
+  // Test gRPC client connectivity (non-blocking)
+  setTimeout(() => {
+    createHealthClient(config.sourceGrpcAddr).check()
+      .then(() => logger.info({ addr: config.sourceGrpcAddr }, "Source gRPC client connected"))
+      .catch((error: any) => logger.warn({ addr: config.sourceGrpcAddr, error: error.message }, "Source gRPC client failed"));
+    
+    createHealthClient(config.agentGrpcAddr).check()
+      .then(() => logger.info({ addr: config.agentGrpcAddr }, "Agent gRPC client connected"))
+      .catch((error: any) => logger.warn({ addr: config.agentGrpcAddr, error: error.message }, "Agent gRPC client failed"));
+  }, 2000); // Wait 2 seconds for gRPC servers to start
   
   const app = buildApp();
   
@@ -117,6 +142,10 @@ async function main() {
   // Handle server errors
   server.on('error', (err: any) => {
     logger.error({ err }, "HTTP server error");
+    if (err.code === 'EADDRINUSE') {
+      logger.error({ port: PORT }, `Port ${PORT} is already in use. Please stop the process using this port or change PORT in .env`);
+      process.exit(1);
+    }
   });
   
   server.on('clientError', (err: any, socket: any) => {
