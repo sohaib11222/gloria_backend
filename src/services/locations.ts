@@ -16,13 +16,15 @@ export const LocationsService = {
     const isMockSource = await isSourceUsingMockAdapter(ag.sourceId);
 
     // Base coverage from source
+    // Note: isMock field may not exist in Prisma client until migration is run
+    // Using type assertion to handle this gracefully
     const base = await prisma.sourceLocation.findMany({
       where: { sourceId: ag.sourceId },
-      select: { unlocode: true, isMock: true },
-    });
+    }) as Array<{ unlocode: string; isMock?: boolean }>;
+    
     const baseSet = new Set<string>(base.map((b) => b.unlocode));
     const mockLocationsSet = new Set<string>(
-      base.filter((b) => (b as any).isMock === true).map((b) => b.unlocode)
+      base.filter((b) => b.isMock === true).map((b) => b.unlocode)
     );
 
     // Overrides for agreement

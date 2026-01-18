@@ -578,6 +578,7 @@ endpointsRouter.get(
           type: true,
           adapterType: true,
           grpcEndpoint: true,
+          httpEndpoint: true,
           updatedAt: true,
         },
       });

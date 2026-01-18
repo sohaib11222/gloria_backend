@@ -1593,8 +1593,15 @@ export async function startGrpcServers() {
         RunAgentVerification: async (call, cb) => {
             try {
                 const { agent_id, source_id, test_agreement_ref, } = call.request;
+                // Validate source_id is provided
+                if (!source_id || source_id === "MOCK-SOURCE-ID") {
+                    return cb({
+                        code: grpc.status.INVALID_ARGUMENT,
+                        message: "source_id is required and cannot be MOCK-SOURCE-ID. Provide a real source company ID.",
+                    });
+                }
                 // Run comprehensive verification
-                const result = await VerificationRunner.runAgentVerification(agent_id, source_id || "MOCK-SOURCE-ID", test_agreement_ref);
+                const result = await VerificationRunner.runAgentVerification(agent_id, source_id, test_agreement_ref);
                 // Record verification metric
                 verificationOperationsTotal.inc({
                     type: "agent",

@@ -214,16 +214,27 @@ export class VerificationRunner {
     /**
      * Run comprehensive verification for an AGENT company
      */
-    static async runAgentVerification(agentId, sourceId = "MOCK-SOURCE-ID", testAgreementRef = "TEST-AGREEMENT") {
+    static async runAgentVerification(agentId, sourceId, testAgreementRef = "TEST-AGREEMENT") {
         const steps = [];
         let overallPassed = true;
         try {
+            // Validate required parameters
+            if (!sourceId || sourceId === "MOCK-SOURCE-ID") {
+                throw new Error("sourceId is required and cannot be MOCK-SOURCE-ID. Provide a real source company ID.");
+            }
             // Verify agent exists and is correct type
             const agent = await prisma.company.findUnique({
                 where: { id: agentId },
             });
             if (!agent || agent.type !== "AGENT") {
                 throw new Error("Invalid agent or agent type");
+            }
+            // Verify source exists and is correct type
+            const source = await prisma.company.findUnique({
+                where: { id: sourceId },
+            });
+            if (!source || source.type !== "SOURCE") {
+                throw new Error(`Invalid source ID: ${sourceId}. Source company not found or is not a SOURCE type.`);
             }
             // Step 1: Echo/Connectivity test
             const echoStart = Date.now();

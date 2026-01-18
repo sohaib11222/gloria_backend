@@ -537,6 +537,7 @@ endpointsRouter.get("/endpoints/status", requireAuth(), async (req, res, next) =
                 type: true,
                 adapterType: true,
                 grpcEndpoint: true,
+                httpEndpoint: true,
                 updatedAt: true,
             },
         });
@@ -546,21 +547,63 @@ endpointsRouter.get("/endpoints/status", requireAuth(), async (req, res, next) =
                 .json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
         }
         // Use ports that don't conflict with main API (8080) and gRPC servers (50051, 50052)
-        const httpEndpoint = company.type === "AGENT"
-            ? "http://localhost:9091"
-            : "http://localhost:9090";
+        const httpEndpoint = company.httpEndpoint ||
+            (company.type === "AGENT"
+                ? "http://localhost:9091"
+                : "http://localhost:9090");
+        // Perform actual health checks
+        let httpStatus = "unknown";
+        let grpcStatus = "unknown";
+        // Check HTTP endpoint health
+        if (httpEndpoint) {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+                const healthUrl = httpEndpoint.endsWith('/health')
+                    ? httpEndpoint
+                    : `${httpEndpoint}/health`;
+                const response = await fetch(healthUrl, {
+                    method: 'GET',
+                    signal: controller.signal,
+                    headers: {
+                        'Accept': 'application/json',
+                    },
+                });
+                clearTimeout(timeoutId);
+                if (response.ok) {
+                    httpStatus = "active";
+                }
+                else {
+                    httpStatus = "inactive";
+                }
+            }
+            catch (error) {
+                // Health check failed - endpoint is inactive or unreachable
+                httpStatus = "inactive";
+            }
+        }
+        // Check gRPC endpoint health (simplified - just check if configured)
+        // Full gRPC health check would require gRPC client connection
+        if (company.grpcEndpoint) {
+            // For now, mark as active if configured (full health check would require gRPC call)
+            // TODO: Implement actual gRPC health check using gRPC health service
+            grpcStatus = "active";
+        }
+        else {
+            grpcStatus = "inactive";
+        }
         res.json({
             companyId: company.id,
             endpoints: {
                 http: {
-                    configured: true,
+                    configured: !!httpEndpoint,
                     endpoint: httpEndpoint,
-                    status: "active", // Assume active for now
+                    status: httpStatus,
                 },
                 grpc: {
                     configured: !!company.grpcEndpoint,
                     endpoint: company.grpcEndpoint || null,
-                    status: company.grpcEndpoint ? "active" : "inactive",
+                    status: grpcStatus,
                 },
             },
             adapterType: company.adapterType,

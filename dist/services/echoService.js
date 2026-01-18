@@ -82,10 +82,22 @@ export async function submitEcho(requestRef, agentId, agreementRef, payload) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), ECHO_TIMEOUT_MS);
             try {
-                // TODO: Implement actual Echo call on adapter
-                // For now, we'll create a mock response
-                const echoedMessage = payload.message;
-                const echoedAttrs = payload.attrs;
+                // Call Echo method on adapter if available
+                let echoedMessage;
+                let echoedAttrs;
+                if (adapter.echo && typeof adapter.echo === 'function') {
+                    // Adapter has echo method - call it
+                    const echoResponse = await adapter.echo(payload.message, payload.attrs);
+                    echoedMessage = echoResponse.echoedMessage;
+                    echoedAttrs = echoResponse.echoedAttrs;
+                    logger.info({ sourceId, messageLength: echoedMessage.length }, "Echo call successful via adapter");
+                }
+                else {
+                    // Adapter doesn't support echo - fallback to simple echo
+                    logger.warn({ sourceId }, "Adapter does not support echo method, using simple echo fallback");
+                    echoedMessage = payload.message;
+                    echoedAttrs = payload.attrs;
+                }
                 // Append EchoItem
                 const job = await prisma.echoJob.findUnique({
                     where: { requestId },

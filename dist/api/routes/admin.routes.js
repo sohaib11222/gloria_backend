@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import fetch from "node-fetch";
 import { requireAuth, Auth } from "../../infra/auth.js";
-import { requireRole } from "../../infra/policies.js";
+import { requireRole, requireCompanyType } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
 import { SourceHealthService } from "../../services/health.js";
 import { createApiKey } from "../../infra/apiKeys.js"; // [AUTO-AUDIT]
@@ -801,11 +801,22 @@ adminRouter.post("/admin/companies", requireAuth(), requireRole("ADMIN"), async 
             });
         }
         // Validate adapter type if provided
-        if (adapterType && !["mock", "grpc", "http"].includes(adapterType)) {
-            return res.status(400).json({
-                error: "INVALID_ADAPTER_TYPE",
-                message: "Adapter type must be one of: mock, grpc, http"
-            });
+        const validAdapterTypes = ["grpc", "http"];
+        const isProduction = process.env.NODE_ENV === "production";
+        if (adapterType) {
+            if (!["mock", "grpc", "http"].includes(adapterType)) {
+                return res.status(400).json({
+                    error: "INVALID_ADAPTER_TYPE",
+                    message: "Adapter type must be one of: grpc, http" + (isProduction ? "" : " (mock allowed in development only)")
+                });
+            }
+            // Reject mock adapter in production
+            if (isProduction && adapterType === "mock") {
+                return res.status(400).json({
+                    error: "MOCK_ADAPTER_NOT_ALLOWED",
+                    message: "Mock adapter type is not allowed in production. Please use 'grpc' or 'http'."
+                });
+            }
         }
         // Check if email already exists
         const existingCompany = await prisma.company.findUnique({
@@ -826,7 +837,7 @@ adminRouter.post("/admin/companies", requireAuth(), requireRole("ADMIN"), async 
                 email,
                 type,
                 passwordHash,
-                adapterType: adapterType || "mock",
+                adapterType: adapterType || null,
                 grpcEndpoint: grpcEndpoint || null,
                 status: "ACTIVE"
             },
@@ -905,11 +916,22 @@ adminRouter.put("/admin/companies/:id", requireAuth(), requireRole("ADMIN"), asy
             });
         }
         // Validate adapter type if provided
-        if (adapterType && !["mock", "grpc", "http"].includes(adapterType)) {
-            return res.status(400).json({
-                error: "INVALID_ADAPTER_TYPE",
-                message: "Adapter type must be one of: mock, grpc, http"
-            });
+        const validAdapterTypes = ["grpc", "http"];
+        const isProduction = process.env.NODE_ENV === "production";
+        if (adapterType) {
+            if (!["mock", "grpc", "http"].includes(adapterType)) {
+                return res.status(400).json({
+                    error: "INVALID_ADAPTER_TYPE",
+                    message: "Adapter type must be one of: grpc, http" + (isProduction ? "" : " (mock allowed in development only)")
+                });
+            }
+            // Reject mock adapter in production
+            if (isProduction && adapterType === "mock") {
+                return res.status(400).json({
+                    error: "MOCK_ADAPTER_NOT_ALLOWED",
+                    message: "Mock adapter type is not allowed in production. Please use 'grpc' or 'http'."
+                });
+            }
         }
         // Validate status if provided
         if (status && !["ACTIVE", "PENDING_VERIFICATION", "SUSPENDED"].includes(status)) {
@@ -1553,6 +1575,69 @@ adminRouter.get("/admin/health/sources/:sourceId", requireAuth(), requireRole("A
 });
 /**
  * @openapi
+ * /admin/sources/health:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Get source health status and adapter information (accessible to agents)
+ *     description: Returns health status for all active sources, including which sources use mock adapters
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Source health information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sources:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       sourceId:
+ *                         type: string
+ *                       companyName:
+ *                         type: string
+ *                       adapterType:
+ *                         type: string
+ *                         enum: [mock, grpc, http]
+ *                       isMock:
+ *                         type: boolean
+ *                       status:
+ *                         type: string
+ *                 hasMockSources:
+ *                   type: boolean
+ */
+adminRouter.get("/admin/sources/health", requireAuth(), requireCompanyType("ADMIN", "AGENT"), async (req, res, next) => {
+    try {
+        const sources = await prisma.company.findMany({
+            where: { type: "SOURCE", status: "ACTIVE" },
+            select: {
+                id: true,
+                companyName: true,
+                adapterType: true,
+                status: true
+            }
+        });
+        const health = sources.map(s => ({
+            sourceId: s.id,
+            companyName: s.companyName,
+            adapterType: s.adapterType,
+            isMock: s.adapterType === "mock",
+            status: s.status
+        }));
+        res.json({
+            sources: health,
+            hasMockSources: health.some(s => s.isMock)
+        });
+    }
+    catch (e) {
+        next(e);
+    }
+});
+/**
+ * @openapi
  * /admin/health/check/{companyId}:
  *   post:
  *     tags: [Admin Health]
@@ -1872,6 +1957,7 @@ adminRouter.get("/admin/endpoints", requireAuth(), requireRole("ADMIN"), async (
                 status: true,
                 adapterType: true,
                 grpcEndpoint: true,
+                httpEndpoint: true,
                 updatedAt: true,
             },
             orderBy: { updatedAt: "desc" }
@@ -1881,9 +1967,9 @@ adminRouter.get("/admin/endpoints", requireAuth(), requireRole("ADMIN"), async (
             companyName: company.companyName,
             type: company.type,
             status: company.status,
-            httpEndpoint: company.type === "AGENT"
+            httpEndpoint: company.httpEndpoint || (company.type === "AGENT"
                 ? "http://localhost:9091"
-                : "http://localhost:9090",
+                : "http://localhost:9090"), // Fallback only for display when not configured
             grpcEndpoint: company.grpcEndpoint,
             adapterType: company.adapterType,
             updatedAt: company.updatedAt
