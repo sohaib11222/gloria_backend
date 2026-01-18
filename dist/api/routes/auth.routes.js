@@ -40,6 +40,7 @@ authRouter.post("/auth/register", async (req, res, next) => {
                 email: body.email,
                 passwordHash,
                 status: "PENDING_VERIFICATION", // Keep as pending until email verified
+                approvalStatus: "PENDING", // Explicitly set to PENDING - requires admin approval
             },
         });
         const user = await prisma.user.create({
@@ -146,6 +147,7 @@ authRouter.post("/auth/verify-email", async (req, res, next) => {
                 companyName: user.company.companyName,
                 type: user.company.type,
                 status: user.company.status,
+                approvalStatus: user.company.approvalStatus,
                 adapterType: user.company.adapterType,
                 grpcEndpoint: user.company.grpcEndpoint,
             },
@@ -359,6 +361,27 @@ authRouter.post("/auth/login", async (req, res, next) => {
                     status: "PENDING_VERIFICATION"
                 });
             }
+            // Check if company is approved by admin
+            if (user.company.approvalStatus !== "APPROVED") {
+                return res.status(403).json({
+                    error: "NOT_APPROVED",
+                    message: user.company.approvalStatus === "PENDING"
+                        ? "Your account is pending admin approval. Please wait for approval before accessing the dashboard."
+                        : "Your account has been rejected. Please contact support for assistance.",
+                    email: user.email,
+                    approvalStatus: user.company.approvalStatus,
+                    status: user.company.status
+                });
+            }
+            // Check if company status is ACTIVE
+            if (user.company.status !== "ACTIVE") {
+                return res.status(403).json({
+                    error: "ACCOUNT_NOT_ACTIVE",
+                    message: "Your account is not active. Please contact support for assistance.",
+                    email: user.email,
+                    status: user.company.status
+                });
+            }
             const access = Auth.signAccess({
                 sub: user.id,
                 companyId: user.companyId,
@@ -377,8 +400,10 @@ authRouter.post("/auth/login", async (req, res, next) => {
                     companyName: user.company.companyName,
                     type: user.company.type,
                     status: user.company.status,
+                    approvalStatus: user.company.approvalStatus,
                     adapterType: user.company.adapterType || null,
                     grpcEndpoint: user.company.grpcEndpoint || null,
+                    httpEndpoint: user.company.httpEndpoint || null,
                 },
                 createdAt: user.createdAt,
                 updatedAt: user.updatedAt,
