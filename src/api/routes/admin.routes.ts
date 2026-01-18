@@ -560,13 +560,14 @@ adminRouter.post("/admin/companies/:id/approve", requireAuth(), requireRole("ADM
       return res.status(404).json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
     }
 
-    // Update approval status and automatically verify email
-    // When admin approves, we also verify the email automatically
+    // Update approval status, verify email, and set status to ACTIVE
+    // When admin approves, we also verify the email and activate the account
     const updatedCompany = await prisma.company.update({
       where: { id },
       data: { 
         approvalStatus: "APPROVED",
-        emailVerified: true  // Automatically verify email when admin approves
+        emailVerified: true,  // Automatically verify email when admin approves
+        status: "ACTIVE"  // Automatically activate account when admin approves
       },
       include: {
         users: true,
