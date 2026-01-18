@@ -125,6 +125,7 @@ locationsRouter.get("/coverage/source/:sourceId", requireAuth(), requireCompanyT
       iata_code: sl.loc.iataCode || "",
       latitude: sl.loc.latitude || 0,
       longitude: sl.loc.longitude || 0,
+      isMock: (sl as any).isMock || false,
       synced_at: (sl as any).createdAt?.toISOString() || null
     }));
 

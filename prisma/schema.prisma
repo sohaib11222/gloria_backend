@@ -76,7 +76,7 @@ model Company {
   whitelistedDomains String? @db.Text // Comma-separated domains/IPs
 
   // Adapter configuration for Sources
-  adapterType  String  @default("mock") // "mock" | "grpc" (or future "http")
+  adapterType  String? // "mock" | "grpc" (or future "http") - must be explicitly set, no default
   grpcEndpoint String?
   httpEndpoint String? // Optional HTTP endpoint for JSON fallback/test
 
@@ -154,6 +154,7 @@ model SourceLocation {
   id       String @id @default(cuid())
   sourceId String
   unlocode String
+  isMock   Boolean @default(false) // Indicates if location was synced from a mock adapter (test data)
 
   source Company  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   loc    UNLocode @relation(fields: [unlocode], references: [unlocode], onDelete: Cascade)

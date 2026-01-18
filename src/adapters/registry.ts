@@ -45,6 +45,11 @@ export interface ModifyBookingInput {
   // e.g., change dropoff time or extras; omitted for mock
 }
 
+export interface EchoResponse {
+  echoedMessage: string;
+  echoedAttrs: Record<string, string>;
+}
+
 export interface SourceAdapter {
   locations(): Promise<string[]>;
   availability(criteria: AvailabilityCriteria): Promise<Offer[]>;
@@ -53,6 +58,8 @@ export interface SourceAdapter {
   bookingModify(input: ModifyBookingInput): Promise<BookingRecord>;
   bookingCancel(ref: string, agreement_ref: string): Promise<BookingRecord>;
   bookingCheck(ref: string, agreement_ref: string): Promise<BookingRecord>;
+  
+  echo?(message: string, attrs: Record<string, string>): Promise<EchoResponse>;
 }
 
 class MockAdapter implements SourceAdapter {
@@ -114,6 +121,14 @@ class MockAdapter implements SourceAdapter {
     if (!rec) throw new Error("NOT_FOUND");
     rec.agreement_ref = agreement_ref; // Ensure agreement_ref is set
     return rec;
+  }
+
+  async echo(message: string, attrs: Record<string, string>): Promise<EchoResponse> {
+    // Mock adapter simply echoes back the message and attributes
+    return {
+      echoedMessage: message,
+      echoedAttrs: attrs,
+    };
   }
 }
 
@@ -187,6 +202,49 @@ export async function getAdapterForSource(sourceId: string): Promise<SourceAdapt
     return new GrpcAdapter({ endpoint: src.grpcEndpoint, authHeader: process.env.SUPPLIER_GRPC_AUTH || "", sourceId });
   }
 
-  console.log(`[AdapterRegistry] ✅ Selected: Mock adapter for source ${sourceId}`);
+  // Check if adapterType is explicitly set to "mock"
+  if (src.adapterType === "mock") {
+    const isProduction = process.env.NODE_ENV === "production";
+    const allowMockInProduction = process.env.ALLOW_MOCK_ADAPTER_IN_PRODUCTION === "true";
+    
+    if (isProduction && !allowMockInProduction) {
+      console.error(`[AdapterRegistry] ❌ BLOCKED: Mock adapter cannot be used in production for source ${sourceId}`);
+      throw new Error("MOCK_ADAPTER_NOT_ALLOWED_IN_PRODUCTION");
+    }
+    
+    console.warn(`[AdapterRegistry] ⚠️ WARNING: Using MOCK adapter for source ${sourceId} (TEST-ONLY)`);
+    console.warn(`[AdapterRegistry] ⚠️ Source: ${src.companyName} (${src.id})`);
+    console.warn(`[AdapterRegistry] ⚠️ This adapter returns fake data and should only be used for testing`);
+    return new MockAdapter();
+  }
+
+  // If adapterType is null/undefined and no gRPC endpoint configured, throw error
+  if (!src.adapterType && !grpcAddr && !src.grpcEndpoint) {
+    console.error(`[AdapterRegistry] ❌ ERROR: Source ${sourceId} has no adapter configured`);
+    console.error(`[AdapterRegistry] ❌ Source must have adapterType set to "grpc" or "http", or configure grpcEndpoint`);
+    throw new Error("ADAPTER_NOT_CONFIGURED");
+  }
+
+  // Fallback to mock only if explicitly allowed (should not happen in normal flow)
+  console.warn(`[AdapterRegistry] ⚠️ WARNING: Falling back to Mock adapter for source ${sourceId} - this should not happen`);
+  console.warn(`[AdapterRegistry] ⚠️ Source configuration: adapterType=${src.adapterType}, grpcEndpoint=${src.grpcEndpoint}`);
   return new MockAdapter();
+}
+
+/**
+ * Check if a source is using a mock adapter
+ * @param sourceId The source company ID
+ * @returns true if the source uses a mock adapter, false otherwise
+ */
+export async function isSourceUsingMockAdapter(sourceId: string): Promise<boolean> {
+  try {
+    const src = await prisma.company.findUnique({ 
+      where: { id: sourceId },
+      select: { adapterType: true }
+    });
+    return src?.adapterType === "mock";
+  } catch (error) {
+    console.error(`[AdapterRegistry] Error checking mock adapter for source ${sourceId}:`, error);
+    return false;
+  }
 }

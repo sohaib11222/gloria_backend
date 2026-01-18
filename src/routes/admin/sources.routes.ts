@@ -113,7 +113,9 @@ adminSourcesRouter.get('/sources', requireAuth(), requireCompanyType('ADMIN'), a
         id: true,
         companyName: true,
         status: true,
+        adapterType: true,
         grpcEndpoint: true,
+        httpEndpoint: true,
         createdAt: true,
         updatedAt: true
       },
@@ -126,7 +128,9 @@ adminSourcesRouter.get('/sources', requireAuth(), requireCompanyType('ADMIN'), a
       id: source.id,
       companyName: source.companyName,
       status: source.status,
+      adapterType: source.adapterType,
       grpcEndpoint: source.grpcEndpoint,
+      httpEndpoint: source.httpEndpoint,
       createdAt: source.createdAt.toISOString(),
       updatedAt: source.updatedAt.toISOString()
     }));

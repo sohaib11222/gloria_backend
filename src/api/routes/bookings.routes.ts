@@ -747,6 +747,18 @@ const testCreateSchema = z.object({
  */
 bookingsRouter.post("/test/create", requireAuth(), async (req: any, res, next) => {
   try {
+    // Only allow test endpoints in non-production environments
+    const isProduction = process.env.NODE_ENV === "production";
+    const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
+    
+    if (isProduction && !allowTestEndpoints) {
+      return res.status(403).json({
+        error: "TEST_ENDPOINT_DISABLED",
+        message: "Test endpoints are disabled in production environment",
+        test_mode: false,
+      });
+    }
+    
     const body = testCreateSchema.parse(req.body);
     // Check for idempotency key in various header formats (case-insensitive)
     const idempotencyKey = req.headers["idempotency-key"] || 
@@ -773,8 +785,10 @@ bookingsRouter.post("/test/create", requireAuth(), async (req: any, res, next) =
     };
     
     // Simulate successful test booking creation
+    // WARNING: This is a TEST endpoint - responses are simulated and do not represent real bookings
     const testResponse = {
       test_mode: true,
+      warning: "This is a TEST endpoint. Responses are simulated and do not create real bookings.",
       booking_id: `TEST_BOOKING_${Date.now()}`,
       status: "TEST_CREATED",
       agent_booking_ref: testData.agent_booking_ref,
@@ -805,12 +819,26 @@ bookingsRouter.post("/test/create", requireAuth(), async (req: any, res, next) =
  */
 bookingsRouter.patch("/test/modify/:ref", requireAuth(), async (req: any, res, next) => {
   try {
+    // Only allow test endpoints in non-production environments
+    const isProduction = process.env.NODE_ENV === "production";
+    const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
+    
+    if (isProduction && !allowTestEndpoints) {
+      return res.status(403).json({
+        error: "TEST_ENDPOINT_DISABLED",
+        message: "Test endpoints are disabled in production environment",
+        test_mode: false,
+      });
+    }
+    
     const bookingRef = String(req.params.ref);
     const sourceId = String(req.query.source_id || "TEST_SOURCE_001");
     
     // Simulate successful test booking modification
+    // WARNING: This is a TEST endpoint - responses are simulated
     const testResponse = {
       test_mode: true,
+      warning: "This is a TEST endpoint. Responses are simulated and do not modify real bookings.",
       booking_id: bookingRef,
       status: "TEST_MODIFIED",
       source_id: sourceId,
@@ -839,12 +867,26 @@ bookingsRouter.patch("/test/modify/:ref", requireAuth(), async (req: any, res, n
  */
 bookingsRouter.post("/test/cancel/:ref", requireAuth(), async (req: any, res, next) => {
   try {
+    // Only allow test endpoints in non-production environments
+    const isProduction = process.env.NODE_ENV === "production";
+    const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
+    
+    if (isProduction && !allowTestEndpoints) {
+      return res.status(403).json({
+        error: "TEST_ENDPOINT_DISABLED",
+        message: "Test endpoints are disabled in production environment",
+        test_mode: false,
+      });
+    }
+    
     const bookingRef = String(req.params.ref);
     const sourceId = String(req.query.source_id || "TEST_SOURCE_001");
     
     // Simulate successful test booking cancellation
+    // WARNING: This is a TEST endpoint - responses are simulated
     const testResponse = {
       test_mode: true,
+      warning: "This is a TEST endpoint. Responses are simulated and do not cancel real bookings.",
       booking_id: bookingRef,
       status: "TEST_CANCELLED",
       source_id: sourceId,
@@ -873,12 +915,26 @@ bookingsRouter.post("/test/cancel/:ref", requireAuth(), async (req: any, res, ne
  */
 bookingsRouter.get("/test/check/:ref", requireAuth(), async (req: any, res, next) => {
   try {
+    // Only allow test endpoints in non-production environments
+    const isProduction = process.env.NODE_ENV === "production";
+    const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
+    
+    if (isProduction && !allowTestEndpoints) {
+      return res.status(403).json({
+        error: "TEST_ENDPOINT_DISABLED",
+        message: "Test endpoints are disabled in production environment",
+        test_mode: false,
+      });
+    }
+    
     const bookingRef = String(req.params.ref);
     const sourceId = String(req.query.source_id || "TEST_SOURCE_001");
     
     // Simulate successful test booking status check
+    // WARNING: This is a TEST endpoint - responses are simulated
     const testResponse = {
       test_mode: true,
+      warning: "This is a TEST endpoint. Responses are simulated and do not check real bookings.",
       booking_id: bookingRef,
       status: "TEST_CONFIRMED",
       source_id: sourceId,
@@ -907,8 +963,31 @@ bookingsRouter.get("/test/check/:ref", requireAuth(), async (req: any, res, next
  */
 bookingsRouter.get("/test/verification", requireAuth(), async (req: any, res, next) => {
   try {
-    // In a real implementation, you would check database for verification status
-    // For now, we'll return a mock verification status
+    // Only allow test endpoints in non-production environments
+    const isProduction = process.env.NODE_ENV === "production";
+    const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
+    
+    if (isProduction && !allowTestEndpoints) {
+      return res.status(403).json({
+        error: "TEST_ENDPOINT_DISABLED",
+        message: "Test endpoints are disabled in production environment",
+        test_mode: false,
+      });
+    }
+    
+    // Check database for actual verification status
+    const verificationReports = await prisma.verificationReport.findMany({
+      where: {
+        companyId: req.user.companyId,
+        kind: "AGENT",
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      take: 1,
+    });
+    
+    const latestReport = verificationReports[0];
     const verificationStatus = {
       agent_id: req.user.companyId,
       verification_complete: false,
