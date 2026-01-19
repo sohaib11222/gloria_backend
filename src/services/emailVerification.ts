@@ -86,15 +86,41 @@ export class EmailVerificationService {
       </html>
     `;
 
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`📧 [EmailVerification] Sending OTP Email`);
+    console.log(`${'='.repeat(80)}`);
+    console.log(`   Email: ${email}`);
+    console.log(`   Company: ${companyName}`);
+    console.log(`   OTP: ${otp}`);
+    console.log(`   Expires: ${expiresAt.toISOString()}`);
+    console.log(`   OTP stored in database: ✓`);
+    console.log(`${'='.repeat(80)}\n`);
+    
     try {
       await sendMail({
         to: email,
         subject: "Verify Your Email - Car Hire Middleware",
         html,
       });
-      console.log(`✅ OTP email sent to ${email} (OTP: ${otp})`);
+      
+      console.log(`\n${'='.repeat(80)}`);
+      console.log(`✅ [EmailVerification] OTP Email Process Completed`);
+      console.log(`${'='.repeat(80)}`);
+      console.log(`   Email: ${email}`);
+      console.log(`   OTP: ${otp}`);
+      console.log(`   Status: Email sent successfully`);
+      console.log(`   Note: Check the email logs above for detailed SMTP information`);
+      console.log(`${'='.repeat(80)}\n`);
     } catch (error: any) {
-      console.error(`❌ Failed to send OTP email to ${email}:`, error);
+      console.log(`\n${'='.repeat(80)}`);
+      console.log(`❌ [EmailVerification] OTP Email Send Failed`);
+      console.log(`${'='.repeat(80)}`);
+      console.log(`   Email: ${email}`);
+      console.log(`   OTP: ${otp} (still stored in database)`);
+      console.log(`   Error: ${error.message}`);
+      console.log(`   Note: OTP is still valid and stored. User can request resend.`);
+      console.log(`   Check email logs above for detailed error information.`);
+      console.log(`${'='.repeat(80)}\n`);
       
       // Check if it's an SMTP authentication error
       const isSmtpAuthError = error.message?.includes('Username and Password not accepted') ||
