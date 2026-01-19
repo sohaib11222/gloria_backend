@@ -56,6 +56,8 @@ export function buildApp() {
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
         res.setHeader('Access-Control-Allow-Credentials', 'false');
         res.setHeader('Access-Control-Expose-Headers', '*');
+        // Set permissive Referrer-Policy to override browser default
+        res.setHeader('Referrer-Policy', 'unsafe-url');
         next();
     });
     // Body parsing middleware - must be careful with multipart/form-data
@@ -70,10 +72,12 @@ export function buildApp() {
         express.json({ limit: "2mb" })(req, res, next);
     });
     // Helmet with relaxed CSP for development - AFTER CORS
+    // Completely disable referrerPolicy in Helmet
     app.use(helmet({
         crossOriginResourcePolicy: { policy: "cross-origin" },
         crossOriginEmbedderPolicy: false,
         contentSecurityPolicy: false, // Disable CSP to avoid CORS-like restrictions
+        referrerPolicy: false, // Completely disable referrer policy
     }));
     app.use(requestId());
     // Only log availability routes to reduce noise
@@ -151,6 +155,12 @@ export function buildApp() {
         res.status(204).end();
     });
     mountSwagger(app);
+    // Set Referrer-Policy to most permissive AFTER all routes (runs on every response)
+    app.use((req, res, next) => {
+        // Override any Referrer-Policy with the most permissive option
+        res.setHeader('Referrer-Policy', 'unsafe-url');
+        next();
+    });
     app.use(errorHandler);
     return app;
 }
