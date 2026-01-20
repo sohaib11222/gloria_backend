@@ -349,14 +349,8 @@ const loginSchema = z.object({
  *       Response includes access/refresh tokens and full user information including company details.
  */
 authRouter.post("/auth/login", async (req, res, next) => {
-    // Explicitly set CORS headers for login route
-    const origin = req.headers.origin || '*';
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-    res.setHeader('Access-Control-Allow-Credentials', 'false');
-    res.setHeader('Access-Control-Expose-Headers', '*');
-    res.setHeader('Referrer-Policy', 'unsafe-url');
+    // CORS headers are handled by nginx and global middleware
+    // No need to set them here to avoid conflicts
     try {
         const body = loginSchema.parse(req.body);
         try {
@@ -433,7 +427,9 @@ authRouter.post("/auth/login", async (req, res, next) => {
                 createdAt: user.createdAt,
                 updatedAt: user.updatedAt,
             };
-            return res.json({
+            // Ensure Content-Type is set explicitly
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            return res.status(200).json({
                 token: access,
                 access,
                 refresh,
