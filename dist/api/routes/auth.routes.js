@@ -429,13 +429,21 @@ authRouter.post("/auth/login", async (req, res, next) => {
             };
             // Ensure Content-Type is set explicitly
             res.setHeader('Content-Type', 'application/json; charset=utf-8');
-            return res.status(200).json({
+            const responseData = {
                 token: access,
                 access,
                 refresh,
                 user: userData,
                 companyId: user.companyId
+            };
+            // Log the response for debugging
+            console.log('Login response data:', {
+                hasAccess: !!responseData.access,
+                hasRefresh: !!responseData.refresh,
+                hasUser: !!responseData.user,
+                userKeys: responseData.user ? Object.keys(responseData.user) : []
             });
+            return res.status(200).json(responseData);
         }
         catch (dbError) {
             console.error("Database error in login:", dbError);
