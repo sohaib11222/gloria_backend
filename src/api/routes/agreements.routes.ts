@@ -785,13 +785,29 @@ agreementsRouter.get(
       const client = agreementClient();
       
       if (defaultScope === "source") {
-        client.ListBySource(
+        // Set timeout for gRPC call (10 seconds)
+        const deadline = new Date();
+        deadline.setSeconds(deadline.getSeconds() + 10);
+        
+        const call = client.ListBySource(
           { source_id: req.user.companyId, status },
           metaFromReq(req),
+          { deadline: deadline.getTime() },
           (err: any, resp: any) => {
             if (err) {
               // Handle gRPC errors
               const errorMessage = err.message || String(err);
+              
+              // Check for timeout errors
+              if (err.code === 4 || errorMessage.includes('DEADLINE_EXCEEDED') || errorMessage.includes('timeout')) {
+                return res.status(504).json({
+                  error: "GATEWAY_TIMEOUT",
+                  message: "Request timed out. The gRPC service did not respond in time.",
+                  code: err.code || 4,
+                  requestId: (req as any).requestId,
+                  hint: "The backend service may be overloaded or the gRPC server is not responding."
+                });
+              }
               
               // Check for database configuration errors
               if (errorMessage.includes('DATABASE_URL') || errorMessage.includes('Environment variable not found')) {
@@ -824,16 +840,49 @@ agreementsRouter.get(
             res.json({ items: resp.items.map(toAgreementCamelCase), total: resp.items.length });
           }
         );
+        
+        // Handle call cancellation on timeout (if call supports it)
+        const timeoutId1 = setTimeout(() => {
+          try {
+            if (call && typeof call.cancel === 'function') {
+              call.cancel();
+            }
+          } catch (e) {
+            // Ignore cancellation errors
+          }
+        }, 10000);
+        
+        // Clear timeout if response comes back
+        if (call && typeof call.on === 'function') {
+          call.on('status', () => {
+            clearTimeout(timeoutId1);
+          });
+        }
       } else {
         // Debug logging for agent agreements
-      
-        client.ListByAgent(
+        // Set timeout for gRPC call (10 seconds)
+        const deadline = new Date();
+        deadline.setSeconds(deadline.getSeconds() + 10);
+        
+        const call = client.ListByAgent(
           { agent_id: req.user.companyId, status },
           metaFromReq(req),
+          { deadline: deadline.getTime() },
           (err: any, resp: any) => {
             if (err) {
               // Handle gRPC errors
               const errorMessage = err.message || String(err);
+              
+              // Check for timeout errors
+              if (err.code === 4 || errorMessage.includes('DEADLINE_EXCEEDED') || errorMessage.includes('timeout')) {
+                return res.status(504).json({
+                  error: "GATEWAY_TIMEOUT",
+                  message: "Request timed out. The gRPC service did not respond in time.",
+                  code: err.code || 4,
+                  requestId: (req as any).requestId,
+                  hint: "The backend service may be overloaded or the gRPC server is not responding."
+                });
+              }
               
               // Check for database configuration errors
               if (errorMessage.includes('DATABASE_URL') || errorMessage.includes('Environment variable not found')) {
@@ -867,6 +916,24 @@ agreementsRouter.get(
             res.json({ items: resp.items.map(toAgreementCamelCase), total: resp.items.length });
           }
         );
+        
+        // Handle call cancellation on timeout (if call supports it)
+        const timeoutId2 = setTimeout(() => {
+          try {
+            if (call && typeof call.cancel === 'function') {
+              call.cancel();
+            }
+          } catch (e) {
+            // Ignore cancellation errors
+          }
+        }, 10000);
+        
+        // Clear timeout if response comes back
+        if (call && typeof call.on === 'function') {
+          call.on('status', () => {
+            clearTimeout(timeoutId2);
+          });
+        }
       }
     } catch (e) {
       next(e);

@@ -123,7 +123,9 @@ export function buildApp() {
     // [AUTO-AUDIT] Enforce IP whitelist globally (can be disabled via env)
     // app.use(ipWhitelist());
     app.use(defaultLimiter);
+    // Health routes
     app.use(healthRouter);
+    app.use("/api", healthRouter); // Also mount at /api for frontend
     // Mount auth router with /api prefix to match frontend expectations
     app.use("/api", authRouter);
     app.use(authRouter); // Also mount without prefix for backward compatibility
@@ -135,14 +137,23 @@ export function buildApp() {
     // Mount agreements router with /api prefix to match frontend expectations
     app.use("/api", agreementsRouter);
     app.use(agreementsRouter); // Also mount without prefix for backward compatibility
+    // Locations routes
     app.use(locationsRouter);
+    app.use("/api", locationsRouter); // Also mount at /api for frontend
+    // Verification routes
     app.use(verificationRouter);
+    app.use("/api", verificationRouter); // Also mount at /api for frontend
+    // Endpoints routes
     app.use(endpointsRouter);
+    app.use("/api", endpointsRouter); // Also mount at /api for frontend
     app.use(locationValidationRouter);
+    // Sources routes
     app.use(sourcesRouter);
+    app.use("/api", sourcesRouter); // Also mount at /api for frontend
+    // Support routes
     app.use(supportRouter);
-    // Mount support router with /api prefix to match frontend expectations
-    app.use("/api", supportRouter);
+    app.use("/api", supportRouter); // Also mount at /api for frontend
+    app.use("/api/api", supportRouter); // Handle double /api prefix from frontend
     app.use(logsRouter);
     // Mount admin routes with /api prefix to match frontend expectations
     app.use("/api", adminRouter);
