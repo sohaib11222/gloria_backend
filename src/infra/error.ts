@@ -14,6 +14,7 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
   res.setHeader('Access-Control-Allow-Credentials', 'false');
   res.setHeader('Access-Control-Expose-Headers', '*');
   res.setHeader('Access-Control-Max-Age', '86400');
+  res.setHeader('Referrer-Policy', 'unsafe-url');
   
   // Log the error for debugging
   logger.error({ 

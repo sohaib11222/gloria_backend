@@ -61,6 +61,7 @@ export function buildApp() {
     }));
     // Handle OPTIONS preflight for all routes - MUST be before other routes
     app.options('*', (req, res) => {
+        // Use request origin if present, otherwise allow all origins
         const origin = req.headers.origin || '*';
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
@@ -68,11 +69,14 @@ export function buildApp() {
         res.setHeader('Access-Control-Allow-Credentials', 'false');
         res.setHeader('Access-Control-Expose-Headers', '*');
         res.setHeader('Access-Control-Max-Age', '86400');
+        res.setHeader('Referrer-Policy', 'unsafe-url');
         res.status(204).end();
     });
     // Global CORS headers middleware - applied to all requests
     // This ensures CORS headers are set even if cors middleware doesn't catch it
     app.use((req, res, next) => {
+        // Use request origin if present, otherwise allow all origins
+        // For same-origin requests (no origin header), use '*' to allow
         const origin = req.headers.origin || '*';
         // Set CORS headers for all responses
         res.setHeader('Access-Control-Allow-Origin', origin);
@@ -81,7 +85,7 @@ export function buildApp() {
         res.setHeader('Access-Control-Allow-Credentials', 'false');
         res.setHeader('Access-Control-Expose-Headers', '*');
         res.setHeader('Access-Control-Max-Age', '86400');
-        // Set permissive Referrer-Policy to override browser default
+        // Set permissive Referrer-Policy to override browser default strict-origin-when-cross-origin
         res.setHeader('Referrer-Policy', 'unsafe-url');
         // Handle preflight requests immediately
         if (req.method === 'OPTIONS') {
