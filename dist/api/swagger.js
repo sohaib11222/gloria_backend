@@ -58,4 +58,5 @@ export function mountSwagger(app) {
         apis: ["./src/api/routes/*.ts"]
     });
     app.use("/docs", swaggerUi.serve, swaggerUi.setup(spec));
+    app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(spec)); // Also mount at /api/docs for frontend
 }

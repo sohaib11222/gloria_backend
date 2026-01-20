@@ -36,33 +36,66 @@ export function buildApp() {
   const app = express();
   
   // CORS - MUST BE FIRST to allow all origins and methods
+  // Enhanced CORS configuration for better compatibility
   app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Idempotency-Key', 'X-Agent-Email', 'X-Api-Key'],
+    origin: function (origin, callback) {
+      // Allow all origins (including null for same-origin requests)
+      callback(null, true);
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
+    allowedHeaders: [
+      'Content-Type', 
+      'Authorization', 
+      'X-Requested-With', 
+      'Accept', 
+      'Origin', 
+      'Idempotency-Key', 
+      'X-Agent-Email', 
+      'X-Api-Key',
+      'X-Request-ID',
+      'Access-Control-Request-Method',
+      'Access-Control-Request-Headers'
+    ],
+    exposedHeaders: ['*'],
     credentials: false,
     preflightContinue: false,
-    optionsSuccessStatus: 204
+    optionsSuccessStatus: 204,
+    maxAge: 86400 // 24 hours
   }));
   
-  // Handle OPTIONS preflight for all routes
+  // Handle OPTIONS preflight for all routes - MUST be before other routes
   app.options('*', (req: any, res: any) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
+    const origin = req.headers.origin || '*';
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key, X-Request-ID, Access-Control-Request-Method, Access-Control-Request-Headers');
     res.setHeader('Access-Control-Allow-Credentials', 'false');
-    res.sendStatus(204);
+    res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    res.status(204).end();
   });
 
   // Global CORS headers middleware - applied to all requests
+  // This ensures CORS headers are set even if cors middleware doesn't catch it
   app.use((req: any, res: any, next: any) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
+    const origin = req.headers.origin || '*';
+    
+    // Set CORS headers for all responses
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key, X-Request-ID, Access-Control-Request-Method, Access-Control-Request-Headers');
     res.setHeader('Access-Control-Allow-Credentials', 'false');
     res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    
     // Set permissive Referrer-Policy to override browser default
     res.setHeader('Referrer-Policy', 'unsafe-url');
+    
+    // Handle preflight requests immediately
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+    
     next();
   });
 
@@ -145,7 +178,9 @@ export function buildApp() {
   app.use("/api/admin/test", adminTestRoutes);
   app.use("/ui", uiRoutes);
   app.use("/docs", docsRouter);
+  app.use("/api/docs", docsRouter); // Also mount at /api/docs for frontend
   app.use("/docs", sdkRouter);
+  app.use("/api/docs", sdkRouter); // Also mount SDK router at /api/docs
 
   // Prometheus metrics endpoint
   app.get('/metrics', async (req: any, res: any) => {

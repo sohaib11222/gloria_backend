@@ -118,7 +118,26 @@ const verifyEmailSchema = z.object({
  *       Verify email address using the OTP code sent during registration.
  *       Returns JWT tokens upon successful verification.
  */
+// Handle OPTIONS preflight for verify-email route
+authRouter.options("/auth/verify-email", (req, res) => {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.setHeader('Access-Control-Allow-Credentials', 'false');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(204).end();
+});
+
 authRouter.post("/auth/verify-email", async (req, res, next) => {
+  // Explicitly set CORS headers for this route
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.setHeader('Access-Control-Allow-Credentials', 'false');
+  res.setHeader('Access-Control-Expose-Headers', '*');
+  
   try {
     const body = verifyEmailSchema.parse(req.body);
     

@@ -5,13 +5,15 @@ import { logger } from "./logger.js";
 export function errorHandler(err: any, req: Request, res: Response, _next: NextFunction) {
   const code = err?.status || 500;
   const requestId = (req as any).requestId;
+  const origin = (req.headers.origin as string) || '*';
   
-  // Set CORS headers for all error responses
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key');
+  // Set CORS headers for all error responses - use request origin
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key, X-Request-ID');
   res.setHeader('Access-Control-Allow-Credentials', 'false');
   res.setHeader('Access-Control-Expose-Headers', '*');
+  res.setHeader('Access-Control-Max-Age', '86400');
   
   // Log the error for debugging
   logger.error({ 
