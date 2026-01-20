@@ -64,36 +64,35 @@ export function buildApp() {
   }));
   
   // Handle OPTIONS preflight for all routes - MUST be before other routes
+  // COMPLETELY OPEN - Allow all origins and all headers
   app.options('*', (req: any, res: any) => {
-    // Use request origin if present, otherwise allow all origins
-    const origin = req.headers.origin || '*';
-    res.setHeader('Access-Control-Allow-Origin', origin);
+    // Always allow all origins - no restrictions
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key, X-Request-ID, Access-Control-Request-Method, Access-Control-Request-Headers');
+    res.setHeader('Access-Control-Allow-Headers', '*'); // Allow all headers
     res.setHeader('Access-Control-Allow-Credentials', 'false');
     res.setHeader('Access-Control-Expose-Headers', '*');
     res.setHeader('Access-Control-Max-Age', '86400');
-    res.setHeader('Referrer-Policy', 'unsafe-url');
+    // Referrer-Policy is set by nginx to avoid duplication
     res.status(204).end();
   });
 
   // Global CORS headers middleware - applied to all requests
   // This ensures CORS headers are set even if cors middleware doesn't catch it
+  // COMPLETELY OPEN - Allow requests from ANY origin with ANY headers
   app.use((req: any, res: any, next: any) => {
-    // Use request origin if present, otherwise allow all origins
-    // For same-origin requests (no origin header), use '*' to allow
+    // Allow all origins - no restrictions
     const origin = req.headers.origin || '*';
     
-    // Set CORS headers for all responses
-    res.setHeader('Access-Control-Allow-Origin', origin);
+    // Set CORS headers for all responses - completely open
+    res.setHeader('Access-Control-Allow-Origin', '*'); // Always allow all origins
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key, X-Request-ID, Access-Control-Request-Method, Access-Control-Request-Headers');
+    res.setHeader('Access-Control-Allow-Headers', '*'); // Allow all headers
     res.setHeader('Access-Control-Allow-Credentials', 'false');
     res.setHeader('Access-Control-Expose-Headers', '*');
     res.setHeader('Access-Control-Max-Age', '86400');
     
-    // Set permissive Referrer-Policy to override browser default strict-origin-when-cross-origin
-    res.setHeader('Referrer-Policy', 'unsafe-url');
+    // Referrer-Policy is set by nginx to avoid duplication
     
     // Handle preflight requests immediately
     if (req.method === 'OPTIONS') {
@@ -231,12 +230,8 @@ export function buildApp() {
 
   mountSwagger(app);
   
-  // Set Referrer-Policy to most permissive AFTER all routes (runs on every response)
-  app.use((req: any, res: any, next: any) => {
-    // Override any Referrer-Policy with the most permissive option
-    res.setHeader('Referrer-Policy', 'unsafe-url');
-    next();
-  });
+  // Note: Referrer-Policy is now set by nginx to avoid duplication
+  // The backend no longer sets it to prevent header conflicts
   
   app.use(errorHandler);
   return app;
