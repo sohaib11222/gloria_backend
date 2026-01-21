@@ -32,8 +32,8 @@ import { register } from "../services/metrics.js";
 import { otaMapper } from "./middleware/otaMapper.js";
 export function buildApp() {
     const app = express();
-    // CORS - COMPLETELY OPEN - NO RESTRICTIONS AT ALL
-    // Simplified single middleware to avoid conflicts
+    // CRITICAL: CORS MUST BE THE VERY FIRST MIDDLEWARE - BEFORE EVERYTHING
+    // This handles OPTIONS preflight requests IMMEDIATELY before any other processing
     app.use((req, res, next) => {
         // Set CORS headers for ALL requests (including OPTIONS preflight)
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -42,9 +42,10 @@ export function buildApp() {
         res.setHeader('Access-Control-Allow-Credentials', 'false');
         res.setHeader('Access-Control-Expose-Headers', '*');
         res.setHeader('Access-Control-Max-Age', '86400');
-        // Remove Vary header that can cause CORS issues
+        // CRITICAL: Remove Vary header that causes CORS issues
         res.removeHeader('Vary');
-        // Handle OPTIONS preflight requests immediately
+        // CRITICAL: Handle OPTIONS preflight requests IMMEDIATELY
+        // This must happen BEFORE rate limiting, body parsing, or any other middleware
         if (req.method === 'OPTIONS') {
             return res.status(204).end();
         }
