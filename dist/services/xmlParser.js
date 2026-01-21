@@ -80,6 +80,12 @@ export function parseXMLToGloria(xmlString) {
                         locationDetail.Longitude ||
                         '0');
                     // Convert to branch format
+                    // AtAirport is stored as string ("true"/"false") to match validation expectations
+                    const atAirportValue = attrs.AtAirport || locationDetail['@_AtAirport'] || locationDetail.AtAirport;
+                    // Convert boolean to string if needed, otherwise keep as string
+                    const atAirport = typeof atAirportValue === 'boolean'
+                        ? (atAirportValue ? 'true' : 'false')
+                        : (atAirportValue || 'false');
                     const branch = {
                         Branchcode: code,
                         Name: name,
@@ -94,7 +100,7 @@ export function parseXMLToGloria(xmlString) {
                         } : undefined,
                         Latitude: isNaN(latitude) ? undefined : latitude,
                         Longitude: isNaN(longitude) ? undefined : longitude,
-                        AtAirport: attrs.AtAirport || locationDetail['@_AtAirport'] || locationDetail.AtAirport,
+                        AtAirport: atAirport,
                         Address: {
                             AddressLine: {
                                 value: addressLine.value || addressLine,

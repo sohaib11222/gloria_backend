@@ -5,6 +5,279 @@ import { requireAuth } from "../../infra/auth.js";
 import { requireCompanyType } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
 import { parseXMLToGloria, extractBranchesFromGloria, validateXMLStructure } from "../../services/xmlParser.js";
+/**
+ * Convert PHP var_dump output to OTA/Gloria structure
+ * This handles the case where PHP endpoints return var_dump() output instead of JSON/XML
+ * The PHP var_dump shows an OTA_VehLocSearchRS structure that we need to convert
+ * Client requested to use "gloria" format name, but we support both for compatibility
+ */
+function convertPhpVarDumpToOta(phpText) {
+    try {
+        const result = {
+            OTA_VehLocSearchRS: {
+                VehMatchedLocs: []
+            },
+            // Also support "gloria" format name as client requested
+            gloria: {
+                VehMatchedLocs: []
+            }
+        };
+        // The structure is: ["VehMatchedLocs"]=> array(2) { [0]=> array(1) { ["VehMatchedLoc"]=> array(1) { ["LocationDetail"]=> ...
+        // We need to extract each VehMatchedLoc block
+        // Find the VehMatchedLocs array - match the opening and find the content
+        // Pattern: ["VehMatchedLocs"]=> array(2) { ...content... }
+        const vehMatchedLocsStart = phpText.indexOf('["VehMatchedLocs"]');
+        if (vehMatchedLocsStart === -1) {
+            throw new Error("Could not find VehMatchedLocs in PHP var_dump");
+        }
+        // Find the opening brace after array(count)
+        let bracePos = phpText.indexOf('{', vehMatchedLocsStart);
+        if (bracePos === -1) {
+            throw new Error("Could not find opening brace for VehMatchedLocs");
+        }
+        // Find matching closing brace - count braces to find the end
+        let braceCount = 1;
+        let pos = bracePos + 1;
+        let vehMatchedLocsEnd = -1;
+        while (pos < phpText.length && braceCount > 0) {
+            if (phpText[pos] === '{')
+                braceCount++;
+            if (phpText[pos] === '}')
+                braceCount--;
+            if (braceCount === 0) {
+                vehMatchedLocsEnd = pos;
+                break;
+            }
+            pos++;
+        }
+        if (vehMatchedLocsEnd === -1) {
+            throw new Error("Could not find closing brace for VehMatchedLocs");
+        }
+        const vehMatchedLocsText = phpText.substring(bracePos + 1, vehMatchedLocsEnd);
+        // Extract each indexed entry: [0]=> array(1) { ["VehMatchedLoc"]=> array(1) { ["LocationDetail"]=> ...
+        // Use a pattern that finds [index]=> array(1) { ["VehMatchedLoc"]=> array(1) { ["LocationDetail"]=> array(count) { ...content... } } }
+        const locations = [];
+        // Find all LocationDetail blocks by looking for the pattern
+        // [index]=> array(1) { ["VehMatchedLoc"]=> array(1) { ["LocationDetail"]=> array(count) { ...content... } } }
+        let searchPos = 0;
+        while (true) {
+            // Find next LocationDetail
+            const locationDetailStart = vehMatchedLocsText.indexOf('["LocationDetail"]', searchPos);
+            if (locationDetailStart === -1)
+                break;
+            // Find the array(count) after LocationDetail
+            const arrayStart = vehMatchedLocsText.indexOf('array(', locationDetailStart);
+            if (arrayStart === -1)
+                break;
+            // Find the opening brace
+            const contentStart = vehMatchedLocsText.indexOf('{', arrayStart);
+            if (contentStart === -1)
+                break;
+            // Find matching closing brace for this LocationDetail
+            let detailBraceCount = 1;
+            let detailPos = contentStart + 1;
+            let detailEnd = -1;
+            while (detailPos < vehMatchedLocsText.length && detailBraceCount > 0) {
+                if (vehMatchedLocsText[detailPos] === '{')
+                    detailBraceCount++;
+                if (vehMatchedLocsText[detailPos] === '}')
+                    detailBraceCount--;
+                if (detailBraceCount === 0) {
+                    detailEnd = detailPos;
+                    break;
+                }
+                detailPos++;
+            }
+            if (detailEnd === -1)
+                break;
+            const locationText = vehMatchedLocsText.substring(contentStart + 1, detailEnd);
+            const locationDetail = parsePhpLocationDetail(locationText);
+            if (locationDetail) {
+                locations.push({
+                    VehMatchedLoc: {
+                        LocationDetail: locationDetail
+                    }
+                });
+            }
+            searchPos = detailEnd + 1;
+        }
+        console.log(`[PHP Parser] Extracted ${locations.length} locations from PHP var_dump`);
+        if (locations.length === 0) {
+            console.warn("[PHP Parser] No locations extracted from PHP var_dump");
+            console.warn("[PHP Parser] VehMatchedLocs text length:", vehMatchedLocsText.length);
+            console.warn("[PHP Parser] First 500 chars:", vehMatchedLocsText.substring(0, 500));
+            console.warn("[PHP Parser] Contains LocationDetail:", vehMatchedLocsText.includes('["LocationDetail"]'));
+        }
+        else {
+            // Log first location details for verification
+            if (locations[0]?.VehMatchedLoc?.LocationDetail) {
+                const firstLoc = locations[0].VehMatchedLoc.LocationDetail;
+                console.log(`[PHP Parser] First location extracted:`, {
+                    code: firstLoc.attr?.Code || firstLoc.attr?.BranchType,
+                    name: firstLoc.attr?.Name,
+                    hasAddress: !!firstLoc.Address,
+                    hasCars: !!firstLoc.Cars
+                });
+            }
+        }
+        result.OTA_VehLocSearchRS.VehMatchedLocs = locations;
+        result.gloria.VehMatchedLocs = locations; // Support "gloria" format name
+        return result;
+    }
+    catch (error) {
+        throw new Error(`Failed to parse PHP var_dump: ${error.message || String(error)}`);
+    }
+}
+/**
+ * Parse PHP LocationDetail structure from var_dump
+ * Extracts key fields needed for branch import
+ * Handles nested PHP array structures and converts to expected format
+ */
+function parsePhpLocationDetail(locationText) {
+    const location = {
+        attr: {}
+    };
+    // Extract attributes from ["attr"]=> array(8) { ... }
+    const attrSectionMatch = locationText.match(/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+    if (attrSectionMatch) {
+        const attrSection = attrSectionMatch[1];
+        // Match: ["Key"]=> string(length) "value"
+        const attrRegex = /\["([^"]+)"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/g;
+        let attrMatch;
+        while ((attrMatch = attrRegex.exec(attrSection)) !== null) {
+            location.attr[attrMatch[1]] = attrMatch[3];
+        }
+    }
+    // Extract Address components - handle nested structure
+    location.Address = {};
+    // AddressLine: ["AddressLine"]=> array(1) { ["value"]=> string(69) "..." }
+    const addressLineMatch = locationText.match(/\["AddressLine"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+    if (addressLineMatch) {
+        const valueMatch = addressLineMatch[1].match(/\["value"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
+        if (valueMatch) {
+            location.Address.AddressLine = { value: valueMatch[2] };
+        }
+    }
+    // CityName
+    const cityMatch = locationText.match(/\["CityName"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+    if (cityMatch) {
+        const valueMatch = cityMatch[1].match(/\["value"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
+        if (valueMatch) {
+            location.Address.CityName = { value: valueMatch[2] };
+        }
+    }
+    // PostalCode
+    const postalMatch = locationText.match(/\["PostalCode"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+    if (postalMatch) {
+        const valueMatch = postalMatch[1].match(/\["value"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
+        if (valueMatch) {
+            location.Address.PostalCode = { value: valueMatch[2] };
+        }
+    }
+    // CountryName: ["CountryName"]=> array(2) { ["value"]=> ..., ["attr"]=> ... }
+    const countryMatch = locationText.match(/\["CountryName"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+    if (countryMatch) {
+        location.Address.CountryName = {};
+        const countryText = countryMatch[1];
+        const valueMatch = countryText.match(/\["value"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
+        if (valueMatch) {
+            location.Address.CountryName.value = valueMatch[2];
+        }
+        // Extract Code from attr
+        const codeAttrMatch = countryText.match(/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+        if (codeAttrMatch) {
+            const codeMatch = codeAttrMatch[1].match(/\["Code"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
+            if (codeMatch) {
+                location.Address.CountryName.attr = { Code: codeMatch[2] };
+            }
+        }
+    }
+    // Extract Telephone: ["Telephone"]=> array(1) { ["attr"]=> array(1) { ["PhoneNumber"]=> ... } }
+    const telephoneMatch = locationText.match(/\["Telephone"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+    if (telephoneMatch) {
+        const phoneAttrMatch = telephoneMatch[1].match(/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+        if (phoneAttrMatch) {
+            const phoneMatch = phoneAttrMatch[1].match(/\["PhoneNumber"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
+            if (phoneMatch) {
+                location.Telephone = {
+                    attr: {
+                        PhoneNumber: phoneMatch[2]
+                    }
+                };
+            }
+        }
+    }
+    // Extract Opening hours - handle multiple times per day
+    const openingMatch = locationText.match(/\["Opening"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+    if (openingMatch) {
+        location.Opening = {};
+        const openingText = openingMatch[1];
+        // Extract each day: ["monday"]=> array(1) { ["attr"]=> array(1) { ["Open"]=> ... } }
+        const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+        for (const day of days) {
+            const dayMatch = openingText.match(new RegExp(`\\["${day}"\\]\\s*=>\\s*array\\(\\d+\\)\\s*\\{([\\s\\S]*?)\\}\\s*\\}`));
+            if (dayMatch) {
+                const dayAttrMatch = dayMatch[1].match(/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+                if (dayAttrMatch) {
+                    const openMatch = dayAttrMatch[1].match(/\["Open"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
+                    if (openMatch) {
+                        location.Opening[day] = {
+                            attr: {
+                                Open: openMatch[2]
+                            }
+                        };
+                    }
+                }
+            }
+        }
+    }
+    // Extract PickupInstructions
+    const pickupMatch = locationText.match(/\["PickupInstructions"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+    if (pickupMatch) {
+        const pickupAttrMatch = pickupMatch[1].match(/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+        if (pickupAttrMatch) {
+            const pickupValueMatch = pickupAttrMatch[1].match(/\["Pickup"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
+            if (pickupValueMatch) {
+                location.PickupInstructions = {
+                    attr: {
+                        Pickup: pickupValueMatch[2]
+                    }
+                };
+            }
+        }
+    }
+    // Extract Cars - ACRISS codes for vehicles
+    const carsMatch = locationText.match(/\["Cars"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+    if (carsMatch) {
+        location.Cars = {};
+        const carsText = carsMatch[1];
+        // Extract Code array: ["Code"]=> array(6) { [0]=> array(1) { ["attr"]=> ... } }
+        const codeArrayMatch = carsText.match(/\["Code"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
+        if (codeArrayMatch) {
+            const codeArrayText = codeArrayMatch[1];
+            location.Cars.Code = [];
+            // Extract each car code: [0]=> array(1) { ["attr"]=> array(7) { ["Acrisscode"]=> ... } }
+            const carCodePattern = /\[(\d+)\]\s*=>\s*array\(\d+\)\s*\{\s*\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}\s*\}/g;
+            let carMatch;
+            while ((carMatch = carCodePattern.exec(codeArrayText)) !== null) {
+                const carAttrText = carMatch[2];
+                const carAttrs = {};
+                // Extract all attributes from car attr section
+                const carAttrRegex = /\["([^"]+)"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/g;
+                let carAttrMatch;
+                while ((carAttrMatch = carAttrRegex.exec(carAttrText)) !== null) {
+                    carAttrs[carAttrMatch[1]] = carAttrMatch[3];
+                }
+                if (Object.keys(carAttrs).length > 0) {
+                    location.Cars.Code.push({
+                        attr: carAttrs
+                    });
+                }
+            }
+        }
+    }
+    return location;
+}
 export const sourcesRouter = Router();
 /**
  * @openapi
@@ -498,7 +771,7 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
             finalEndpointUrl = `http://${finalEndpointUrl}`;
         }
         try {
-            const response = await fetch(finalEndpointUrl, {
+            const fetchResponse = await fetch(finalEndpointUrl, {
                 method: "GET",
                 headers: {
                     "Request-Type": "LocationRq",
@@ -508,19 +781,72 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
                 timeout: 30000,
             });
             clearTimeout(timeoutId);
-            if (!response.ok) {
-                return res.status(response.status).json({
+            if (!fetchResponse.ok) {
+                return res.status(fetchResponse.status).json({
                     error: "SUPPLIER_ERROR",
-                    message: `Supplier endpoint returned ${response.status}`,
+                    message: `Supplier endpoint returned ${fetchResponse.status}`,
                 });
             }
+            // Get response as text first to detect format
+            const responseText = await fetchResponse.text();
             // Detect content type
-            const contentType = response.headers.get('content-type') || '';
+            const contentType = fetchResponse.headers.get('content-type') || '';
             let data;
             let branches = [];
-            if (contentType.includes('xml') || contentType.includes('text/xml')) {
+            // Check if response is PHP var_dump format
+            if (responseText.trim().startsWith('array(') || responseText.includes('["OTA_VehLocSearchRS"]')) {
+                // Parse PHP var_dump output - convert to OTA structure
+                try {
+                    // The PHP var_dump shows OTA_VehLocSearchRS structure
+                    // We need to convert it to the expected format
+                    const phpArrayMatch = responseText.match(/\["OTA_VehLocSearchRS"\]\s*=>\s*array\(([\s\S]*)\)/);
+                    if (phpArrayMatch) {
+                        // Convert PHP array structure to JSON-like structure
+                        // The structure is: OTA_VehLocSearchRS -> VehMatchedLocs -> VehMatchedLoc -> LocationDetail
+                        const otaStructure = convertPhpVarDumpToOta(responseText);
+                        if (otaStructure && (otaStructure.OTA_VehLocSearchRS || otaStructure.gloria)) {
+                            // Use the existing XML parser logic by converting to the expected format
+                            // Support both OTA_VehLocSearchRS and "gloria" format names (client requested "gloria")
+                            const gloriaResponse = {
+                                OTA_VehLocSearchRS: otaStructure.OTA_VehLocSearchRS || otaStructure.gloria,
+                                gloria: otaStructure.gloria || otaStructure.OTA_VehLocSearchRS
+                            };
+                            branches = extractBranchesFromGloria(gloriaResponse);
+                            console.log(`[Branch Import] Parsed ${branches.length} branches from PHP var_dump format`);
+                            if (branches.length === 0) {
+                                console.warn(`[Branch Import] No branches extracted. OTA structure:`, {
+                                    hasOta: !!otaStructure.OTA_VehLocSearchRS,
+                                    hasGloria: !!otaStructure.gloria,
+                                    otaLocs: otaStructure.OTA_VehLocSearchRS?.VehMatchedLocs?.length || 0,
+                                    gloriaLocs: otaStructure.gloria?.VehMatchedLocs?.length || 0
+                                });
+                            }
+                        }
+                        else {
+                            return res.status(422).json({
+                                error: "INVALID_PHP_FORMAT",
+                                message: "Could not parse PHP var_dump format. Expected OTA_VehLocSearchRS structure.",
+                            });
+                        }
+                    }
+                    else {
+                        return res.status(422).json({
+                            error: "INVALID_PHP_FORMAT",
+                            message: "PHP var_dump format detected but could not extract OTA_VehLocSearchRS structure.",
+                        });
+                    }
+                }
+                catch (parseError) {
+                    return res.status(422).json({
+                        error: "PARSE_ERROR",
+                        message: "Failed to parse PHP var_dump format",
+                        details: parseError.message || String(parseError),
+                    });
+                }
+            }
+            else if (contentType.includes('xml') || contentType.includes('text/xml') || responseText.trim().startsWith('<?xml') || responseText.trim().startsWith('<')) {
                 // Parse XML response
-                const xmlText = await response.text();
+                const xmlText = responseText;
                 // Validate XML structure
                 const validation = validateXMLStructure(xmlText);
                 if (!validation.valid) {
@@ -535,10 +861,19 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
             }
             else {
                 // Parse JSON response
-                data = await response.json();
-                // Extract branches (assume data.Branches or data is array)
-                const dataTyped = data;
-                branches = Array.isArray(dataTyped.Branches) ? dataTyped.Branches : (Array.isArray(data) ? data : []);
+                try {
+                    data = JSON.parse(responseText);
+                    // Extract branches (assume data.Branches or data is array)
+                    const dataTyped = data;
+                    branches = Array.isArray(dataTyped.Branches) ? dataTyped.Branches : (Array.isArray(data) ? data : []);
+                }
+                catch (jsonError) {
+                    return res.status(422).json({
+                        error: "INVALID_JSON",
+                        message: "Response is not valid JSON, XML, or PHP var_dump format",
+                        details: jsonError.message || String(jsonError),
+                    });
+                }
             }
             // Validate CompanyCode (only for JSON responses)
             if (data && typeof data === 'object' && !Array.isArray(data)) {
@@ -556,29 +891,107 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
                     message: "No branches found in supplier response",
                 });
             }
-            // Validate all branches
+            // Add CompanyCode to branches if missing (for PHP/XML formats that don't include it)
+            // This is needed for validation but not stored in the database
+            const branchesWithCompanyCode = branches.map((branch) => ({
+                ...branch,
+                CompanyCode: branch.CompanyCode || source.companyCode
+            }));
+            // Validate all branches - but don't fail completely, just track errors
             const { validateLocationArray } = await import("../../services/locationValidation.js");
-            const validation = validateLocationArray(branches, source.companyCode);
-            if (!validation.valid) {
+            const validation = validateLocationArray(branchesWithCompanyCode, source.companyCode);
+            // Separate valid and invalid branches
+            const validBranches = [];
+            const invalidBranches = [];
+            for (let i = 0; i < branches.length; i++) {
+                const branch = branches[i];
+                const branchWithCode = branchesWithCompanyCode[i];
+                const branchValidation = await import("../../services/locationValidation.js");
+                const result = branchValidation.validateLocationPayload(branchWithCode, source.companyCode);
+                if (result.valid) {
+                    validBranches.push(branch);
+                }
+                else {
+                    invalidBranches.push({
+                        branch: branch,
+                        error: result.error,
+                        index: i
+                    });
+                }
+            }
+            // If no valid branches, return error with details
+            if (validBranches.length === 0) {
                 return res.status(422).json({
                     error: "VALIDATION_FAILED",
-                    message: `${validation.errors.length} branch(es) failed validation`,
+                    message: `All ${branches.length} branch(es) failed validation`,
                     errors: validation.errors,
+                    summary: {
+                        total: branches.length,
+                        valid: 0,
+                        invalid: branches.length,
+                        invalidDetails: invalidBranches.map(ib => ({
+                            index: ib.index,
+                            branchCode: ib.branch.Branchcode || ib.branch.attr?.Code || ib.branch.Code || 'unknown',
+                            branchName: ib.branch.Name || ib.branch.attr?.Name || 'unknown',
+                            error: ib.error
+                        }))
+                    }
                 });
             }
-            // Upsert branches
+            // Upsert only valid branches
             let imported = 0;
             let updated = 0;
-            for (const branch of branches) {
+            const skipped = [];
+            for (const branch of validBranches) {
                 // Handle both JSON and XML formats
-                const branchCode = branch.Branchcode || branch.attr?.Code || branch.Code;
+                // Code can be in attr.Code (from PHP/XML) or Branchcode (from JSON)
+                const branchCode = branch.Branchcode || branch.attr?.Code || branch.Code || branch.attr?.BranchType;
                 const branchName = branch.Name || branch.attr?.Name;
-                const latitude = typeof branch.Latitude === "number"
-                    ? branch.Latitude
-                    : (branch.attr?.Latitude ? parseFloat(branch.attr.Latitude) : null);
-                const longitude = typeof branch.Longitude === "number"
-                    ? branch.Longitude
-                    : (branch.attr?.Longitude ? parseFloat(branch.attr.Longitude) : null);
+                // Convert latitude/longitude from string to number if needed
+                let latitude = null;
+                if (typeof branch.Latitude === "number") {
+                    latitude = branch.Latitude;
+                }
+                else if (branch.attr?.Latitude) {
+                    const lat = parseFloat(branch.attr.Latitude);
+                    latitude = isNaN(lat) ? null : lat;
+                }
+                else if (branch.Latitude) {
+                    const lat = parseFloat(String(branch.Latitude));
+                    latitude = isNaN(lat) ? null : lat;
+                }
+                let longitude = null;
+                if (typeof branch.Longitude === "number") {
+                    longitude = branch.Longitude;
+                }
+                else if (branch.attr?.Longitude) {
+                    const lon = parseFloat(branch.attr.Longitude);
+                    longitude = isNaN(lon) ? null : lon;
+                }
+                else if (branch.Longitude) {
+                    const lon = parseFloat(String(branch.Longitude));
+                    longitude = isNaN(lon) ? null : lon;
+                }
+                // Extract ACRISS codes from Cars array for vehicle filtering
+                const acrissCodes = [];
+                if (branch.Cars?.Code && Array.isArray(branch.Cars.Code)) {
+                    for (const car of branch.Cars.Code) {
+                        if (car.attr?.Acrisscode) {
+                            acrissCodes.push(car.attr.Acrisscode);
+                        }
+                    }
+                }
+                // Store opening times, pickup/dropoff times, and ACRISS codes in rawJson
+                // These will be available for future filtering and comparison
+                const enhancedBranch = {
+                    ...branch,
+                    _extracted: {
+                        acrissCodes: acrissCodes,
+                        openingTimes: branch.Opening || {},
+                        pickupInstructions: branch.PickupInstructions?.attr?.Pickup || null,
+                        // Future: pickupTimes and dropoffTimes will be added when available
+                    }
+                };
                 const branchData = {
                     sourceId: source.id,
                     branchCode: branchCode,
@@ -596,36 +1009,83 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
                     country: branch.Address?.CountryName?.value || branch.Address?.CountryName || null,
                     countryCode: branch.Address?.CountryName?.attr?.Code || null,
                     natoLocode: branch.NatoLocode || null,
-                    rawJson: branch,
+                    // Store full branch data including Cars (ACRISS codes), Opening times, etc.
+                    rawJson: enhancedBranch,
                 };
+                if (!branchCode) {
+                    skipped.push({
+                        branchCode: 'unknown',
+                        branchName: branchName || 'unknown',
+                        reason: 'Missing branch code'
+                    });
+                    console.warn(`[Branch Import] Skipping branch without code:`, {
+                        hasBranchcode: !!branch.Branchcode,
+                        hasAttrCode: !!branch.attr?.Code,
+                        hasCode: !!branch.Code,
+                        hasAttrBranchType: !!branch.attr?.BranchType
+                    });
+                    continue;
+                }
+                // Check if branch already exists - only update if it does, create if it doesn't
                 const existing = await prisma.branch.findUnique({
                     where: {
                         sourceId_branchCode: {
                             sourceId: source.id,
-                            branchCode: branch.Branchcode,
+                            branchCode: branchCode,
                         },
                     },
                 });
                 if (existing) {
+                    // Update existing branch
                     await prisma.branch.update({
                         where: { id: existing.id },
                         data: branchData,
                     });
                     updated++;
+                    console.log(`[Branch Import] Updated existing branch: ${branchCode} (${branchName})`);
                 }
                 else {
+                    // Create new branch
                     await prisma.branch.create({
                         data: branchData,
                     });
                     imported++;
+                    console.log(`[Branch Import] Imported new branch: ${branchCode} (${branchName})`);
                 }
             }
-            res.json({
-                message: "Branches imported successfully",
+            // Prepare response with detailed results
+            const importResponse = {
+                message: "Branch import completed",
+                summary: {
+                    total: branches.length,
+                    valid: validBranches.length,
+                    invalid: invalidBranches.length,
+                    imported,
+                    updated,
+                    skipped: skipped.length
+                },
                 imported,
                 updated,
                 total: branches.length,
-            });
+            };
+            // Include validation errors if any branches were invalid
+            if (invalidBranches.length > 0) {
+                importResponse.validationErrors = invalidBranches.map(ib => ({
+                    index: ib.index,
+                    branchCode: ib.branch.Branchcode || ib.branch.attr?.Code || ib.branch.Code || 'unknown',
+                    branchName: ib.branch.Name || ib.branch.attr?.Name || 'unknown',
+                    error: ib.error
+                }));
+                importResponse.message = `${validBranches.length} branch(es) imported successfully, ${invalidBranches.length} branch(es) skipped due to validation errors`;
+            }
+            else {
+                importResponse.message = "All branches imported successfully";
+            }
+            // Include skipped branches if any
+            if (skipped.length > 0) {
+                importResponse.skipped = skipped;
+            }
+            res.json(importResponse);
         }
         catch (fetchError) {
             clearTimeout(timeoutId);
@@ -907,7 +1367,7 @@ sourcesRouter.get("/sources/branches/poll", requireAuth(), requireCompanyType("S
         const pollInterval = setInterval(async () => {
             try {
                 // Fetch from endpoint
-                const response = await fetch(source.branchEndpointUrl, {
+                const branchFetchResponse = await fetch(source.branchEndpointUrl, {
                     method: "GET",
                     headers: {
                         "Request-Type": "LocationRq",
@@ -915,13 +1375,13 @@ sourcesRouter.get("/sources/branches/poll", requireAuth(), requireCompanyType("S
                     },
                     timeout: 10000,
                 });
-                if (!response.ok) {
+                if (!branchFetchResponse.ok) {
                     return;
                 }
-                const contentType = response.headers.get('content-type') || '';
+                const contentType = branchFetchResponse.headers.get('content-type') || '';
                 let branches = [];
                 if (contentType.includes('xml')) {
-                    const xmlText = await response.text();
+                    const xmlText = await branchFetchResponse.text();
                     const validation = validateXMLStructure(xmlText);
                     if (validation.valid) {
                         const gloriaResponse = parseXMLToGloria(xmlText);
@@ -929,7 +1389,7 @@ sourcesRouter.get("/sources/branches/poll", requireAuth(), requireCompanyType("S
                     }
                 }
                 else {
-                    const data = await response.json();
+                    const data = await branchFetchResponse.json();
                     const dataTyped = data;
                     branches = Array.isArray(dataTyped.Branches) ? dataTyped.Branches : (Array.isArray(data) ? data : []);
                 }
