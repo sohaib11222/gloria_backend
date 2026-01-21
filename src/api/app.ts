@@ -15,12 +15,12 @@ import { locationsRouter } from "./routes/locations.routes.js";
 import { verificationRouter } from "./routes/verification.routes.js";
 import { adminRouter } from "./routes/admin.routes.js";
 import { logsRouter } from "./routes/logs.routes.js";
-import { debugRouter } from "./routes/debug.routes.js";
 import { adminGrpcRouter } from "./routes/adminGrpc.routes.js";
 import { endpointsRouter } from "./routes/endpoints.routes.js";
 import { locationValidationRouter } from "./routes/locationValidation.routes.js";
 import { sourcesRouter } from "./routes/sources.routes.js";
 import { supportRouter } from "./routes/support.routes.js";
+import { coverageRouter } from "./routes/coverage.routes.js";
 import adminTestRoutes from "./routes/adminTest.routes.js";
 import uiRoutes from "./routes/ui.routes.js";
 // import adminGrpcRoutes from "../routes/adminGrpc.js"; // Commented out - file not found
@@ -36,36 +36,74 @@ import { ipWhitelist } from "../infra/ipWhitelist.js"; // [AUTO-AUDIT]
 export function buildApp() {
   const app = express();
   
-  // CRITICAL: CORS MUST BE THE VERY FIRST MIDDLEWARE - BEFORE EVERYTHING
-  // This handles OPTIONS preflight requests IMMEDIATELY before any other processing
-  // IMPORTANT: We use ONLY this custom middleware - do NOT use cors() library to avoid duplicate headers
+  // CORS - MUST BE FIRST to allow all origins and methods
+  // Enhanced CORS configuration for better compatibility
+  app.use(cors({
+    origin: function (origin, callback) {
+      // Allow all origins (including null for same-origin requests)
+      // This allows requests from any domain including source.gloriaconnect.com
+      callback(null, true);
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
+    allowedHeaders: [
+      'Content-Type', 
+      'Authorization', 
+      'X-Requested-With', 
+      'Accept', 
+      'Origin', 
+      'Idempotency-Key', 
+      'X-Agent-Email', 
+      'X-Api-Key',
+      'X-Request-ID',
+      'Access-Control-Request-Method',
+      'Access-Control-Request-Headers'
+    ],
+    exposedHeaders: ['*'],
+    credentials: false,
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
+    maxAge: 86400 // 24 hours
+  }));
+  
+  // Handle OPTIONS preflight for all routes - MUST be before other routes
+  app.options('*', (req: any, res: any) => {
+    // Echo back the origin from the request, or allow all if no origin
+    const origin = req.headers.origin || '*';
+    res.setHeader('Access-Control-Allow-Origin', origin === '*' ? '*' : origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key, X-Request-ID, Access-Control-Request-Method, Access-Control-Request-Headers');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
+    res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    res.status(204).end();
+  });
+
+  // Global CORS headers middleware - applied to all requests
+  // This ensures CORS headers are set even if cors middleware doesn't catch it
   app.use((req: any, res: any, next: any) => {
-    // CRITICAL: Handle OPTIONS preflight requests IMMEDIATELY - before setting any headers
-    // This must happen BEFORE rate limiting, body parsing, or any other middleware
-    if (req.method === 'OPTIONS') {
-      // Set CORS headers for OPTIONS preflight
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', '*');
-      res.setHeader('Access-Control-Allow-Headers', '*');
-      res.setHeader('Access-Control-Allow-Credentials', 'false');
-      res.setHeader('Access-Control-Expose-Headers', '*');
-      res.setHeader('Access-Control-Max-Age', '86400');
-      // CRITICAL: Remove Vary header that causes CORS issues
-      res.removeHeader('Vary');
-      return res.status(204).end();
-    }
+    // Echo back the exact origin from the request header
+    // This is required for CORS to work properly
+    const origin = req.headers.origin;
     
-    // For non-OPTIONS requests, set CORS headers but don't end the response
-    // CRITICAL: Check if headers are already set to avoid duplicates
-    if (!res.getHeader('Access-Control-Allow-Origin')) {
+    // Set CORS headers for all responses
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    } else {
+      // If no origin header (same-origin request), allow all
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', '*');
-      res.setHeader('Access-Control-Allow-Headers', '*');
-      res.setHeader('Access-Control-Allow-Credentials', 'false');
-      res.setHeader('Access-Control-Expose-Headers', '*');
-      res.setHeader('Access-Control-Max-Age', '86400');
-      // CRITICAL: Remove Vary header that causes CORS issues
-      res.removeHeader('Vary');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key, X-Request-ID, Access-Control-Request-Method, Access-Control-Request-Headers');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
+    res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    
+    // Set permissive Referrer-Policy to override browser default
+    res.setHeader('Referrer-Policy', 'unsafe-url');
+    
+    // Handle preflight requests immediately
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
     }
     
     next();
@@ -112,10 +150,7 @@ export function buildApp() {
 
   app.use(defaultLimiter);
 
-  // Health routes
   app.use(healthRouter);
-  app.use("/api", healthRouter); // Also mount at /api for frontend
-  
   // Mount auth router with /api prefix to match frontend expectations
   app.use("/api", authRouter);
   app.use(authRouter); // Also mount without prefix for backward compatibility
@@ -129,33 +164,25 @@ export function buildApp() {
   // Mount agreements router with /api prefix to match frontend expectations
   app.use("/api", agreementsRouter);
   app.use(agreementsRouter); // Also mount without prefix for backward compatibility
-  
-  // Locations routes
   app.use(locationsRouter);
-  app.use("/api", locationsRouter); // Also mount at /api for frontend
-  
-  // Verification routes
   app.use(verificationRouter);
-  app.use("/api", verificationRouter); // Also mount at /api for frontend
-  
-  // Endpoints routes
   app.use(endpointsRouter);
-  app.use("/api", endpointsRouter); // Also mount at /api for frontend
-  
   app.use(locationValidationRouter);
-  
-  // Sources routes
   app.use(sourcesRouter);
-  app.use("/api", sourcesRouter); // Also mount at /api for frontend
-  
-  // Support routes
   app.use(supportRouter);
-  app.use("/api", supportRouter); // Also mount at /api for frontend
-  app.use("/api/api", supportRouter); // Handle double /api prefix from frontend
+  // Mount support router with /api prefix to match frontend expectations
+  app.use("/api", supportRouter);
+  // Mount sources router with /api prefix to match frontend expectations
+  app.use("/api", sourcesRouter);
+  // Mount endpoints router with /api prefix to match frontend expectations
+  app.use("/api", endpointsRouter);
+  // Mount health router with /api prefix to match frontend expectations
+  app.use("/api", healthRouter);
+  // Mount verification router with /api prefix to match frontend expectations
+  app.use("/api", verificationRouter);
+  // Mount coverage router with /api prefix to match frontend expectations
+  app.use("/api", coverageRouter);
   app.use(logsRouter);
-  // Debug routes - accessible from browser for troubleshooting
-  app.use(debugRouter);
-  app.use("/api", debugRouter); // Also mount at /api for frontend
   // Mount admin routes with /api prefix to match frontend expectations
   app.use("/api", adminRouter);
   app.use("/api", adminGrpcRouter);
@@ -202,13 +229,13 @@ export function buildApp() {
 
   mountSwagger(app);
   
-  // Note: Referrer-Policy is now set by nginx to avoid duplication
-  // The backend no longer sets it to prevent header conflicts
+  // Set Referrer-Policy to most permissive AFTER all routes (runs on every response)
+  app.use((req: any, res: any, next: any) => {
+    // Override any Referrer-Policy with the most permissive option
+    res.setHeader('Referrer-Policy', 'unsafe-url');
+    next();
+  });
   
   app.use(errorHandler);
   return app;
 }
-
-
-
-

@@ -495,10 +495,18 @@ authRouter.post("/auth/login", async (req, res, next) => {
     const body = loginSchema.parse(req.body);
     
     try {
-      const user = await prisma.user.findUnique({
+      // Add timeout wrapper to prevent database queries from hanging
+      const userQuery = prisma.user.findUnique({
         where: { email: body.email },
         include: { company: true },
       });
+      
+      // Race the query against a timeout
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Database query timeout after 10 seconds')), 10000);
+      });
+      
+      const user = await Promise.race([userQuery, timeoutPromise]) as any;
       
       // Helper function to send error response with CORS headers
       // CRITICAL: ALWAYS set CORS headers to ensure browser can read response
@@ -644,7 +652,18 @@ authRouter.post("/auth/login", async (req, res, next) => {
       // res.json() will automatically set Content-Type, but we've already set it above
       return res.status(200).json(responseData);
     } catch (dbError: any) {
-      console.error("Database error in login:", dbError);
+      // Safe error logging - handle circular references and undefined properties
+      try {
+        const errorInfo = {
+          message: dbError?.message || 'Unknown error',
+          name: dbError?.name || 'Error',
+          code: dbError?.code || 'UNKNOWN',
+          stack: dbError?.stack ? dbError.stack.substring(0, 500) : undefined
+        };
+        console.error("Database error in login:", JSON.stringify(errorInfo, null, 2));
+      } catch (logError) {
+        console.error("Database error in login (logging failed):", String(dbError));
+      }
       
       // Helper function to send error response with CORS headers
       // CRITICAL: ALWAYS set CORS headers to ensure browser can read response
@@ -662,7 +681,7 @@ authRouter.post("/auth/login", async (req, res, next) => {
       };
       
       // Check for database authentication errors
-      const errorMessage = dbError?.message || '';
+      const errorMessage = dbError?.message || String(dbError || '');
       if (errorMessage.includes('Access denied') || 
           errorMessage.includes('ERROR 28000') || 
           errorMessage.includes('ERROR 1698')) {
@@ -682,6 +701,15 @@ authRouter.post("/auth/login", async (req, res, next) => {
         });
       }
       
+      // Check for timeout errors
+      if (errorMessage.includes('timeout') || errorMessage.includes('Timeout') || errorMessage.includes('ETIMEDOUT')) {
+        return sendError(504, {
+          error: "DATABASE_TIMEOUT",
+          message: "Database request timed out. Please try again.",
+          hint: "The database is taking too long to respond. This may be a temporary issue."
+        });
+      }
+      
       // Generic database error
       return sendError(500, {
         error: "DATABASE_ERROR",
@@ -690,7 +718,18 @@ authRouter.post("/auth/login", async (req, res, next) => {
       });
     }
   } catch (e: any) {
-    console.error("Login error:", e);
+    // Safe error logging - handle circular references and undefined properties
+    try {
+      const errorInfo = {
+        message: e?.message || 'Unknown error',
+        name: e?.name || 'Error',
+        code: e?.code || 'UNKNOWN',
+        stack: e?.stack ? e.stack.substring(0, 500) : undefined
+      };
+      console.error("Login error:", JSON.stringify(errorInfo, null, 2));
+    } catch (logError) {
+      console.error("Login error (logging failed):", String(e));
+    }
     
     // CRITICAL: Set CORS headers ONLY if not already set by global middleware
     // This prevents duplicate headers that cause "multiple values" error
@@ -721,18 +760,18 @@ authRouter.post("/auth/login", async (req, res, next) => {
       return res.status(status).json(errorData);
     };
     
-    if (e.name === "ZodError") {
+    if (e?.name === "ZodError") {
       return sendError(400, {
         error: "VALIDATION_ERROR",
         message: "Invalid request data",
-        details: e.errors
+        details: e?.errors || []
       });
     }
     // Ensure we always send a response
     if (!res.headersSent) {
       return sendError(500, {
         error: "INTERNAL_ERROR",
-        message: e.message || "An unexpected error occurred"
+        message: e?.message || "An unexpected error occurred"
       });
     } else {
       // If headers already sent, pass to error handler

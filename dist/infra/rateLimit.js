@@ -12,5 +12,9 @@ export const defaultLimiter = rateLimit({
     },
     // Skip rate limiting for /api/auth/login and /api/auth/register to prevent blocking
     skipSuccessfulRequests: false,
-    skipFailedRequests: false
+    skipFailedRequests: false,
+    // Validate X-Forwarded-For header to prevent errors when proxied through nginx
+    validate: {
+        xForwardedForHeader: false, // Disable validation to prevent ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+    },
 });
