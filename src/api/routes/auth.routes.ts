@@ -26,6 +26,12 @@ const registerSchema = z.object({
  *       User must verify email before they can login.
  */
 authRouter.post("/auth/register", async (req, res, next) => {
+  // Set CORS headers explicitly to ensure response is accessible
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Expose-Headers', '*');
+  
   try {
     const body = registerSchema.parse(req.body);
     const exists = await prisma.company.findUnique({
@@ -97,7 +103,14 @@ authRouter.post("/auth/register", async (req, res, next) => {
       }
     }
     
-    res.json(response);
+    // Ensure CORS headers are set before sending response
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    
+    return res.status(200).json(response);
   } catch (e) {
     next(e);
   }
@@ -372,8 +385,11 @@ const loginSchema = z.object({
  *       Response includes access/refresh tokens and full user information including company details.
  */
 authRouter.post("/auth/login", async (req, res, next) => {
-  // CORS headers are handled by nginx and global middleware
-  // No need to set them here to avoid conflicts
+  // Set CORS headers explicitly to ensure response is accessible
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Expose-Headers', '*');
   
   try {
     const body = loginSchema.parse(req.body);
@@ -461,7 +477,11 @@ authRouter.post("/auth/login", async (req, res, next) => {
         updatedAt: user.updatedAt,
       };
 
-      // Ensure Content-Type is set explicitly
+      // Ensure CORS headers are set before sending response
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Expose-Headers', '*');
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       
       const responseData = { 
@@ -480,6 +500,7 @@ authRouter.post("/auth/login", async (req, res, next) => {
         userKeys: responseData.user ? Object.keys(responseData.user) : []
       });
       
+      // Send response with explicit JSON encoding
       return res.status(200).json(responseData);
     } catch (dbError: any) {
       console.error("Database error in login:", dbError);
