@@ -22,26 +22,49 @@ const registerSchema = z.object({
  *       Register endpoint that creates a new company and user, then sends an OTP email for verification.
  *       User must verify email before they can login.
  */
-authRouter.post("/auth/register", async (req, res, next) => {
-    // Set CORS headers explicitly to ensure response is accessible
+// Handle OPTIONS preflight for register route - COMPLETELY OPEN
+authRouter.options("/auth/register", (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Methods', '*'); // Allow ALL methods
     res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
     res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    // Remove Vary header that causes CORS issues
+    res.removeHeader('Vary');
+    res.status(204).end();
+});
+authRouter.post("/auth/register", async (req, res, next) => {
+    // CRITICAL: Set ALL CORS headers FIRST - before any processing
+    // This ensures browser can read the response body
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', '*');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
+    res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    // Remove Vary header that can cause CORS issues
+    res.removeHeader('Vary');
     try {
         const body = registerSchema.parse(req.body);
         const exists = await prisma.company.findUnique({
             where: { email: body.email },
         });
         if (exists) {
-            // Ensure CORS headers are set before error response
+            // CRITICAL: Set ALL CORS headers before sending error response
+            // This ensures browser can read the response body
             res.setHeader('Access-Control-Allow-Origin', '*');
-            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+            res.setHeader('Access-Control-Allow-Methods', '*');
             res.setHeader('Access-Control-Allow-Headers', '*');
             res.setHeader('Access-Control-Allow-Credentials', 'false');
             res.setHeader('Access-Control-Expose-Headers', '*');
+            res.setHeader('Access-Control-Max-Age', '86400');
             res.setHeader('Content-Type', 'application/json; charset=utf-8');
-            return res.status(409).json({ error: "CONFLICT", message: "Email already exists" });
+            // Remove Vary header that can cause CORS issues
+            res.removeHeader('Vary');
+            // Send response explicitly - ensure it's sent properly
+            const errorResponse = { error: "CONFLICT", message: "Email already exists" };
+            return res.status(409).json(errorResponse);
         }
         const passwordHash = await Auth.hash(body.password);
         const company = await prisma.company.create({
@@ -100,22 +123,29 @@ authRouter.post("/auth/register", async (req, res, next) => {
                 console.log(`${'='.repeat(80)}\n`);
             }
         }
-        // Ensure CORS headers are set before sending response
+        // CRITICAL: Set ALL CORS headers before sending success response
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
-        res.setHeader('Access-Control-Allow-Headers', '*');
-        res.setHeader('Access-Control-Expose-Headers', '*');
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        return res.status(200).json(response);
-    }
-    catch (e) {
-        // Ensure CORS headers are set even on errors
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+        res.setHeader('Access-Control-Allow-Methods', '*');
         res.setHeader('Access-Control-Allow-Headers', '*');
         res.setHeader('Access-Control-Allow-Credentials', 'false');
         res.setHeader('Access-Control-Expose-Headers', '*');
+        res.setHeader('Access-Control-Max-Age', '86400');
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        // Remove Vary header that causes CORS issues
+        res.removeHeader('Vary');
+        return res.status(200).json(response);
+    }
+    catch (e) {
+        // CRITICAL: Set ALL CORS headers even on errors
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', '*');
+        res.setHeader('Access-Control-Allow-Headers', '*');
+        res.setHeader('Access-Control-Allow-Credentials', 'false');
+        res.setHeader('Access-Control-Expose-Headers', '*');
+        res.setHeader('Access-Control-Max-Age', '86400');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        // Remove Vary header that causes CORS issues
+        res.removeHeader('Vary');
         // If it's a validation error, send it directly with CORS headers
         if (e.name === "ZodError") {
             return res.status(400).json({

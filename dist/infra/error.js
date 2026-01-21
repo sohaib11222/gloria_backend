@@ -4,14 +4,16 @@ export function errorHandler(err, req, res, _next) {
     const code = err?.status || 500;
     const requestId = req.requestId;
     const origin = req.headers.origin || '*';
-    // Set CORS headers for all error responses - COMPLETELY OPEN
+    // Set CORS headers for all error responses - COMPLETELY OPEN - NO RESTRICTIONS
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Methods', '*'); // Allow ALL methods
     res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Access-Control-Allow-Credentials', 'false');
     res.setHeader('Access-Control-Expose-Headers', '*');
     res.setHeader('Access-Control-Max-Age', '86400');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    // Remove Vary header that causes CORS issues
+    res.removeHeader('Vary');
     // Referrer-Policy is set by nginx to avoid duplication
     // Log the error for debugging
     logger.error({

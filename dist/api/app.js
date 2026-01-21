@@ -32,28 +32,13 @@ import { register } from "../services/metrics.js";
 import { otaMapper } from "./middleware/otaMapper.js";
 export function buildApp() {
     const app = express();
-    // CORS - MUST BE FIRST to allow all origins and methods
-    // Enhanced CORS configuration for better compatibility
+    // CORS - COMPLETELY OPEN - NO RESTRICTIONS AT ALL
+    // Allow ALL origins, ALL methods, ALL headers - no restrictions whatsoever
     app.use(cors({
-        origin: function (origin, callback) {
-            // Allow all origins (including null for same-origin requests)
-            callback(null, true);
-        },
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
-        allowedHeaders: [
-            'Content-Type',
-            'Authorization',
-            'X-Requested-With',
-            'Accept',
-            'Origin',
-            'Idempotency-Key',
-            'X-Agent-Email',
-            'X-Api-Key',
-            'X-Request-ID',
-            'Access-Control-Request-Method',
-            'Access-Control-Request-Headers'
-        ],
-        exposedHeaders: ['*'],
+        origin: '*', // Allow ALL origins - no restrictions
+        methods: ['*'], // Allow ALL methods
+        allowedHeaders: ['*'], // Allow ALL headers
+        exposedHeaders: ['*'], // Expose ALL headers
         credentials: false,
         preflightContinue: false,
         optionsSuccessStatus: 204,
