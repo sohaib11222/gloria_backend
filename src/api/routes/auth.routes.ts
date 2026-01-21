@@ -37,10 +37,16 @@ authRouter.post("/auth/register", async (req, res, next) => {
     const exists = await prisma.company.findUnique({
       where: { email: body.email },
     });
-    if (exists)
-      return res
-        .status(409)
-        .json({ error: "CONFLICT", message: "Email already exists" });
+    if (exists) {
+      // Ensure CORS headers are set before error response
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Allow-Credentials', 'false');
+      res.setHeader('Access-Control-Expose-Headers', '*');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      return res.status(409).json({ error: "CONFLICT", message: "Email already exists" });
+    }
     
     const passwordHash = await Auth.hash(body.password);
     const company = await prisma.company.create({
@@ -111,7 +117,25 @@ authRouter.post("/auth/register", async (req, res, next) => {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     
     return res.status(200).json(response);
-  } catch (e) {
+  } catch (e: any) {
+    // Ensure CORS headers are set even on errors
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
+    res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    
+    // If it's a validation error, send it directly with CORS headers
+    if (e.name === "ZodError") {
+      return res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Invalid request data",
+        details: e.errors
+      });
+    }
+    
+    // Otherwise pass to error handler
     next(e);
   }
 });
@@ -157,6 +181,13 @@ authRouter.post("/auth/verify-email", async (req, res, next) => {
     const isValid = await EmailVerificationService.verifyOTP(body.email, body.otp);
     
     if (!isValid) {
+      // Ensure CORS headers are set before error response
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Allow-Credentials', 'false');
+      res.setHeader('Access-Control-Expose-Headers', '*');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
       return res.status(400).json({
         error: "INVALID_OTP",
         message: "Invalid or expired OTP code"
@@ -170,6 +201,13 @@ authRouter.post("/auth/verify-email", async (req, res, next) => {
     });
 
     if (!user) {
+      // Ensure CORS headers are set before error response
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Allow-Credentials', 'false');
+      res.setHeader('Access-Control-Expose-Headers', '*');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
       return res.status(404).json({
         error: "USER_NOT_FOUND",
         message: "User not found"
@@ -202,7 +240,15 @@ authRouter.post("/auth/verify-email", async (req, res, next) => {
       updatedAt: user.updatedAt,
     };
 
-    res.json({
+    // Ensure CORS headers are set before success response
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
+    res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    
+    res.status(200).json({
       message: "Email verified successfully!",
       access,
       refresh,
@@ -400,12 +446,23 @@ authRouter.post("/auth/login", async (req, res, next) => {
         include: { company: true },
       });
       
+      // Helper function to send error response with CORS headers
+      const sendError = (status: number, errorData: any) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+        res.setHeader('Access-Control-Allow-Headers', '*');
+        res.setHeader('Access-Control-Allow-Credentials', 'false');
+        res.setHeader('Access-Control-Expose-Headers', '*');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        return res.status(status).json(errorData);
+      };
+      
       if (!user) {
-        return res.status(401).json({ error: "AUTH_ERROR", message: "Invalid credentials" });
+        return sendError(401, { error: "AUTH_ERROR", message: "Invalid credentials" });
       }
       
       if (!user.company) {
-        return res.status(500).json({
+        return sendError(500, {
           error: "INTERNAL_ERROR",
           message: "User company not found"
         });
@@ -413,12 +470,12 @@ authRouter.post("/auth/login", async (req, res, next) => {
 
       const ok = await Auth.compare(body.password, user.passwordHash);
       if (!ok) {
-        return res.status(401).json({ error: "AUTH_ERROR", message: "Invalid credentials" });
+        return sendError(401, { error: "AUTH_ERROR", message: "Invalid credentials" });
       }
 
       // Check if email is verified
       if (!user.company.emailVerified) {
-        return res.status(403).json({
+        return sendError(403, {
           error: "EMAIL_NOT_VERIFIED",
           message: "Please verify your email address before logging in",
           email: user.email,
@@ -428,7 +485,7 @@ authRouter.post("/auth/login", async (req, res, next) => {
 
       // Check if company is approved by admin
       if (user.company.approvalStatus !== "APPROVED") {
-        return res.status(403).json({
+        return sendError(403, {
           error: "NOT_APPROVED",
           message: user.company.approvalStatus === "PENDING" 
             ? "Your account is pending admin approval. Please wait for approval before accessing the dashboard."
@@ -441,7 +498,7 @@ authRouter.post("/auth/login", async (req, res, next) => {
 
       // Check if company status is ACTIVE
       if (user.company.status !== "ACTIVE") {
-        return res.status(403).json({
+        return sendError(403, {
           error: "ACCOUNT_NOT_ACTIVE",
           message: "Your account is not active. Please contact support for assistance.",
           email: user.email,
@@ -500,17 +557,38 @@ authRouter.post("/auth/login", async (req, res, next) => {
         userKeys: responseData.user ? Object.keys(responseData.user) : []
       });
       
-      // Send response with explicit JSON encoding
+      // CRITICAL: Ensure ALL CORS headers are set BEFORE sending response
+      // This ensures browser can read the response body
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Allow-Credentials', 'false');
+      res.setHeader('Access-Control-Expose-Headers', '*');
+      res.setHeader('Access-Control-Max-Age', '86400');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      
+      // Send response with explicit status and JSON
+      // Using return to ensure response is sent and no further code executes
       return res.status(200).json(responseData);
     } catch (dbError: any) {
       console.error("Database error in login:", dbError);
+      
+      // Helper function to send error response with CORS headers
+      const sendError = (status: number, errorData: any) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+        res.setHeader('Access-Control-Allow-Headers', '*');
+        res.setHeader('Access-Control-Expose-Headers', '*');
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        return res.status(status).json(errorData);
+      };
       
       // Check for database authentication errors
       const errorMessage = dbError?.message || '';
       if (errorMessage.includes('Access denied') || 
           errorMessage.includes('ERROR 28000') || 
           errorMessage.includes('ERROR 1698')) {
-        return res.status(503).json({
+        return sendError(503, {
           error: "DATABASE_AUTH_ERROR",
           message: "Database connection error. Please contact the administrator.",
           hint: "The server cannot connect to the database. This is a server configuration issue."
@@ -519,7 +597,7 @@ authRouter.post("/auth/login", async (req, res, next) => {
       
       // Check for missing DATABASE_URL
       if (errorMessage.includes('DATABASE_URL') || errorMessage.includes('Environment variable not found')) {
-        return res.status(503).json({
+        return sendError(503, {
           error: "DATABASE_CONFIG_ERROR",
           message: "Database configuration error. Please contact the administrator.",
           hint: "The server database configuration is missing or incorrect."
@@ -527,7 +605,7 @@ authRouter.post("/auth/login", async (req, res, next) => {
       }
       
       // Generic database error
-      return res.status(500).json({
+      return sendError(500, {
         error: "DATABASE_ERROR",
         message: "Database operation failed. Please try again later.",
         hint: "If this problem persists, please contact support."
@@ -535,8 +613,19 @@ authRouter.post("/auth/login", async (req, res, next) => {
     }
   } catch (e: any) {
     console.error("Login error:", e);
+    
+    // Helper function to send error response with CORS headers
+    const sendError = (status: number, errorData: any) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Expose-Headers', '*');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      return res.status(status).json(errorData);
+    };
+    
     if (e.name === "ZodError") {
-      return res.status(400).json({
+      return sendError(400, {
         error: "VALIDATION_ERROR",
         message: "Invalid request data",
         details: e.errors
@@ -544,7 +633,7 @@ authRouter.post("/auth/login", async (req, res, next) => {
     }
     // Ensure we always send a response
     if (!res.headersSent) {
-      return res.status(500).json({
+      return sendError(500, {
         error: "INTERNAL_ERROR",
         message: e.message || "An unexpected error occurred"
       });
