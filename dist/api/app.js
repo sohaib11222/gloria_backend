@@ -1,6 +1,5 @@
 import express from "express";
 import helmet from "helmet";
-import cors from "cors";
 import pinoHttp from "pino-http";
 import { logger } from "../infra/logger.js";
 import { requestId } from "../infra/requestId.js";
@@ -34,34 +33,36 @@ export function buildApp() {
     const app = express();
     // CRITICAL: CORS MUST BE THE VERY FIRST MIDDLEWARE - BEFORE EVERYTHING
     // This handles OPTIONS preflight requests IMMEDIATELY before any other processing
+    // IMPORTANT: We use ONLY this custom middleware - do NOT use cors() library to avoid duplicate headers
     app.use((req, res, next) => {
-        // Set CORS headers for ALL requests (including OPTIONS preflight)
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', '*');
-        res.setHeader('Access-Control-Allow-Headers', '*');
-        res.setHeader('Access-Control-Allow-Credentials', 'false');
-        res.setHeader('Access-Control-Expose-Headers', '*');
-        res.setHeader('Access-Control-Max-Age', '86400');
-        // CRITICAL: Remove Vary header that causes CORS issues
-        res.removeHeader('Vary');
-        // CRITICAL: Handle OPTIONS preflight requests IMMEDIATELY
+        // CRITICAL: Handle OPTIONS preflight requests IMMEDIATELY - before setting any headers
         // This must happen BEFORE rate limiting, body parsing, or any other middleware
         if (req.method === 'OPTIONS') {
+            // Set CORS headers for OPTIONS preflight
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', '*');
+            res.setHeader('Access-Control-Allow-Headers', '*');
+            res.setHeader('Access-Control-Allow-Credentials', 'false');
+            res.setHeader('Access-Control-Expose-Headers', '*');
+            res.setHeader('Access-Control-Max-Age', '86400');
+            // CRITICAL: Remove Vary header that causes CORS issues
+            res.removeHeader('Vary');
             return res.status(204).end();
+        }
+        // For non-OPTIONS requests, set CORS headers but don't end the response
+        // CRITICAL: Check if headers are already set to avoid duplicates
+        if (!res.getHeader('Access-Control-Allow-Origin')) {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', '*');
+            res.setHeader('Access-Control-Allow-Headers', '*');
+            res.setHeader('Access-Control-Allow-Credentials', 'false');
+            res.setHeader('Access-Control-Expose-Headers', '*');
+            res.setHeader('Access-Control-Max-Age', '86400');
+            // CRITICAL: Remove Vary header that causes CORS issues
+            res.removeHeader('Vary');
         }
         next();
     });
-    // Also use cors middleware as backup (but our custom middleware above takes precedence)
-    app.use(cors({
-        origin: '*',
-        methods: ['*'],
-        allowedHeaders: ['*'],
-        exposedHeaders: ['*'],
-        credentials: false,
-        preflightContinue: false,
-        optionsSuccessStatus: 204,
-        maxAge: 86400
-    }));
     // Body parsing middleware - must be careful with multipart/form-data
     // JSON parser - skip for multipart/form-data (handled by multer)
     app.use((req, res, next) => {

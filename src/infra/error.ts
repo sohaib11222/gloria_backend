@@ -8,12 +8,15 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
   const origin = (req.headers.origin as string) || '*';
   
   // Set CORS headers for all error responses - COMPLETELY OPEN - NO RESTRICTIONS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', '*'); // Allow ALL methods
-  res.setHeader('Access-Control-Allow-Headers', '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'false');
-  res.setHeader('Access-Control-Expose-Headers', '*');
-  res.setHeader('Access-Control-Max-Age', '86400');
+  // CRITICAL: Only set headers if not already set to avoid duplicates
+  if (!res.getHeader('Access-Control-Allow-Origin')) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', '*'); // Allow ALL methods
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Credentials', 'false');
+    res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Access-Control-Max-Age', '86400');
+  }
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   // Remove Vary header that causes CORS issues
   res.removeHeader('Vary');
