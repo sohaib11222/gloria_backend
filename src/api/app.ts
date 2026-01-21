@@ -15,6 +15,7 @@ import { locationsRouter } from "./routes/locations.routes.js";
 import { verificationRouter } from "./routes/verification.routes.js";
 import { adminRouter } from "./routes/admin.routes.js";
 import { logsRouter } from "./routes/logs.routes.js";
+import { debugRouter } from "./routes/debug.routes.js";
 import { adminGrpcRouter } from "./routes/adminGrpc.routes.js";
 import { endpointsRouter } from "./routes/endpoints.routes.js";
 import { locationValidationRouter } from "./routes/locationValidation.routes.js";
@@ -152,6 +153,9 @@ export function buildApp() {
   app.use("/api", supportRouter); // Also mount at /api for frontend
   app.use("/api/api", supportRouter); // Handle double /api prefix from frontend
   app.use(logsRouter);
+  // Debug routes - accessible from browser for troubleshooting
+  app.use(debugRouter);
+  app.use("/api", debugRouter); // Also mount at /api for frontend
   // Mount admin routes with /api prefix to match frontend expectations
   app.use("/api", adminRouter);
   app.use("/api", adminGrpcRouter);

@@ -480,17 +480,15 @@ authRouter.options("/auth/login", (req, res) => {
 });
 
 authRouter.post("/auth/login", async (req, res, next) => {
-  // CRITICAL: Set CORS headers ONLY if not already set by global middleware
-  // This prevents duplicate headers that cause "multiple values" error
-  if (!res.getHeader('Access-Control-Allow-Origin')) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', '*');
-    res.setHeader('Access-Control-Allow-Headers', '*');
-    res.setHeader('Access-Control-Allow-Credentials', 'false');
-    res.setHeader('Access-Control-Expose-Headers', '*');
-    res.setHeader('Access-Control-Max-Age', '86400');
-  }
-  // Remove Vary header that can cause CORS issues
+  // CRITICAL: ALWAYS set CORS headers - ensure they're present
+  // Even if global middleware sets them, we ensure they're correct here
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'false');
+  res.setHeader('Access-Control-Expose-Headers', '*');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  // CRITICAL: Remove Vary header that causes CORS issues
   res.removeHeader('Vary');
   
   try {
@@ -503,16 +501,14 @@ authRouter.post("/auth/login", async (req, res, next) => {
       });
       
       // Helper function to send error response with CORS headers
-      // CRITICAL: Only set headers if not already set to avoid duplicates
+      // CRITICAL: ALWAYS set CORS headers to ensure browser can read response
       const sendError = (status: number, errorData: any) => {
-        if (!res.getHeader('Access-Control-Allow-Origin')) {
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.setHeader('Access-Control-Allow-Methods', '*');
-          res.setHeader('Access-Control-Allow-Headers', '*');
-          res.setHeader('Access-Control-Allow-Credentials', 'false');
-          res.setHeader('Access-Control-Expose-Headers', '*');
-          res.setHeader('Access-Control-Max-Age', '86400');
-        }
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', '*');
+        res.setHeader('Access-Control-Allow-Headers', '*');
+        res.setHeader('Access-Control-Allow-Credentials', 'false');
+        res.setHeader('Access-Control-Expose-Headers', '*');
+        res.setHeader('Access-Control-Max-Age', '86400');
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         // Remove Vary header that causes CORS issues
         res.removeHeader('Vary');
@@ -604,7 +600,19 @@ authRouter.post("/auth/login", async (req, res, next) => {
         companyId: user.companyId
       };
       
-      // Log the response for debugging
+      // CRITICAL: ALWAYS set CORS headers FIRST - before any logging or response
+      // This ensures headers are set before the response is sent
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', '*');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Allow-Credentials', 'false');
+      res.setHeader('Access-Control-Expose-Headers', '*');
+      res.setHeader('Access-Control-Max-Age', '86400');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      // CRITICAL: Remove Vary header that causes CORS issues
+      res.removeHeader('Vary');
+      
+      // Log the response for debugging (AFTER headers are set)
       console.log('Login response data:', {
         hasAccess: !!responseData.access,
         hasRefresh: !!responseData.refresh,
@@ -612,37 +620,41 @@ authRouter.post("/auth/login", async (req, res, next) => {
         userKeys: responseData.user ? Object.keys(responseData.user) : []
       });
       
-      // CRITICAL: Set CORS headers ONLY if not already set by global middleware
-      // This prevents duplicate headers that cause "multiple values" error
-      if (!res.getHeader('Access-Control-Allow-Origin')) {
+      // Log request details for CORS debugging
+      console.log('Login request details:', {
+        method: req.method,
+        origin: req.headers.origin || 'Not set',
+        referer: req.headers.referer || 'Not set',
+        userAgent: req.headers['user-agent']?.substring(0, 50) || 'Not set',
+        ip: req.ip,
+        timestamp: new Date().toISOString(),
+      });
+      
+      // Log response headers being sent (AFTER they're set)
+      console.log('Login response headers:', {
+        'Access-Control-Allow-Origin': res.getHeader('Access-Control-Allow-Origin'),
+        'Access-Control-Allow-Methods': res.getHeader('Access-Control-Allow-Methods'),
+        'Access-Control-Allow-Headers': res.getHeader('Access-Control-Allow-Headers'),
+        'Content-Type': res.getHeader('Content-Type'),
+        'Status': 200,
+      });
+      
+      // Send response with explicit status and JSON
+      // Using return to ensure response is sent and no further code executes
+      // res.json() will automatically set Content-Type, but we've already set it above
+      return res.status(200).json(responseData);
+    } catch (dbError: any) {
+      console.error("Database error in login:", dbError);
+      
+      // Helper function to send error response with CORS headers
+      // CRITICAL: ALWAYS set CORS headers to ensure browser can read response
+      const sendError = (status: number, errorData: any) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', '*');
         res.setHeader('Access-Control-Allow-Headers', '*');
         res.setHeader('Access-Control-Allow-Credentials', 'false');
         res.setHeader('Access-Control-Expose-Headers', '*');
         res.setHeader('Access-Control-Max-Age', '86400');
-      }
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      // Remove Vary header that causes CORS issues
-      res.removeHeader('Vary');
-      
-      // Send response with explicit status and JSON
-      // Using return to ensure response is sent and no further code executes
-      return res.status(200).json(responseData);
-    } catch (dbError: any) {
-      console.error("Database error in login:", dbError);
-      
-      // Helper function to send error response with CORS headers
-      // CRITICAL: Only set headers if not already set to avoid duplicates
-      const sendError = (status: number, errorData: any) => {
-        if (!res.getHeader('Access-Control-Allow-Origin')) {
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.setHeader('Access-Control-Allow-Methods', '*');
-          res.setHeader('Access-Control-Allow-Headers', '*');
-          res.setHeader('Access-Control-Allow-Credentials', 'false');
-          res.setHeader('Access-Control-Expose-Headers', '*');
-          res.setHeader('Access-Control-Max-Age', '86400');
-        }
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         // Remove Vary header that causes CORS issues
         res.removeHeader('Vary');
@@ -695,16 +707,14 @@ authRouter.post("/auth/login", async (req, res, next) => {
     res.removeHeader('Vary');
     
     // Helper function to send error response with CORS headers
-    // CRITICAL: Only set headers if not already set to avoid duplicates
+    // CRITICAL: ALWAYS set CORS headers to ensure browser can read response
     const sendError = (status: number, errorData: any) => {
-      if (!res.getHeader('Access-Control-Allow-Origin')) {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', '*');
-        res.setHeader('Access-Control-Allow-Headers', '*');
-        res.setHeader('Access-Control-Allow-Credentials', 'false');
-        res.setHeader('Access-Control-Expose-Headers', '*');
-        res.setHeader('Access-Control-Max-Age', '86400');
-      }
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', '*');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      res.setHeader('Access-Control-Allow-Credentials', 'false');
+      res.setHeader('Access-Control-Expose-Headers', '*');
+      res.setHeader('Access-Control-Max-Age', '86400');
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       // Remove Vary header that causes CORS issues
       res.removeHeader('Vary');
