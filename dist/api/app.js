@@ -33,50 +33,34 @@ import { otaMapper } from "./middleware/otaMapper.js";
 export function buildApp() {
     const app = express();
     // CORS - COMPLETELY OPEN - NO RESTRICTIONS AT ALL
-    // Allow ALL origins, ALL methods, ALL headers - no restrictions whatsoever
-    app.use(cors({
-        origin: '*', // Allow ALL origins - no restrictions
-        methods: ['*'], // Allow ALL methods
-        allowedHeaders: ['*'], // Allow ALL headers
-        exposedHeaders: ['*'], // Expose ALL headers
-        credentials: false,
-        preflightContinue: false,
-        optionsSuccessStatus: 204,
-        maxAge: 86400 // 24 hours
-    }));
-    // Handle OPTIONS preflight for all routes - MUST be before other routes
-    // COMPLETELY OPEN - Allow all origins and all headers
-    app.options('*', (req, res) => {
-        // Always allow all origins - no restrictions
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
-        res.setHeader('Access-Control-Allow-Headers', '*'); // Allow all headers
-        res.setHeader('Access-Control-Allow-Credentials', 'false');
-        res.setHeader('Access-Control-Expose-Headers', '*');
-        res.setHeader('Access-Control-Max-Age', '86400');
-        // Referrer-Policy is set by nginx to avoid duplication
-        res.status(204).end();
-    });
-    // Global CORS headers middleware - applied to all requests
-    // This ensures CORS headers are set even if cors middleware doesn't catch it
-    // COMPLETELY OPEN - Allow requests from ANY origin with ANY headers
+    // Simplified single middleware to avoid conflicts
     app.use((req, res, next) => {
-        // Allow all origins - no restrictions
-        const origin = req.headers.origin || '*';
-        // Set CORS headers for all responses - completely open
-        res.setHeader('Access-Control-Allow-Origin', '*'); // Always allow all origins
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
-        res.setHeader('Access-Control-Allow-Headers', '*'); // Allow all headers
+        // Set CORS headers for ALL requests (including OPTIONS preflight)
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', '*');
+        res.setHeader('Access-Control-Allow-Headers', '*');
         res.setHeader('Access-Control-Allow-Credentials', 'false');
         res.setHeader('Access-Control-Expose-Headers', '*');
         res.setHeader('Access-Control-Max-Age', '86400');
-        // Referrer-Policy is set by nginx to avoid duplication
-        // Handle preflight requests immediately
+        // Remove Vary header that can cause CORS issues
+        res.removeHeader('Vary');
+        // Handle OPTIONS preflight requests immediately
         if (req.method === 'OPTIONS') {
             return res.status(204).end();
         }
         next();
     });
+    // Also use cors middleware as backup (but our custom middleware above takes precedence)
+    app.use(cors({
+        origin: '*',
+        methods: ['*'],
+        allowedHeaders: ['*'],
+        exposedHeaders: ['*'],
+        credentials: false,
+        preflightContinue: false,
+        optionsSuccessStatus: 204,
+        maxAge: 86400
+    }));
     // Body parsing middleware - must be careful with multipart/form-data
     // JSON parser - skip for multipart/form-data (handled by multer)
     app.use((req, res, next) => {
