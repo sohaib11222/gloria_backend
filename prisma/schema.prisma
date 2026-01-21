@@ -79,6 +79,7 @@ model Company {
   adapterType  String? // "mock" | "grpc" (or future "http") - must be explicitly set, no default
   grpcEndpoint String?
   httpEndpoint String? // Optional HTTP endpoint for JSON fallback/test
+  branchEndpointUrl String? // Branch import endpoint URL (supports XML and JSON)
 
   // TLS/mTLS configuration for gRPC (JSON)
   tlsProfile Json?
