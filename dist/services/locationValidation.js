@@ -20,43 +20,74 @@ export function validateLocationPayload(payload, companyCode) {
         };
     }
     // Validate required top-level fields
-    if (!payload.Branchcode)
+    // Allow empty strings but not undefined/null
+    if (payload.Branchcode === undefined || payload.Branchcode === null || payload.Branchcode === '') {
         missingFields.push("Branchcode");
-    if (!payload.AtAirport)
+    }
+    if (payload.AtAirport === undefined || payload.AtAirport === null || payload.AtAirport === '') {
         missingFields.push("AtAirport");
-    if (!payload.LocationType)
+    }
+    if (payload.LocationType === undefined || payload.LocationType === null || payload.LocationType === '') {
         missingFields.push("LocationType");
-    if (!payload.CollectionType)
-        missingFields.push("CollectionType");
-    if (!payload.Name)
+    }
+    // CollectionType can be derived from AtAirport, so only check if both are missing
+    if (!payload.CollectionType && (!payload.AtAirport || payload.AtAirport === 'false')) {
+        // If AtAirport is true, CollectionType should be AIRPORT (but we allow it to be missing if we can derive it)
+        // Only mark as missing if we can't derive it
+        if (payload.AtAirport !== 'true') {
+            missingFields.push("CollectionType");
+        }
+    }
+    if (payload.Name === undefined || payload.Name === null || payload.Name === '') {
         missingFields.push("Name");
-    // Validate coordinates
-    if (typeof payload.Latitude !== "number" || isNaN(payload.Latitude)) {
+    }
+    // Validate coordinates - accept both number and string (will be parsed)
+    // Allow 0 as a valid coordinate value (some locations may be at 0,0)
+    const latValue = payload.Latitude;
+    const lonValue = payload.Longitude;
+    let latitude = undefined;
+    let longitude = undefined;
+    if (typeof latValue === 'number') {
+        latitude = isNaN(latValue) ? undefined : latValue;
+    }
+    else if (latValue !== undefined && latValue !== null && latValue !== '') {
+        const parsed = parseFloat(String(latValue));
+        latitude = isNaN(parsed) ? undefined : parsed;
+    }
+    if (typeof lonValue === 'number') {
+        longitude = isNaN(lonValue) ? undefined : lonValue;
+    }
+    else if (lonValue !== undefined && lonValue !== null && lonValue !== '') {
+        const parsed = parseFloat(String(lonValue));
+        longitude = isNaN(parsed) ? undefined : parsed;
+    }
+    if (latitude === undefined) {
         missingFields.push("Latitude");
     }
-    if (typeof payload.Longitude !== "number" || isNaN(payload.Longitude)) {
+    if (longitude === undefined) {
         missingFields.push("Longitude");
     }
-    // Validate email
-    if (!payload.EmailAddress) {
-        missingFields.push("EmailAddress");
-    }
-    else {
+    // Validate email - more lenient for OTA format (defaults are provided)
+    if (payload.EmailAddress) {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(payload.EmailAddress)) {
-            errors.push("EmailAddress: Invalid email format");
+            // Only warn, don't fail - OTA format may have default emails
+            console.warn(`[Validation] Invalid email format: ${payload.EmailAddress}, but allowing for OTA format`);
         }
     }
-    // Validate phone
-    if (!payload.Telephone?.attr?.PhoneNumber) {
-        missingFields.push("Telephone.attr.PhoneNumber");
-    }
-    else {
+    // EmailAddress is optional - extractBranchesFromGloria provides defaults
+    // Validate phone - more lenient for OTA format
+    if (payload.Telephone?.attr?.PhoneNumber) {
+        const phoneNumber = payload.Telephone.attr.PhoneNumber;
+        // Normalize phone number - remove spaces and ensure + prefix
+        const normalizedPhone = phoneNumber.replace(/\s+/g, '').replace(/^([^+])/, '+$1');
         const phoneRegex = /^\+[0-9]{10,15}$/;
-        if (!phoneRegex.test(payload.Telephone.attr.PhoneNumber)) {
-            errors.push("Telephone.attr.PhoneNumber: Must match pattern ^\\+[0-9]{10,15}$");
+        if (!phoneRegex.test(normalizedPhone)) {
+            // Only warn, don't fail - OTA format may have default phones
+            console.warn(`[Validation] Invalid phone format: ${phoneNumber}, but allowing for OTA format`);
         }
     }
+    // PhoneNumber is optional - extractBranchesFromGloria provides defaults
     // Validate Address
     if (!payload.Address) {
         missingFields.push("Address");
@@ -78,39 +109,55 @@ export function validateLocationPayload(payload, companyCode) {
             missingFields.push("Address.CountryName.attr.Code");
         }
     }
-    // Validate Opening hours (all 7 days required)
+    // Validate Opening hours - more lenient for OTA format (defaults are provided)
     const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-    if (!payload.Opening) {
-        missingFields.push("Opening");
-    }
-    else {
+    if (payload.Opening) {
         for (const day of days) {
             const dayData = payload.Opening[day];
-            if (!dayData) {
-                invalidDays.push(day);
-            }
-            else {
-                if (!dayData.attr?.Open) {
-                    invalidDays.push(`${day}.attr.Open`);
+            if (dayData) {
+                // If day exists, validate it has Open/Closed
+                // Accept if either Open or Closed exists (PHP format may have combined times)
+                const hasOpen = dayData.attr?.Open || dayData.Open;
+                const hasClosed = dayData.attr?.Closed || dayData.Closed;
+                // If Open contains both times (PHP format ": 09:00 - 22:00 "), that's also valid
+                const openTime = String(hasOpen || '');
+                const hasCombinedTimes = openTime.includes('-') && openTime.match(/\d{1,2}:\d{2}/);
+                if (!hasOpen && !hasClosed && !hasCombinedTimes) {
+                    invalidDays.push(`${day}.attr.Open/Closed`);
                 }
-                if (!dayData.attr?.Closed) {
-                    invalidDays.push(`${day}.attr.Closed`);
-                }
             }
+            // Missing days are OK - extractBranchesFromGloria provides defaults
         }
     }
+    // Opening is optional - extractBranchesFromGloria provides defaults for all days
     // Validate optional ReturnInstructions
     if (payload.ReturnInstructions && !payload.ReturnInstructions.attr?.Pickup) {
         errors.push("ReturnInstructions.attr.Pickup: Required if ReturnInstructions is present");
     }
-    // Compile result
+    // Compile result with detailed error messages
     if (missingFields.length > 0 || errors.length > 0 || invalidDays.length > 0) {
+        // Create detailed error message showing exactly what's missing
+        const errorMessages = [];
+        if (missingFields.length > 0) {
+            errorMessages.push(`Missing required fields: ${missingFields.join(', ')}`);
+        }
+        if (errors.length > 0) {
+            errorMessages.push(`Validation errors: ${errors.join('; ')}`);
+        }
+        if (invalidDays.length > 0) {
+            errorMessages.push(`Invalid opening hours for: ${invalidDays.join(', ')}`);
+        }
         return {
             valid: false,
             error: {
-                error: "Location validation failed",
+                error: errorMessages.join('. ') || "Location validation failed",
                 fields: [...missingFields, ...errors],
                 days: invalidDays.length > 0 ? invalidDays : undefined,
+                details: {
+                    missingFields: missingFields.length > 0 ? missingFields : undefined,
+                    validationErrors: errors.length > 0 ? errors : undefined,
+                    invalidDays: invalidDays.length > 0 ? invalidDays : undefined,
+                },
             },
         };
     }

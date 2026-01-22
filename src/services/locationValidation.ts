@@ -4,6 +4,11 @@ export interface LocationValidationError {
   error: string;
   fields?: string[];
   days?: string[];
+  details?: {
+    missingFields?: string[];
+    validationErrors?: string[];
+    invalidDays?: string[];
+  };
 }
 
 export interface LocationValidationResult {

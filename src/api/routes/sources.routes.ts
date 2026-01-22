@@ -883,7 +883,7 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
     }
 
     try {
-      const response = await fetch(finalEndpointUrl, {
+      const fetchResponse = await fetch(finalEndpointUrl, {
         method: "GET",
         headers: {
           "Request-Type": "LocationRq",
@@ -895,15 +895,15 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
 
       clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        return res.status(response.status).json({
+      if (!fetchResponse.ok) {
+        return res.status(fetchResponse.status).json({
           error: "SUPPLIER_ERROR",
-          message: `Supplier endpoint returned ${response.status}`,
+          message: `Supplier endpoint returned ${fetchResponse.status}`,
         });
       }
 
       // Get response text first to handle both JSON and PHP var_dump formats
-      let responseText = await response.text();
+      let responseText = await fetchResponse.text();
       
       // Clean up response text - remove HTML tags if present
       if (responseText.includes('<html') || responseText.includes('<!DOCTYPE')) {
@@ -1057,8 +1057,9 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
       }
 
       // Validate all branches - but allow import even if validation fails (client requirement)
+      // Convert null to undefined for validation (companyCode is optional)
       const { validateLocationArray } = await import("../../services/locationValidation.js");
-      const validation = validateLocationArray(branches, source.companyCode);
+      const validation = validateLocationArray(branches, source.companyCode || undefined);
       
       console.log(`[import-branches] Validation result: valid=${validation.valid}, errors=${validation.errors.length}`);
       
@@ -1340,7 +1341,7 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
 
       // Always return 200 (success) even if validation fails - client wants to store data
       // Include detailed validation information in response
-      const response: any = {
+      const uploadResponse: any = {
         message,
         imported,
         updated,
@@ -1358,15 +1359,15 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
       
       // Add validation errors if any
       if (validation.errors.length > 0) {
-        response.validationErrors = enhancedValidationErrors;
-        response.invalidDetails = enhancedValidationErrors;
-        response.warnings = [
+        uploadResponse.validationErrors = enhancedValidationErrors;
+        uploadResponse.invalidDetails = enhancedValidationErrors;
+        uploadResponse.warnings = [
           `${validation.errors.length} branch(es) had validation issues but were still imported.`,
           'Check the validationErrors array for detailed information about what fields are missing or invalid.'
         ];
       }
       
-      res.status(200).json(response);
+      res.status(200).json(uploadResponse);
     } catch (fetchError: any) {
       clearTimeout(timeoutId);
       if (fetchError.name === "AbortError" || fetchError.code === "ETIMEDOUT") {
@@ -1461,13 +1462,6 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
       });
     }
 
-    if (!source.companyCode) {
-      return res.status(400).json({
-        error: "COMPANY_CODE_MISSING",
-        message: "Source companyCode must be set",
-      });
-    }
-
     const data = req.body;
 
     if (!data) {
@@ -1498,7 +1492,7 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
       console.log('[upload-branches] Found rawContent in object, length:', rawValue.length);
       if (rawValue.includes('array(') || rawValue.includes('OTA_VehLocSearchRS') || rawValue.includes('<')) {
         content = rawValue.trim();
-        console.log('[upload-branches] Using rawContent, trimmed length:', content.length);
+        console.log('[upload-branches] Using rawContent, trimmed length:', content?.length || 0);
       }
     }
     
@@ -1781,8 +1775,9 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
     }
 
     // Validate all branches - but allow upload even if validation fails (client requirement)
+    // Convert null to undefined for validation (companyCode is optional)
     const { validateLocationArray } = await import("../../services/locationValidation.js");
-    const validation = validateLocationArray(branches, source.companyCode);
+    const validation = validateLocationArray(branches, source.companyCode || undefined);
     
     console.log(`[upload-branches] Validation result: valid=${validation.valid}, errors=${validation.errors.length}`);
     

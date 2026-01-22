@@ -140,8 +140,29 @@ export function parseXMLToGloria(xmlString) {
                     for (const [day, dayData] of Object.entries(opening)) {
                         const normalizedDay = dayMap[day.toLowerCase()] || day;
                         const dayObj = dayData;
-                        const openTime = dayObj.attr?.Open || dayObj['@_Open'] || dayObj.Open || '';
-                        const closedTime = dayObj.attr?.Closed || dayObj['@_Closed'] || dayObj.Closed || '24:00'; // Default closed time
+                        let openTime = dayObj.attr?.Open || dayObj['@_Open'] || dayObj.Open || '';
+                        let closedTime = dayObj.attr?.Closed || dayObj['@_Closed'] || dayObj.Closed || '';
+                        // PHP format may have both times in Open field: ": 09:00 - 22:00 "
+                        // Parse this format: extract times from "09:00 - 22:00" or ": 09:00 - 22:00 "
+                        if (openTime && !closedTime && openTime.includes('-')) {
+                            // Split by " - " or " -" or "- "
+                            const timeMatch = openTime.match(/(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/);
+                            if (timeMatch) {
+                                openTime = timeMatch[1].trim(); // "09:00"
+                                closedTime = timeMatch[2].trim(); // "22:00"
+                            }
+                            else {
+                                // Try simpler split
+                                const parts = openTime.split(/\s*-\s*/);
+                                if (parts.length >= 2) {
+                                    openTime = parts[parts.length - 2].replace(/^:\s*/, '').trim(); // Remove leading colon
+                                    closedTime = parts[parts.length - 1].trim();
+                                }
+                            }
+                        }
+                        // Clean up times - remove leading colons and spaces, default closed time if missing
+                        openTime = openTime.replace(/^:\s*/, '').trim();
+                        closedTime = closedTime.replace(/^:\s*/, '').trim() || '24:00'; // Default closed time
                         normalizedOpening[normalizedDay] = {
                             attr: {
                                 Open: openTime,
@@ -229,11 +250,17 @@ export function extractBranchesFromGloria(gloriaResponse) {
         return branches;
     }
     const vehMatchedLocs = root.VehMatchedLocs || [];
-    for (const loc of vehMatchedLocs) {
+    console.log(`[extractBranchesFromGloria] Processing ${vehMatchedLocs.length} VehMatchedLocs`);
+    for (let i = 0; i < vehMatchedLocs.length; i++) {
+        const loc = vehMatchedLocs[i];
+        console.log(`[extractBranchesFromGloria] Processing location ${i}, has VehMatchedLoc:`, !!loc.VehMatchedLoc);
         const locationDetail = loc.VehMatchedLoc?.LocationDetail;
         if (!locationDetail) {
+            console.warn(`[extractBranchesFromGloria] Location ${i} missing LocationDetail, skipping`);
+            console.warn(`[extractBranchesFromGloria] Location ${i} structure:`, JSON.stringify(loc, null, 2).substring(0, 500));
             continue;
         }
+        console.log(`[extractBranchesFromGloria] Location ${i} has LocationDetail, keys:`, Object.keys(locationDetail));
         // Normalize the structure - handle both XML-parsed (already normalized) and PHP-parsed (needs normalization)
         // PHP structure has: { attr: { Code, Name, ... }, Address: {...}, ... }
         // XML structure has: { Branchcode, Name, Address: {...}, ... }
@@ -255,13 +282,23 @@ export function extractBranchesFromGloria(gloriaResponse) {
             hasTelephone: !!locationDetail.Telephone,
             fullLocationDetail: JSON.stringify(locationDetail, null, 2).substring(0, 1000)
         });
-        // Extract code - try Code first, then BranchType
+        // Extract code - try Code first, then BranchType, then check direct properties
         // PHP structure has: LocationDetail.attr.Code = "DXBA02"
-        const code = attrs.Code || attrs.BranchType || '';
-        const name = attrs.Name || '';
+        let code = attrs.Code || attrs.BranchType || '';
+        let name = attrs.Name || '';
+        // Fallback: check if Code/Name are direct properties (not in attr)
+        if (!code && locationDetail.Code) {
+            code = locationDetail.Code;
+            console.warn(`[extractBranchesFromGloria] Found Code as direct property:`, code);
+        }
+        if (!name && locationDetail.Name) {
+            name = locationDetail.Name;
+            console.warn(`[extractBranchesFromGloria] Found Name as direct property:`, name);
+        }
         if (!code) {
             console.error(`[extractBranchesFromGloria] Missing branch code! Attrs:`, attrs);
             console.error(`[extractBranchesFromGloria] Full locationDetail keys:`, Object.keys(locationDetail));
+            console.error(`[extractBranchesFromGloria] LocationDetail sample:`, JSON.stringify(locationDetail, null, 2).substring(0, 1000));
             // Try to extract from nested structure
             if (locationDetail.LocationDetail?.attr?.Code) {
                 console.warn(`[extractBranchesFromGloria] Found nested LocationDetail structure, using it`);
@@ -275,6 +312,9 @@ export function extractBranchesFromGloria(gloriaResponse) {
                     }
                 });
             }
+            // If still no code, use a generated one to allow import
+            code = `BRANCH_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            console.warn(`[extractBranchesFromGloria] Generated fallback code:`, code);
         }
         // Extract address - handle both object and string formats
         const address = locationDetail.Address || {};
@@ -290,19 +330,26 @@ export function extractBranchesFromGloria(gloriaResponse) {
             '';
         // Extract coordinates - ensure they're numbers
         // PHP format: attr.Latitude = "25.228005" (string)
-        const latStr = attrs.Latitude || locationDetail.Latitude || '';
-        const lonStr = attrs.Longitude || locationDetail.Longitude || '';
+        // Try multiple sources: attr, direct property, nested
+        const latStr = attrs.Latitude ||
+            locationDetail.Latitude ||
+            locationDetail.Latitude ||
+            '';
+        const lonStr = attrs.Longitude ||
+            locationDetail.Longitude ||
+            locationDetail.Longitude ||
+            '';
         let latitude = NaN;
         let longitude = NaN;
         if (latStr) {
             const lat = parseFloat(String(latStr));
-            if (!isNaN(lat) && lat !== 0) {
+            if (!isNaN(lat)) {
                 latitude = lat;
             }
         }
         if (lonStr) {
             const lon = parseFloat(String(lonStr));
-            if (!isNaN(lon) && lon !== 0) {
+            if (!isNaN(lon)) {
                 longitude = lon;
             }
         }
@@ -317,15 +364,21 @@ export function extractBranchesFromGloria(gloriaResponse) {
                 attrsLongitude: attrs.Longitude
             });
         }
-        // Extract AtAirport
-        const atAirportValue = attrs.AtAirport || locationDetail.AtAirport;
+        // Extract AtAirport - try multiple sources
+        const atAirportValue = attrs.AtAirport ||
+            locationDetail.AtAirport ||
+            locationDetail.AtAirport;
         const atAirport = typeof atAirportValue === 'boolean'
             ? (atAirportValue ? 'true' : 'false')
             : (atAirportValue ? String(atAirportValue).toLowerCase() : 'false');
-        // Extract LocationType
-        const locationType = attrs.LocationType || locationDetail.LocationType || '';
+        // Extract LocationType - try multiple sources
+        const locationType = attrs.LocationType ||
+            locationDetail.LocationType ||
+            locationDetail.LocationType ||
+            '';
         // Extract CollectionType - derive if missing
         const collectionType = attrs.CollectionType ||
+            locationDetail.CollectionType ||
             locationDetail.CollectionType ||
             (atAirport === 'true' ? 'AIRPORT' : 'CITY');
         // Extract Status
@@ -362,8 +415,30 @@ export function extractBranchesFromGloria(gloriaResponse) {
             const normalizedDay = dayMap[day.toLowerCase()] || day;
             const dayObj = dayData;
             // Extract Open time - PHP format: ": 09:00 - 22:00 " (may have leading colon and spaces)
+            // OR separate Open/Closed fields
             let openTime = dayObj.attr?.Open || dayObj['@_Open'] || dayObj.Open || '';
             let closedTime = dayObj.attr?.Closed || dayObj['@_Closed'] || dayObj.Closed || '';
+            // PHP format may have both times in Open field: ": 09:00 - 22:00 "
+            // Parse this format: extract times from "09:00 - 22:00" or ": 09:00 - 22:00 "
+            if (openTime && !closedTime && openTime.includes('-')) {
+                // Split by " - " or " -" or "- "
+                const timeMatch = openTime.match(/(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/);
+                if (timeMatch) {
+                    openTime = timeMatch[1].trim(); // "09:00"
+                    closedTime = timeMatch[2].trim(); // "22:00"
+                }
+                else {
+                    // Try simpler split
+                    const parts = openTime.split(/\s*-\s*/);
+                    if (parts.length >= 2) {
+                        openTime = parts[parts.length - 2].replace(/^:\s*/, '').trim(); // Remove leading colon
+                        closedTime = parts[parts.length - 1].trim();
+                    }
+                }
+            }
+            // Clean up times - remove leading colons and spaces
+            openTime = openTime.replace(/^:\s*/, '').trim();
+            closedTime = closedTime.replace(/^:\s*/, '').trim();
             // Clean up the time string - remove leading colon and spaces
             if (openTime) {
                 openTime = openTime.replace(/^:\s*/, '').trim();
@@ -413,12 +488,36 @@ export function extractBranchesFromGloria(gloriaResponse) {
             '';
         // Build normalized branch - ensure ALL required fields are present
         // CRITICAL: All fields must be present and correctly formatted for validation
+        // Ensure CollectionType is always set - derive from AtAirport if not provided
+        const finalCollectionType = collectionType || (atAirport === 'true' ? 'AIRPORT' : 'CITY');
+        // Ensure coordinates are numbers, not strings
+        // Try to parse from latStr/lonStr if latitude/longitude are NaN
+        let finalLatitude = undefined;
+        let finalLongitude = undefined;
+        if (!isNaN(latitude)) {
+            finalLatitude = latitude;
+        }
+        else if (latStr) {
+            const lat = parseFloat(String(latStr));
+            if (!isNaN(lat)) {
+                finalLatitude = lat;
+            }
+        }
+        if (!isNaN(longitude)) {
+            finalLongitude = longitude;
+        }
+        else if (lonStr) {
+            const lon = parseFloat(String(lonStr));
+            if (!isNaN(lon)) {
+                finalLongitude = lon;
+            }
+        }
         const normalizedBranch = {
             Branchcode: code || '',
             Name: name || '',
             Status: status || 'ACTIVE',
             LocationType: locationType || '',
-            CollectionType: collectionType || 'CITY',
+            CollectionType: finalCollectionType,
             EmailAddress: emailAddress || `branch-${code || 'unknown'}@example.com`,
             Telephone: normalizedPhone ? {
                 attr: {
@@ -434,14 +533,8 @@ export function extractBranchesFromGloria(gloriaResponse) {
                     PhoneNumber: '+00000000000' // Default if missing
                 }
             }),
-            Latitude: (!isNaN(latitude) && latitude !== 0) ? latitude : (latStr ? (() => {
-                const lat = parseFloat(String(latStr));
-                return !isNaN(lat) ? lat : 0;
-            })() : 0),
-            Longitude: (!isNaN(longitude) && longitude !== 0) ? longitude : (lonStr ? (() => {
-                const lon = parseFloat(String(lonStr));
-                return !isNaN(lon) ? lon : 0;
-            })() : 0),
+            Latitude: finalLatitude,
+            Longitude: finalLongitude,
             AtAirport: atAirport || 'false',
             Address: {
                 AddressLine: {
