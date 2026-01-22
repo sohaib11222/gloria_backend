@@ -784,12 +784,9 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
                 message: "Source branchEndpointUrl or httpEndpoint must be configured",
             });
         }
-        if (!source.companyCode) {
-            return res.status(400).json({
-                error: "COMPANY_CODE_MISSING",
-                message: "Source companyCode must be set",
-            });
-        }
+        // Get companyCode from authenticated user's company (automatically from source)
+        // companyCode is optional - if not set, validation will skip CompanyCode checks
+        const companyCode = source.companyCode || undefined;
         // Enforce whitelist check
         const { enforceWhitelist } = await import("../../infra/whitelistEnforcement.js");
         try {
@@ -921,8 +918,8 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
                 else {
                     // Standard JSON format - validate CompanyCode (warn but don't block)
                     const dataTyped = data;
-                    if (dataTyped.CompanyCode && dataTyped.CompanyCode !== source.companyCode) {
-                        console.warn(`[import-branches] CompanyCode mismatch: expected ${source.companyCode}, got ${dataTyped.CompanyCode}, but proceeding with import`);
+                    if (dataTyped.CompanyCode && companyCode && dataTyped.CompanyCode !== companyCode) {
+                        console.warn(`[import-branches] CompanyCode mismatch: expected ${companyCode}, got ${dataTyped.CompanyCode}, but proceeding with import`);
                         // Don't block - just log warning and continue
                     }
                     // Extract branches (assume data.Branches or data is array)
@@ -977,9 +974,10 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
                 }
             }
             // Validate all branches - but allow import even if validation fails (client requirement)
+            // Use companyCode from authenticated user's company (automatically from source)
             // Convert null to undefined for validation (companyCode is optional)
             const { validateLocationArray } = await import("../../services/locationValidation.js");
-            const validation = validateLocationArray(branches, source.companyCode || undefined);
+            const validation = validateLocationArray(branches, companyCode);
             console.log(`[import-branches] Validation result: valid=${validation.valid}, errors=${validation.errors.length}`);
             // Log validation errors but don't block import (client wants to store data even if validation fails)
             if (validation.errors.length > 0) {
@@ -1340,6 +1338,9 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
                 message: "Source email must be verified",
             });
         }
+        // Get companyCode from authenticated user's company (automatically from source)
+        // companyCode is optional - if not set, validation will skip CompanyCode checks
+        const companyCode = source.companyCode || undefined;
         const data = req.body;
         if (!data) {
             return res.status(400).json({
@@ -1589,8 +1590,9 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
                 console.log(`[upload-branches] Extracted ${branches.length} branches from JSON structure`);
             }
             // Validate CompanyCode if present (but don't block)
-            if (dataTyped.CompanyCode && dataTyped.CompanyCode !== source.companyCode) {
-                console.warn(`[upload-branches] CompanyCode mismatch: expected ${source.companyCode}, got ${dataTyped.CompanyCode}, but proceeding with upload`);
+            // Use companyCode from authenticated user's company (automatically from source)
+            if (dataTyped.CompanyCode && companyCode && dataTyped.CompanyCode !== companyCode) {
+                console.warn(`[upload-branches] CompanyCode mismatch: expected ${companyCode}, got ${dataTyped.CompanyCode}, but proceeding with upload`);
             }
         }
         // Log final branch count before checking
@@ -1642,9 +1644,10 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
             });
         }
         // Validate all branches - but allow upload even if validation fails (client requirement)
+        // Use companyCode from authenticated user's company (automatically from source)
         // Convert null to undefined for validation (companyCode is optional)
         const { validateLocationArray } = await import("../../services/locationValidation.js");
-        const validation = validateLocationArray(branches, source.companyCode || undefined);
+        const validation = validateLocationArray(branches, companyCode);
         console.log(`[upload-branches] Validation result: valid=${validation.valid}, errors=${validation.errors.length}`);
         // Log validation errors but don't block upload (client wants to store data even if validation fails)
         if (validation.errors.length > 0) {

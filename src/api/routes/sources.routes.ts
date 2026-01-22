@@ -854,12 +854,9 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
       });
     }
 
-    if (!source.companyCode) {
-      return res.status(400).json({
-        error: "COMPANY_CODE_MISSING",
-        message: "Source companyCode must be set",
-      });
-    }
+    // Get companyCode from authenticated user's company (automatically from source)
+    // companyCode is optional - if not set, validation will skip CompanyCode checks
+    const companyCode = source.companyCode || undefined;
 
     // Enforce whitelist check
     const { enforceWhitelist } = await import("../../infra/whitelistEnforcement.js");
@@ -996,8 +993,8 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
         } else {
           // Standard JSON format - validate CompanyCode (warn but don't block)
           const dataTyped = data as any;
-          if (dataTyped.CompanyCode && dataTyped.CompanyCode !== source.companyCode) {
-            console.warn(`[import-branches] CompanyCode mismatch: expected ${source.companyCode}, got ${dataTyped.CompanyCode}, but proceeding with import`);
+          if (dataTyped.CompanyCode && companyCode && dataTyped.CompanyCode !== companyCode) {
+            console.warn(`[import-branches] CompanyCode mismatch: expected ${companyCode}, got ${dataTyped.CompanyCode}, but proceeding with import`);
             // Don't block - just log warning and continue
           }
 
@@ -1057,9 +1054,10 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
       }
 
       // Validate all branches - but allow import even if validation fails (client requirement)
+      // Use companyCode from authenticated user's company (automatically from source)
       // Convert null to undefined for validation (companyCode is optional)
       const { validateLocationArray } = await import("../../services/locationValidation.js");
-      const validation = validateLocationArray(branches, source.companyCode || undefined);
+      const validation = validateLocationArray(branches, companyCode);
       
       console.log(`[import-branches] Validation result: valid=${validation.valid}, errors=${validation.errors.length}`);
       
@@ -1462,6 +1460,10 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
       });
     }
 
+    // Get companyCode from authenticated user's company (automatically from source)
+    // companyCode is optional - if not set, validation will skip CompanyCode checks
+    const companyCode = source.companyCode || undefined;
+
     const data = req.body;
 
     if (!data) {
@@ -1720,8 +1722,9 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
       }
       
       // Validate CompanyCode if present (but don't block)
-      if (dataTyped.CompanyCode && dataTyped.CompanyCode !== source.companyCode) {
-        console.warn(`[upload-branches] CompanyCode mismatch: expected ${source.companyCode}, got ${dataTyped.CompanyCode}, but proceeding with upload`);
+      // Use companyCode from authenticated user's company (automatically from source)
+      if (dataTyped.CompanyCode && companyCode && dataTyped.CompanyCode !== companyCode) {
+        console.warn(`[upload-branches] CompanyCode mismatch: expected ${companyCode}, got ${dataTyped.CompanyCode}, but proceeding with upload`);
       }
     }
 
@@ -1775,9 +1778,10 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
     }
 
     // Validate all branches - but allow upload even if validation fails (client requirement)
+    // Use companyCode from authenticated user's company (automatically from source)
     // Convert null to undefined for validation (companyCode is optional)
     const { validateLocationArray } = await import("../../services/locationValidation.js");
-    const validation = validateLocationArray(branches, source.companyCode || undefined);
+    const validation = validateLocationArray(branches, companyCode);
     
     console.log(`[upload-branches] Validation result: valid=${validation.valid}, errors=${validation.errors.length}`);
     
