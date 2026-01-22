@@ -14,6 +14,7 @@ const endpointConfigSchema = z.object({
   grpcEndpoint: z.string().optional(),
   adapterType: z.enum(["mock", "grpc", "http"]).optional(),
   description: z.string().optional(),
+  branchEndpointUrl: z.string().url().optional(),
 });
 
 /**
@@ -88,6 +89,7 @@ endpointsRouter.get(
           adapterType: true,
           grpcEndpoint: true,
           httpEndpoint: true,
+          branchEndpointUrl: true,
           updatedAt: true,
           lastGrpcTestResult: true,
           lastGrpcTestAt: true,
@@ -114,6 +116,7 @@ endpointsRouter.get(
         type: company.type,
         httpEndpoint,
         grpcEndpoint: company.grpcEndpoint || null,
+        branchEndpointUrl: company.branchEndpointUrl || null,
         adapterType: company.adapterType,
         description: `${
           company.companyName
@@ -254,6 +257,19 @@ endpointsRouter.put(
         }
       }
 
+      // Validate branch endpoint URL format if provided
+      if (body.branchEndpointUrl) {
+        try {
+          new URL(body.branchEndpointUrl);
+        } catch {
+          return res.status(400).json({
+            error: "INVALID_BRANCH_ENDPOINT",
+            message:
+              "Branch endpoint URL must be a valid URL (e.g., 'https://example.com/loctest.php')",
+          });
+        }
+      }
+
       // Update company configuration
       const updatedCompany = await prisma.company.update({
         where: { id: req.user.companyId },
@@ -261,6 +277,7 @@ endpointsRouter.put(
           adapterType: body.adapterType,
           grpcEndpoint: body.grpcEndpoint,
           httpEndpoint: body.httpEndpoint,
+          branchEndpointUrl: body.branchEndpointUrl,
           updatedAt: new Date(),
         },
         select: {
@@ -270,6 +287,7 @@ endpointsRouter.put(
           adapterType: true,
           grpcEndpoint: true,
           httpEndpoint: true,
+          branchEndpointUrl: true,
           updatedAt: true,
         },
       });
@@ -283,6 +301,7 @@ endpointsRouter.put(
             ? "http://localhost:9091"
             : "http://localhost:9090"),
         grpcEndpoint: updatedCompany.grpcEndpoint,
+        branchEndpointUrl: updatedCompany.branchEndpointUrl,
         adapterType: updatedCompany.adapterType,
         updatedAt: updatedCompany.updatedAt,
       });

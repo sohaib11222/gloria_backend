@@ -1,0 +1,13 @@
+-- Add isMock column to SourceLocation table
+-- This column indicates if location was synced from a mock adapter (test data)
+-- 
+-- IMPORTANT: Run this SQL command directly on your MySQL database
+-- 
+-- Option 1: Simple (will error if column already exists - that's okay):
+-- ALTER TABLE SourceLocation ADD COLUMN isMock BOOLEAN NOT NULL DEFAULT FALSE;
+--
+-- Option 2: Safe (checks if column exists first):
+-- Use the script in add-isMock-column-manual.sql for a safer approach
+--
+-- After running, verify with:
+-- DESCRIBE SourceLocation;

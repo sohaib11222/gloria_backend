@@ -384,6 +384,8 @@ model Branch {
   country        String?
   countryCode    String?
   natoLocode     String? // Maps to NATO LOCODES
+  pickupTimes    Json? // Pickup times per day (separate from opening hours) - e.g., {"monday": {"start": "00:00", "end": "23:59"}}
+  dropoffTimes   Json? // Dropoff times per day (separate from opening hours) - e.g., {"monday": {"start": "00:00", "end": "23:59"}}
   rawJson        Json? // Full branch sub-JSON from supplier
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
