@@ -2303,66 +2303,204 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
       let data: any;
       let locations: any[] = [];
 
-      // Try to parse as JSON first
-      try {
-        data = JSON.parse(responseText);
-        console.log('[import-locations] Successfully parsed as JSON');
-      } catch (jsonError) {
-        // If JSON parsing fails, try to parse as XML
-        console.log('[import-locations] Response is not JSON, attempting XML parsing');
+      // Check if it's PHP var_dump format with OTA_VehLocSearchRS
+      if (responseText.includes('array(') && responseText.includes('OTA_VehLocSearchRS')) {
+        console.log('[import-locations] Detected PHP var_dump format with OTA_VehLocSearchRS, parsing...');
         try {
-          const { XMLParser } = await import('fast-xml-parser');
-          const xmlParser = new XMLParser({
-            ignoreAttributes: false,
-            attributeNamePrefix: '@_',
-            textNodeName: 'value',
-            parseAttributeValue: true,
-            trimValues: true,
-          });
-          data = xmlParser.parse(responseText);
-          console.log('[import-locations] Successfully parsed as XML');
-        } catch (xmlError: any) {
+          const gloriaResponse = convertPhpVarDumpToOta(responseText);
+          console.log('[import-locations] PHP var_dump parsed, extracting locations from OTA structure');
+          
+          // Extract locations from OTA_VehLocSearchRS.VehMatchedLocs
+          const root = gloriaResponse.gloria || gloriaResponse.OTA_VehLocSearchRS;
+          if (root && root.VehMatchedLocs && Array.isArray(root.VehMatchedLocs)) {
+            // Extract location data from each VehMatchedLoc.LocationDetail
+            for (const loc of root.VehMatchedLocs) {
+              const locationDetail = loc.VehMatchedLoc?.LocationDetail;
+              if (locationDetail) {
+                const attrs = locationDetail.attr || {};
+                const address = locationDetail.Address || {};
+                const countryName = address.CountryName || {};
+                
+                // Extract country code first
+                const countryCode = (countryName.attr?.Code || attrs.CountryCode || '').toString().toUpperCase().trim();
+                
+                // Extract unlocode - try multiple sources
+                let unlocode: string | null = null;
+                
+                // 1. Try explicit NatoLocode field
+                if (locationDetail.NatoLocode) {
+                  unlocode = String(locationDetail.NatoLocode).toUpperCase().trim();
+                } else if (attrs.NatoLocode) {
+                  unlocode = String(attrs.NatoLocode).toUpperCase().trim();
+                }
+                
+                // 2. Check if Code itself is a valid UN/LOCODE (5 chars, starts with country code)
+                if (!unlocode && attrs.Code) {
+                  const code = String(attrs.Code).toUpperCase().trim();
+                  if (code.length === 5 && countryCode && code.startsWith(countryCode)) {
+                    unlocode = code;
+                  }
+                }
+                
+                // 3. Derive from country code + location identifier
+                if (!unlocode && countryCode && attrs.Code) {
+                  const code = String(attrs.Code).toUpperCase().trim();
+                  // Use last 3 characters of code to form UN/LOCODE
+                  const locationSuffix = code.length >= 3 ? code.substring(code.length - 3) : code;
+                  unlocode = `${countryCode}${locationSuffix}`;
+                }
+                
+                // Extract location fields
+                const extractedLocation: any = {
+                  unlocode: unlocode,
+                  country: countryCode,
+                  place: (attrs.Name || locationDetail.Name || '').toString().trim(),
+                  iataCode: (attrs.IataCode || locationDetail.IataCode || '').toString().trim() || null,
+                  latitude: attrs.Latitude ? parseFloat(String(attrs.Latitude)) : 
+                           (locationDetail.Latitude ? parseFloat(String(locationDetail.Latitude)) : null),
+                  longitude: attrs.Longitude ? parseFloat(String(attrs.Longitude)) : 
+                            (locationDetail.Longitude ? parseFloat(String(locationDetail.Longitude)) : null),
+                };
+                
+                if (extractedLocation.unlocode) {
+                  locations.push(extractedLocation);
+                }
+              }
+            }
+            console.log(`[import-locations] Extracted ${locations.length} locations from OTA_VehLocSearchRS format`);
+          }
+        } catch (phpError: any) {
+          console.error('[import-locations] Error parsing PHP var_dump:', phpError);
           return res.status(400).json({
             error: "INVALID_RESPONSE_FORMAT",
-            message: `Failed to parse response: ${xmlError.message || String(xmlError)}. Expected JSON or XML format.`,
+            message: `Failed to parse PHP var_dump format: ${phpError.message || String(phpError)}`,
           });
         }
-      }
-
-      // Extract locations from response
-      // Expected formats:
-      // 1. JSON: { Locations: [...] } or { items: [...] } or array
-      // 2. XML: <Locations><Location>...</Location></Locations>
-      if (Array.isArray(data)) {
-        locations = data;
-      } else if (data.Locations && Array.isArray(data.Locations)) {
-        locations = data.Locations;
-      } else if (data.items && Array.isArray(data.items)) {
-        locations = data.items;
-      } else if (data.Location && Array.isArray(data.Location)) {
-        locations = data.Location;
-      } else if (data.Location) {
-        locations = [data.Location];
       } else {
-        // Provide detailed error message showing what was received
-        const receivedKeys = data && typeof data === 'object' ? Object.keys(data).slice(0, 10) : [];
-        const dataPreview = JSON.stringify(data, null, 2).substring(0, 500);
-        
-        return res.status(400).json({
-          error: "INVALID_FORMAT",
-          message: "Response must contain Locations array or items array",
-          details: {
-            receivedKeys: receivedKeys,
-            dataPreview: dataPreview,
-            expectedFormats: [
-              "JSON: { Locations: [...] }",
-              "JSON: { items: [...] }",
-              "JSON: [location1, location2, ...]",
-              "XML: <Locations><Location>...</Location></Locations>"
-            ],
-            help: "Your endpoint should return location data in one of the supported formats. Each location should have: unlocode (required), country, place, iataCode, latitude, longitude"
-          },
-        });
+        // Try to parse as JSON first
+        try {
+          data = JSON.parse(responseText);
+          console.log('[import-locations] Successfully parsed as JSON');
+        } catch (jsonError) {
+          // If JSON parsing fails, try to parse as XML
+          console.log('[import-locations] Response is not JSON, attempting XML parsing');
+          try {
+            const { XMLParser } = await import('fast-xml-parser');
+            const xmlParser = new XMLParser({
+              ignoreAttributes: false,
+              attributeNamePrefix: '@_',
+              textNodeName: 'value',
+              parseAttributeValue: true,
+              trimValues: true,
+            });
+            data = xmlParser.parse(responseText);
+            console.log('[import-locations] Successfully parsed as XML');
+          } catch (xmlError: any) {
+            return res.status(400).json({
+              error: "INVALID_RESPONSE_FORMAT",
+              message: `Failed to parse response: ${xmlError.message || String(xmlError)}. Expected JSON, XML, or PHP var_dump format.`,
+            });
+          }
+        }
+
+        // Extract locations from response
+        // Expected formats:
+        // 1. JSON: { Locations: [...] } or { items: [...] } or array
+        // 2. XML: <Locations><Location>...</Location></Locations>
+        // 3. OTA_VehLocSearchRS: { OTA_VehLocSearchRS: { VehMatchedLocs: [...] } }
+        if (data.OTA_VehLocSearchRS || data.gloria) {
+          // Handle OTA_VehLocSearchRS format (JSON/XML parsed)
+          console.log('[import-locations] Detected OTA_VehLocSearchRS format in parsed data');
+          const root = data.gloria || data.OTA_VehLocSearchRS;
+          if (root && root.VehMatchedLocs && Array.isArray(root.VehMatchedLocs)) {
+            for (const loc of root.VehMatchedLocs) {
+              const locationDetail = loc.VehMatchedLoc?.LocationDetail || loc.LocationDetail;
+              if (locationDetail) {
+                const attrs = locationDetail.attr || locationDetail['@_'] || {};
+                const address = locationDetail.Address || {};
+                const countryName = address.CountryName || {};
+                
+                // Extract country code
+                const countryCode = (countryName.attr?.Code || countryName['@_Code'] || attrs.CountryCode || '').toString().toUpperCase().trim();
+                
+                // Extract unlocode - try multiple sources
+                let unlocode: string | null = null;
+                
+                // 1. Try explicit NatoLocode field
+                if (locationDetail.NatoLocode) {
+                  unlocode = String(locationDetail.NatoLocode).toUpperCase().trim();
+                } else if (attrs.NatoLocode) {
+                  unlocode = String(attrs.NatoLocode).toUpperCase().trim();
+                }
+                
+                // 2. Check if Code itself is a valid UN/LOCODE (5 chars, starts with country code)
+                if (!unlocode && attrs.Code) {
+                  const code = String(attrs.Code).toUpperCase().trim();
+                  if (code.length === 5 && countryCode && code.startsWith(countryCode)) {
+                    unlocode = code;
+                  }
+                }
+                
+                // 3. Derive from country code + location identifier
+                if (!unlocode && countryCode && attrs.Code) {
+                  const code = String(attrs.Code).toUpperCase().trim();
+                  // Use last 3 characters of code to form UN/LOCODE
+                  const locationSuffix = code.length >= 3 ? code.substring(code.length - 3) : code;
+                  unlocode = `${countryCode}${locationSuffix}`;
+                }
+                
+                const extractedLocation: any = {
+                  unlocode: unlocode,
+                  country: countryCode,
+                  place: (attrs.Name || locationDetail.Name || '').toString().trim(),
+                  iataCode: (attrs.IataCode || locationDetail.IataCode || '').toString().trim() || null,
+                  latitude: attrs.Latitude ? parseFloat(String(attrs.Latitude)) : 
+                           (locationDetail.Latitude ? parseFloat(String(locationDetail.Latitude)) : null),
+                  longitude: attrs.Longitude ? parseFloat(String(attrs.Longitude)) : 
+                            (locationDetail.Longitude ? parseFloat(String(locationDetail.Longitude)) : null),
+                };
+                
+                if (extractedLocation.unlocode) {
+                  locations.push(extractedLocation);
+                }
+              }
+            }
+            console.log(`[import-locations] Extracted ${locations.length} locations from OTA_VehLocSearchRS format`);
+          }
+        } else if (Array.isArray(data)) {
+          locations = data;
+        } else if (data.Locations && Array.isArray(data.Locations)) {
+          locations = data.Locations;
+        } else if (data.items && Array.isArray(data.items)) {
+          locations = data.items;
+        } else if (data.Location && Array.isArray(data.Location)) {
+          locations = data.Location;
+        } else if (data.Location) {
+          locations = [data.Location];
+        } else {
+          // Provide detailed error message showing what was received
+          const receivedKeys = data && typeof data === 'object' ? Object.keys(data).slice(0, 10) : [];
+          const dataPreview = JSON.stringify(data, null, 2).substring(0, 500);
+          
+          return res.status(400).json({
+            error: "INVALID_FORMAT",
+            message: "Response must contain Locations array, items array, or OTA_VehLocSearchRS structure",
+            details: {
+              receivedKeys: receivedKeys,
+              dataPreview: dataPreview,
+              expectedFormats: [
+                "JSON: { Locations: [...] }",
+                "JSON: { items: [...] }",
+                "JSON: [location1, location2, ...]",
+                "JSON: { OTA_VehLocSearchRS: { VehMatchedLocs: [...] } }",
+                "XML: <Locations><Location>...</Location></Locations>",
+                "XML: <OTA_VehLocSearchRS><VehMatchedLocs>...</VehMatchedLocs></OTA_VehLocSearchRS>",
+                "PHP var_dump: array(1) { [\"OTA_VehLocSearchRS\"]=> ... }"
+              ],
+              help: "Your endpoint should return location data in one of the supported formats. Each location should have: unlocode (required), country, place, iataCode, latitude, longitude. For OTA format, locations are extracted from VehMatchedLocs[].VehMatchedLoc.LocationDetail"
+            },
+          });
+        }
       }
 
       console.log(`[import-locations] Extracted ${locations.length} locations`);
