@@ -96,6 +96,22 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
     });
   }
   
+  // Handle FetchError (HTTP request failures) - don't confuse with database errors
+  if (err?.name === 'FetchError' || err?.type === 'system' || (errorMessage.includes('ECONNREFUSED') && !errorMessage.includes('587'))) {
+    // Check if it's a database connection error (MySQL port 3306) vs external HTTP endpoint
+    const isDatabaseError = errorMessage.includes('3306') || errorMessage.includes('mysql') || errorMessage.includes('DATABASE');
+    
+    if (!isDatabaseError) {
+      // This is an external HTTP endpoint connection failure, not a database error
+      return res.status(503).json({
+        error: "ENDPOINT_CONNECTION_ERROR",
+        message: err?.message || "Failed to connect to external endpoint",
+        hint: "The supplier endpoint may be unavailable or unreachable",
+        requestId
+      });
+    }
+  }
+  
   // Handle SMTP/email connection errors separately from database errors
   if (errorMessage.includes('ECONNREFUSED') && errorMessage.includes('587')) {
     // This is an SMTP error, not a database error

@@ -165,6 +165,8 @@ export function buildApp() {
   app.use("/api", agreementsRouter);
   app.use(agreementsRouter); // Also mount without prefix for backward compatibility
   app.use(locationsRouter);
+  // Mount locations router with /api prefix to match frontend expectations
+  app.use("/api", locationsRouter);
   app.use(verificationRouter);
   app.use(endpointsRouter);
   app.use(locationValidationRouter);

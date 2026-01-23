@@ -91,6 +91,7 @@ endpointsRouter.get(
           grpcEndpoint: true,
           httpEndpoint: true,
           branchEndpointUrl: true,
+          locationEndpointUrl: true,
           updatedAt: true,
           lastGrpcTestResult: true,
           lastGrpcTestAt: true,

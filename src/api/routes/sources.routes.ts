@@ -2461,12 +2461,23 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
       });
     } catch (fetchError: any) {
       clearTimeout(timeoutId);
-      if (fetchError.name === 'AbortError') {
-        return res.status(408).json({
+      if (fetchError.name === 'AbortError' || fetchError.code === 'ETIMEDOUT') {
+        return res.status(504).json({
           error: "TIMEOUT",
-          message: "Request to supplier endpoint timed out",
+          message: `Supplier endpoint timeout after 30s: ${finalEndpointUrl || endpointUrl}`,
         });
       }
+      
+      // Handle fetch connection errors
+      if (fetchError.message?.includes("fetch failed") || fetchError.code === "ECONNREFUSED" || fetchError.code === "ENOTFOUND") {
+        return res.status(503).json({
+          error: "ENDPOINT_CONNECTION_ERROR",
+          message: `Cannot connect to supplier endpoint: ${finalEndpointUrl || endpointUrl}. Please ensure the source backend is running and accessible.`,
+          details: fetchError.message || fetchError.code,
+          hint: "The supplier HTTP endpoint may not be running or may be unreachable",
+        });
+      }
+      
       throw fetchError;
     }
   } catch (error: any) {
