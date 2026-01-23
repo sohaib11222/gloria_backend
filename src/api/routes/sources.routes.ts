@@ -2182,3 +2182,296 @@ sourcesRouter.delete("/sources/locations/:unlocode", requireAuth(), requireCompa
   }
 });
 
+/**
+ * @openapi
+ * /sources/import-locations:
+ *   post:
+ *     tags: [Sources]
+ *     summary: Import locations from supplier endpoint (for own company)
+ *     description: |
+ *       Imports location/UN/LOCODE data from supplier HTTP endpoint.
+ *       Supports JSON and XML formats. Creates/updates UNLocode entries and links them to source.
+ *     security:
+ *       - bearerAuth: []
+ */
+sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
+  try {
+    const sourceId = req.user.companyId;
+    
+    // Load source and check approval
+    const source = await prisma.company.findUnique({
+      where: { id: sourceId },
+      select: {
+        id: true,
+        companyName: true,
+        type: true,
+        status: true,
+        approvalStatus: true,
+        emailVerified: true,
+        companyCode: true,
+        httpEndpoint: true,
+        locationEndpointUrl: true,
+        whitelistedDomains: true,
+      },
+    });
+
+    if (!source) {
+      return res.status(404).json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
+    }
+
+    if (source.approvalStatus !== "APPROVED") {
+      return res.status(400).json({
+        error: "NOT_APPROVED",
+        message: "Source must be approved before importing locations",
+      });
+    }
+
+    if (!source.emailVerified) {
+      return res.status(400).json({
+        error: "EMAIL_NOT_VERIFIED",
+        message: "Source email must be verified",
+      });
+    }
+
+    // Use configured locationEndpointUrl, or fallback to httpEndpoint
+    const endpointUrl =
+      source.locationEndpointUrl ||
+      source.httpEndpoint ||
+      `http://localhost:9090`;
+
+    if (!endpointUrl) {
+      return res.status(400).json({
+        error: "ENDPOINT_NOT_CONFIGURED",
+        message: "Source locationEndpointUrl or httpEndpoint must be configured",
+      });
+    }
+
+    // Enforce whitelist check
+    const { enforceWhitelist } = await import("../../infra/whitelistEnforcement.js");
+    try {
+      await enforceWhitelist(sourceId, endpointUrl);
+    } catch (e: any) {
+      return res.status(403).json({
+        error: "WHITELIST_VIOLATION",
+        message: e.message || "Endpoint not whitelisted",
+      });
+    }
+
+    // Call supplier endpoint with Request-Type: LocationRq header
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+    let finalEndpointUrl = endpointUrl.trim();
+    if (!finalEndpointUrl.startsWith('http://') && !finalEndpointUrl.startsWith('https://')) {
+      finalEndpointUrl = `http://${finalEndpointUrl}`;
+    }
+
+    try {
+      const fetchResponse = await fetch(finalEndpointUrl, {
+        method: "GET",
+        headers: {
+          "Request-Type": "LocationRq",
+          "Content-Type": "application/json",
+        },
+        signal: controller.signal,
+        timeout: 30000,
+      } as any);
+
+      clearTimeout(timeoutId);
+
+      if (!fetchResponse.ok) {
+        return res.status(fetchResponse.status).json({
+          error: "SUPPLIER_ERROR",
+          message: `Supplier endpoint returned ${fetchResponse.status}`,
+        });
+      }
+
+      // Get response text first to handle both JSON and XML formats
+      let responseText = await fetchResponse.text();
+      
+      // Clean up response text - remove HTML tags if present
+      if (responseText.includes('<html') || responseText.includes('<!DOCTYPE')) {
+        console.log('[import-locations] Response appears to be HTML, attempting to extract text content');
+        const preMatch = responseText.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+        if (preMatch) {
+          responseText = preMatch[1];
+        } else {
+          responseText = responseText.replace(/<[^>]+>/g, '');
+        }
+      }
+      
+      let data: any;
+      let locations: any[] = [];
+
+      // Try to parse as JSON first
+      try {
+        data = JSON.parse(responseText);
+        console.log('[import-locations] Successfully parsed as JSON');
+      } catch (jsonError) {
+        // If JSON parsing fails, try to parse as XML
+        console.log('[import-locations] Response is not JSON, attempting XML parsing');
+        try {
+          const { XMLParser } = await import('fast-xml-parser');
+          const xmlParser = new XMLParser({
+            ignoreAttributes: false,
+            attributeNamePrefix: '@_',
+            textNodeName: 'value',
+            parseAttributeValue: true,
+            trimValues: true,
+          });
+          data = xmlParser.parse(responseText);
+          console.log('[import-locations] Successfully parsed as XML');
+        } catch (xmlError: any) {
+          return res.status(400).json({
+            error: "INVALID_RESPONSE_FORMAT",
+            message: `Failed to parse response: ${xmlError.message || String(xmlError)}. Expected JSON or XML format.`,
+          });
+        }
+      }
+
+      // Extract locations from response
+      // Expected formats:
+      // 1. JSON: { Locations: [...] } or { items: [...] } or array
+      // 2. XML: <Locations><Location>...</Location></Locations>
+      if (Array.isArray(data)) {
+        locations = data;
+      } else if (data.Locations && Array.isArray(data.Locations)) {
+        locations = data.Locations;
+      } else if (data.items && Array.isArray(data.items)) {
+        locations = data.items;
+      } else if (data.Location && Array.isArray(data.Location)) {
+        locations = data.Location;
+      } else if (data.Location) {
+        locations = [data.Location];
+      } else {
+        return res.status(400).json({
+          error: "INVALID_FORMAT",
+          message: "Response must contain Locations array or items array",
+        });
+      }
+
+      console.log(`[import-locations] Extracted ${locations.length} locations`);
+
+      let imported = 0;
+      let updated = 0;
+      let skipped = 0;
+      const errors: any[] = [];
+
+      // Process each location
+      for (let i = 0; i < locations.length; i++) {
+        const loc = locations[i];
+        try {
+          // Extract location data - handle both object and nested structures
+          const unlocode = (loc.unlocode || loc.UnLocode || loc.code || loc.Code || '').toString().toUpperCase().trim();
+          const country = (loc.country || loc.Country || '').toString().trim();
+          const place = (loc.place || loc.Place || loc.name || loc.Name || '').toString().trim();
+          const iataCode = (loc.iataCode || loc.IataCode || loc.iata_code || loc.IATA || '').toString().trim() || null;
+          const latitude = loc.latitude || loc.Latitude ? parseFloat(String(loc.latitude || loc.Latitude)) : null;
+          const longitude = loc.longitude || loc.Longitude ? parseFloat(String(loc.longitude || loc.Longitude)) : null;
+
+          if (!unlocode) {
+            errors.push({
+              index: i,
+              error: "Missing unlocode field",
+            });
+            skipped++;
+            continue;
+          }
+
+          // Validate unlocode format (should be 5 characters: 2 letter country + 3 letter location)
+          if (unlocode.length < 4 || unlocode.length > 5) {
+            errors.push({
+              index: i,
+              unlocode,
+              error: `Invalid unlocode format: ${unlocode} (should be 4-5 characters)`,
+            });
+            skipped++;
+            continue;
+          }
+
+          // Extract country from unlocode if not provided
+          const finalCountry = country || unlocode.substring(0, 2).toUpperCase();
+
+          // Upsert UNLocode entry
+          const unlocodeEntry = await prisma.uNLocode.upsert({
+            where: { unlocode },
+            update: {
+              country: finalCountry,
+              place: place || unlocode,
+              iataCode: iataCode || null,
+              latitude: latitude && !isNaN(latitude) ? latitude : null,
+              longitude: longitude && !isNaN(longitude) ? longitude : null,
+            },
+            create: {
+              unlocode,
+              country: finalCountry,
+              place: place || unlocode,
+              iataCode: iataCode || null,
+              latitude: latitude && !isNaN(latitude) ? latitude : null,
+              longitude: longitude && !isNaN(longitude) ? longitude : null,
+            },
+          });
+
+          // Check if location is already linked to source
+          const existingSourceLocation = await prisma.sourceLocation.findUnique({
+            where: {
+              sourceId_unlocode: {
+                sourceId,
+                unlocode,
+              },
+            },
+          });
+
+          if (existingSourceLocation) {
+            updated++;
+          } else {
+            // Link location to source
+            await prisma.sourceLocation.create({
+              data: {
+                sourceId,
+                unlocode,
+                isMock: false, // Imported locations are not mock
+              },
+            });
+            imported++;
+          }
+        } catch (locError: any) {
+          console.error(`[import-locations] Error processing location ${i}:`, locError);
+          errors.push({
+            index: i,
+            error: locError.message || String(locError),
+          });
+          skipped++;
+        }
+      }
+
+      // Update lastLocationSyncAt
+      await prisma.company.update({
+        where: { id: sourceId },
+        data: { lastLocationSyncAt: new Date() },
+      });
+
+      res.json({
+        message: "Locations imported successfully",
+        imported,
+        updated,
+        skipped,
+        total: locations.length,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === 'AbortError') {
+        return res.status(408).json({
+          error: "TIMEOUT",
+          message: "Request to supplier endpoint timed out",
+        });
+      }
+      throw fetchError;
+    }
+  } catch (error: any) {
+    console.error('[import-locations] Error:', error);
+    next(error);
+  }
+});
+

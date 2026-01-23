@@ -15,6 +15,7 @@ const endpointConfigSchema = z.object({
   adapterType: z.enum(["mock", "grpc", "http"]).optional(),
   description: z.string().optional(),
   branchEndpointUrl: z.string().url().optional(),
+  locationEndpointUrl: z.string().url().optional(),
 });
 
 /**
@@ -117,6 +118,7 @@ endpointsRouter.get(
         httpEndpoint,
         grpcEndpoint: company.grpcEndpoint || null,
         branchEndpointUrl: company.branchEndpointUrl || null,
+        locationEndpointUrl: company.locationEndpointUrl || null,
         adapterType: company.adapterType,
         description: `${
           company.companyName
@@ -270,6 +272,19 @@ endpointsRouter.put(
         }
       }
 
+      // Validate location endpoint URL format if provided
+      if (body.locationEndpointUrl) {
+        try {
+          new URL(body.locationEndpointUrl);
+        } catch {
+          return res.status(400).json({
+            error: "INVALID_LOCATION_ENDPOINT",
+            message:
+              "Location endpoint URL must be a valid URL (e.g., 'https://example.com/locations.php')",
+          });
+        }
+      }
+
       // Update company configuration
       const updatedCompany = await prisma.company.update({
         where: { id: req.user.companyId },
@@ -278,6 +293,7 @@ endpointsRouter.put(
           grpcEndpoint: body.grpcEndpoint,
           httpEndpoint: body.httpEndpoint,
           branchEndpointUrl: body.branchEndpointUrl,
+          locationEndpointUrl: body.locationEndpointUrl,
           updatedAt: new Date(),
         },
         select: {
@@ -288,6 +304,7 @@ endpointsRouter.put(
           grpcEndpoint: true,
           httpEndpoint: true,
           branchEndpointUrl: true,
+          locationEndpointUrl: true,
           updatedAt: true,
         },
       });
@@ -302,6 +319,7 @@ endpointsRouter.put(
             : "http://localhost:9090"),
         grpcEndpoint: updatedCompany.grpcEndpoint,
         branchEndpointUrl: updatedCompany.branchEndpointUrl,
+        locationEndpointUrl: updatedCompany.locationEndpointUrl,
         adapterType: updatedCompany.adapterType,
         updatedAt: updatedCompany.updatedAt,
       });

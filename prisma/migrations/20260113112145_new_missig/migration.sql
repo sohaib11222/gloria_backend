@@ -1,17 +1,16 @@
 -- AlterTable
--- Note: Columns may already exist, but Prisma will handle this safely
-ALTER TABLE `Booking` ADD COLUMN IF NOT EXISTS `availabilityRequestId` VARCHAR(191) NULL,
-    ADD COLUMN IF NOT EXISTS `customerInfoJson` JSON NULL,
-    ADD COLUMN IF NOT EXISTS `driverAge` INTEGER NULL,
-    ADD COLUMN IF NOT EXISTS `dropoffDateTime` DATETIME(3) NULL,
-    ADD COLUMN IF NOT EXISTS `dropoffUnlocode` VARCHAR(191) NULL,
-    ADD COLUMN IF NOT EXISTS `paymentInfoJson` JSON NULL,
-    ADD COLUMN IF NOT EXISTS `pickupDateTime` DATETIME(3) NULL,
-    ADD COLUMN IF NOT EXISTS `pickupUnlocode` VARCHAR(191) NULL,
-    ADD COLUMN IF NOT EXISTS `ratePlanCode` VARCHAR(191) NULL,
-    ADD COLUMN IF NOT EXISTS `residencyCountry` VARCHAR(191) NULL,
-    ADD COLUMN IF NOT EXISTS `vehicleClass` VARCHAR(191) NULL,
-    ADD COLUMN IF NOT EXISTS `vehicleMakeModel` VARCHAR(191) NULL;
+-- Columns already exist in database, but migration must match original applied state
+-- Using conditional logic to make idempotent
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.columns 
+  WHERE table_schema = DATABASE() 
+  AND table_name = 'Booking' 
+  AND column_name = 'availabilityRequestId');
+SET @sql = IF(@col_exists = 0, 
+  'ALTER TABLE `Booking` ADD COLUMN `availabilityRequestId` VARCHAR(191) NULL, ADD COLUMN `customerInfoJson` JSON NULL, ADD COLUMN `driverAge` INTEGER NULL, ADD COLUMN `dropoffDateTime` DATETIME(3) NULL, ADD COLUMN `dropoffUnlocode` VARCHAR(191) NULL, ADD COLUMN `paymentInfoJson` JSON NULL, ADD COLUMN `pickupDateTime` DATETIME(3) NULL, ADD COLUMN `pickupUnlocode` VARCHAR(191) NULL, ADD COLUMN `ratePlanCode` VARCHAR(191) NULL, ADD COLUMN `residencyCountry` VARCHAR(191) NULL, ADD COLUMN `vehicleClass` VARCHAR(191) NULL, ADD COLUMN `vehicleMakeModel` VARCHAR(191) NULL;',
+  'SELECT "Columns already exist" AS message;');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- CreateIndex
 -- Check if index exists before creating

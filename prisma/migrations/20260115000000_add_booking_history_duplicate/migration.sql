@@ -1,5 +1,7 @@
 -- CreateTable
-CREATE TABLE `BookingHistory` (
+-- This migration is a duplicate of 20260114040200_add_booking_history
+-- Table already exists, so this is a no-op migration
+CREATE TABLE IF NOT EXISTS `BookingHistory` (
     `id` VARCHAR(191) NOT NULL,
     `bookingId` VARCHAR(191) NOT NULL,
     `eventType` VARCHAR(191) NOT NULL,
@@ -16,4 +18,3 @@ CREATE TABLE `BookingHistory` (
     INDEX `BookingHistory_timestamp_idx`(`timestamp`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
