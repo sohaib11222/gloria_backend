@@ -2344,9 +2344,24 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
       } else if (data.Location) {
         locations = [data.Location];
       } else {
+        // Provide detailed error message showing what was received
+        const receivedKeys = data && typeof data === 'object' ? Object.keys(data).slice(0, 10) : [];
+        const dataPreview = JSON.stringify(data, null, 2).substring(0, 500);
+        
         return res.status(400).json({
           error: "INVALID_FORMAT",
           message: "Response must contain Locations array or items array",
+          details: {
+            receivedKeys: receivedKeys,
+            dataPreview: dataPreview,
+            expectedFormats: [
+              "JSON: { Locations: [...] }",
+              "JSON: { items: [...] }",
+              "JSON: [location1, location2, ...]",
+              "XML: <Locations><Location>...</Location></Locations>"
+            ],
+            help: "Your endpoint should return location data in one of the supported formats. Each location should have: unlocode (required), country, place, iataCode, latitude, longitude"
+          },
         });
       }
 
