@@ -52,6 +52,7 @@ function getSenderType(req) {
  *     security:
  *       - bearerAuth: []
  */
+// Support both /support/tickets and /api/support/tickets paths
 supportRouter.get("/support/tickets", requireAuth(), async (req, res, next) => {
     try {
         // Check if Prisma client has been regenerated with support models
@@ -144,6 +145,7 @@ supportRouter.get("/support/tickets", requireAuth(), async (req, res, next) => {
  *     security:
  *       - bearerAuth: []
  */
+// Support both /support/tickets and /api/support/tickets paths
 supportRouter.post("/support/tickets", requireAuth(), requireCompanyType("AGENT", "SOURCE"), async (req, res, next) => {
     try {
         const schema = z.object({
