@@ -7,6 +7,7 @@ import { metaFromReq } from "../../grpc/meta.js";
 import { prisma } from "../../data/prisma.js";
 import { notifyAgreementDrafted, notifyAgreementOffered, notifyAgreementAccepted, notifyAgreementStatus } from "../../services/notifications.js";
 import { auditLog } from "../../services/audit.js";
+import { sourceIdsWithActiveSubscription } from "../../services/subscriptionCheck.js";
 
 export const agreementsRouter = Router();
 
@@ -327,10 +328,17 @@ agreementsRouter.get(
         },
         orderBy: { createdAt: "desc" }
       });
-      
+
+      const allSourceIds = [...new Set(agents.flatMap((a: any) => (a.agentAgreements || []).map((ag: any) => ag.sourceId)))];
+      const activeSourceIds = await sourceIdsWithActiveSubscription(allSourceIds);
+      const agentsFiltered = agents.map((a: any) => ({
+        ...a,
+        agentAgreements: (a.agentAgreements || []).filter((ag: any) => activeSourceIds.has(ag.sourceId)),
+      }));
+
       res.json({
-        items: agents,
-        total: agents.length,
+        items: agentsFiltered,
+        total: agentsFiltered.length,
         filters: {
           status: status,
           type: "AGENT"

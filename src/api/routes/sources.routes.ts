@@ -6,6 +6,47 @@ import { requireCompanyType } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
 import { parseXMLToGloria, extractBranchesFromGloria, validateXMLStructure } from "../../services/xmlParser.js";
 
+/** Require active subscription for source; return null if ok, or { status, body } to send as 402 */
+async function requireActiveSubscription(sourceId: string): Promise<{ status: number; body: object } | null> {
+  const sub = await prisma.sourceSubscription.findUnique({
+    where: { sourceId },
+    include: { plan: true },
+  });
+  if (!sub || sub.status !== "active") {
+    return { status: 402, body: { error: "PLAN_REQUIRED", message: "Active plan required. Please subscribe to a plan." } };
+  }
+  const now = new Date();
+  if (!sub.currentPeriodEnd || sub.currentPeriodEnd < now) {
+    return { status: 402, body: { error: "PLAN_EXPIRED", message: "Your plan has expired. Please renew to continue." } };
+  }
+  return null;
+}
+
+/** Check branch/location limit; return null if ok, or { status, body } for 402 */
+async function checkBranchLimit(
+  sourceId: string,
+  planBranchLimit: number,
+  addingBranches: number,
+  addingLocations: number
+): Promise<{ status: number; body: object } | null> {
+  const [branchCount, locationCount] = await Promise.all([
+    prisma.branch.count({ where: { sourceId } }),
+    prisma.sourceLocation.count({ where: { sourceId } }),
+  ]);
+  const current = branchCount + locationCount;
+  const after = current + addingBranches + addingLocations;
+  if (after > planBranchLimit) {
+    return {
+      status: 402,
+      body: {
+        error: "BRANCH_LIMIT_REACHED",
+        message: `Branch/location limit reached for your plan (${current + addingBranches + addingLocations} would exceed limit of ${planBranchLimit}).`,
+      },
+    };
+  }
+  return null;
+}
+
 /**
  * Convert PHP var_dump output to OTA/Gloria structure
  * This handles the case where PHP endpoints return var_dump() output instead of JSON/XML
@@ -839,6 +880,9 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
       });
     }
 
+    const subscriptionCheck = await requireActiveSubscription(sourceId);
+    if (subscriptionCheck) return res.status(subscriptionCheck.status).json(subscriptionCheck.body);
+
     // Use configured branchEndpointUrl, or fallback to httpEndpoint, or default
     const endpointUrl =
       source.branchEndpointUrl ||
@@ -1073,6 +1117,15 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
             error: err.error,
           });
         });
+      }
+
+      const subWithPlan = await prisma.sourceSubscription.findUnique({
+        where: { sourceId },
+        include: { plan: true },
+      });
+      if (subWithPlan?.plan) {
+        const limitCheck = await checkBranchLimit(sourceId, subWithPlan.plan.branchLimit, branches.length, 0);
+        if (limitCheck) return res.status(limitCheck.status).json(limitCheck.body);
       }
 
       // Upsert branches - extract all available fields, use defaults for missing ones
@@ -1460,6 +1513,9 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
       });
     }
 
+    const subscriptionCheckUpload = await requireActiveSubscription(sourceId);
+    if (subscriptionCheckUpload) return res.status(subscriptionCheckUpload.status).json(subscriptionCheckUpload.body);
+
     // Get companyCode from authenticated user's company (automatically from source)
     // companyCode is optional - if not set, validation will skip CompanyCode checks
     const companyCode = source.companyCode || undefined;
@@ -1788,6 +1844,15 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
     // Log validation errors but don't block upload (client wants to store data even if validation fails)
     if (validation.errors.length > 0) {
       console.warn(`[upload-branches] ${validation.errors.length} branch(es) have validation issues, but proceeding with upload as requested`);
+    }
+
+    const subUpload = await prisma.sourceSubscription.findUnique({
+      where: { sourceId },
+      include: { plan: true },
+    });
+    if (subUpload?.plan) {
+      const limitCheckUpload = await checkBranchLimit(sourceId, subUpload.plan.branchLimit, branches.length, 0);
+      if (limitCheckUpload) return res.status(limitCheckUpload.status).json(limitCheckUpload.body);
     }
 
     // Upsert branches - extract all available fields, use null for missing ones
@@ -2233,6 +2298,9 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
       });
     }
 
+    const subscriptionCheckLoc = await requireActiveSubscription(sourceId);
+    if (subscriptionCheckLoc) return res.status(subscriptionCheckLoc.status).json(subscriptionCheckLoc.body);
+
     // Use configured locationEndpointUrl, or fallback to httpEndpoint
     const endpointUrl =
       source.locationEndpointUrl ||
@@ -2504,6 +2572,15 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
       }
 
       console.log(`[import-locations] Extracted ${locations.length} locations`);
+
+      const subLoc = await prisma.sourceSubscription.findUnique({
+        where: { sourceId },
+        include: { plan: true },
+      });
+      if (subLoc?.plan) {
+        const limitCheckLoc = await checkBranchLimit(sourceId, subLoc.plan.branchLimit, 0, locations.length);
+        if (limitCheckLoc) return res.status(limitCheckLoc.status).json(limitCheckLoc.body);
+      }
 
       let imported = 0;
       let updated = 0;

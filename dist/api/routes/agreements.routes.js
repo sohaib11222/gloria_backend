@@ -7,6 +7,7 @@ import { metaFromReq } from "../../grpc/meta.js";
 import { prisma } from "../../data/prisma.js";
 import { notifyAgreementDrafted, notifyAgreementOffered, notifyAgreementAccepted, notifyAgreementStatus } from "../../services/notifications.js";
 import { auditLog } from "../../services/audit.js";
+import { sourceIdsWithActiveSubscription } from "../../services/subscriptionCheck.js";
 export const agreementsRouter = Router();
 // Helper function to convert snake_case to camelCase for agreement responses
 function toAgreementCamelCase(ag) {
@@ -302,9 +303,15 @@ agreementsRouter.get("/agreements/all", requireAuth(), async (req, res, next) =>
             },
             orderBy: { createdAt: "desc" }
         });
+        const allSourceIds = [...new Set(agents.flatMap((a) => (a.agentAgreements || []).map((ag) => ag.sourceId)))];
+        const activeSourceIds = await sourceIdsWithActiveSubscription(allSourceIds);
+        const agentsFiltered = agents.map((a) => ({
+            ...a,
+            agentAgreements: (a.agentAgreements || []).filter((ag) => activeSourceIds.has(ag.sourceId)),
+        }));
         res.json({
-            items: agents,
-            total: agents.length,
+            items: agentsFiltered,
+            total: agentsFiltered.length,
             filters: {
                 status: status,
                 type: "AGENT"

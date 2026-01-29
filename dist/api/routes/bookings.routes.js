@@ -5,6 +5,7 @@ import { z } from "zod";
 import { bookingClient } from "../../grpc/clients/core.js";
 import { metaFromReq } from "../../grpc/meta.js";
 import { prisma } from "../../data/prisma.js";
+import { hasActiveSubscription, sourceIdsWithActiveSubscription } from "../../services/subscriptionCheck.js";
 import { auditLog, logBooking } from "../../services/audit.js";
 import { getBookingHistory } from "../../services/bookingHistory.js";
 export const bookingsRouter = Router();
@@ -38,7 +39,7 @@ bookingsRouter.get("/", requireAuth(), async (req, res, next) => {
 async function getValidBookingData(agentId) {
     try {
         // Get active agreements for this agent
-        const agreements = await prisma.agreement.findMany({
+        const agreementsRaw = await prisma.agreement.findMany({
             where: {
                 agentId: agentId,
                 status: 'ACTIVE'
@@ -54,6 +55,9 @@ async function getValidBookingData(agentId) {
             },
             take: 5 // Limit to 5 most recent
         });
+        const sourceIds = agreementsRaw.map((a) => a.sourceId);
+        const activeSourceIds = await sourceIdsWithActiveSubscription(sourceIds);
+        const agreements = agreementsRaw.filter((a) => activeSourceIds.has(a.sourceId));
         // Get all active sources
         const sources = await prisma.company.findMany({
             where: {
@@ -200,6 +204,10 @@ bookingsRouter.post("/", requireAuth(), async (req, res, next) => {
                 durationMs: Date.now() - startTime,
             });
             return res.status(409).json(errorResponse);
+        }
+        const hasSub = await hasActiveSubscription(agreementRow.sourceId);
+        if (!hasSub) {
+            return res.status(402).json({ error: "SOURCE_SUBSCRIPTION_EXPIRED", message: "Source subscription has expired. This source is not available for bookings." });
         }
         const client = bookingClient();
         // Create a custom error handler to catch AGREEMENT_INACTIVE
@@ -471,6 +479,10 @@ bookingsRouter.patch("/:ref", requireAuth(), requireCompanyStatus("ACTIVE"), asy
             });
             return res.status(409).json(errorResponse);
         }
+        const hasSubModify = await hasActiveSubscription(activeAgreement.sourceId);
+        if (!hasSubModify) {
+            return res.status(402).json({ error: "SOURCE_SUBSCRIPTION_EXPIRED", message: "Source subscription has expired. This source is not available for bookings." });
+        }
         const client = bookingClient();
         client.Modify({ ...qp, source_id: activeAgreement.sourceId, middleware_request_id: requestId, agent_company_id: req.user.companyId }, metaFromReq(req), async (err, resp) => {
             const duration = Date.now() - startTime;
@@ -552,6 +564,10 @@ bookingsRouter.post("/:ref/cancel", requireAuth(), requireCompanyStatus("ACTIVE"
             });
             return res.status(409).json(errorResponse);
         }
+        const hasSubCancel = await hasActiveSubscription(activeAgreement.sourceId);
+        if (!hasSubCancel) {
+            return res.status(402).json({ error: "SOURCE_SUBSCRIPTION_EXPIRED", message: "Source subscription has expired. This source is not available for bookings." });
+        }
         const client = bookingClient();
         client.Cancel({ ...qp, source_id: activeAgreement.sourceId, middleware_request_id: requestId, agent_company_id: req.user.companyId }, metaFromReq(req), async (err, resp) => {
             const duration = Date.now() - startTime;
@@ -632,6 +648,10 @@ bookingsRouter.get("/:ref", requireAuth(), requireCompanyStatus("ACTIVE"), async
                 durationMs: Date.now() - startTime,
             });
             return res.status(409).json(errorResponse);
+        }
+        const hasSubCheck = await hasActiveSubscription(activeAgreement.sourceId);
+        if (!hasSubCheck) {
+            return res.status(402).json({ error: "SOURCE_SUBSCRIPTION_EXPIRED", message: "Source subscription has expired. This source is not available for bookings." });
         }
         const client = bookingClient();
         client.Check({ ...qp, source_id: activeAgreement.sourceId, middleware_request_id: requestId, agent_company_id: req.user.companyId }, metaFromReq(req), async (err, resp) => {

@@ -56,6 +56,15 @@ ENABLE_IP_WHITELIST=false
 LOG_LEVEL=info
 ```
 
+#### Stripe (billing)
+
+To configure Stripe for source plans and checkout:
+
+1. Set env vars (or pass via CLI): `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and optionally `VITE_STRIPE_PUBLISHABLE_KEY` for admin/source UIs.
+2. From the backend directory run: `node scripts/setup-stripe-env.cjs`
+
+The script writes the secret keys to `gloriaconnect_backend/.env` (gitignored) and the publishable key to `gloriaconnect_admin/.env` and `gloriaconnect_source/.env`. Never commit real keys. See `.env.example` for placeholders.
+
 ### 4. Database Setup
 
 ```bash

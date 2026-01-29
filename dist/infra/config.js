@@ -48,6 +48,9 @@ export const config = {
     emailFrom: getEnvVar('EMAIL_FROM', 'no-reply@carhire.local'),
     // Health monitoring
     enableHealthMonitor: getEnvBoolean('ENABLE_HEALTH_MONITOR', true),
+    // Stripe
+    stripeSecretKey: getEnvVar('STRIPE_SECRET_KEY', ''),
+    stripeWebhookSecret: getEnvVar('STRIPE_WEBHOOK_SECRET', ''),
 };
 export function getServiceConfig(serviceName) {
     switch (serviceName) {
@@ -67,6 +70,8 @@ export function getServiceConfig(serviceName) {
                 rateLimitMax: config.rateLimitMax,
                 emailFrom: config.emailFrom,
                 enableHealthMonitor: config.enableHealthMonitor,
+                stripeSecretKey: config.stripeSecretKey,
+                stripeWebhookSecret: config.stripeWebhookSecret,
             };
         case 'source':
             return {

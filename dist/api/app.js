@@ -21,6 +21,7 @@ import { locationValidationRouter } from "./routes/locationValidation.routes.js"
 import { sourcesRouter } from "./routes/sources.routes.js";
 import { supportRouter } from "./routes/support.routes.js";
 import { coverageRouter } from "./routes/coverage.routes.js";
+import { billingRouter, handleStripeWebhook } from "./routes/billing.routes.js";
 import adminTestRoutes from "./routes/adminTest.routes.js";
 import uiRoutes from "./routes/ui.routes.js";
 // import adminGrpcRoutes from "../routes/adminGrpc.js"; // Commented out - file not found
@@ -100,6 +101,9 @@ export function buildApp() {
         }
         next();
     });
+    // Stripe webhook: must use raw body for signature verification (before any JSON body parser)
+    app.post("/api/sources/webhook/stripe", express.raw({ type: "application/json", limit: "10mb" }), (req, res) => handleStripeWebhook(req, res));
+    app.post("/sources/webhook/stripe", express.raw({ type: "application/json", limit: "10mb" }), (req, res) => handleStripeWebhook(req, res));
     // Body parsing middleware - must be careful with multipart/form-data
     // JSON parser - skip for multipart/form-data (handled by multer)
     app.use((req, res, next) => {
@@ -158,6 +162,8 @@ export function buildApp() {
     app.use("/api", supportRouter);
     // Mount sources router with /api prefix to match frontend expectations
     app.use("/api", sourcesRouter);
+    app.use("/api", billingRouter);
+    app.use(billingRouter);
     // Mount endpoints router with /api prefix to match frontend expectations
     app.use("/api", endpointsRouter);
     // Mount health router with /api prefix to match frontend expectations

@@ -12,6 +12,7 @@ import { notifyAgreementOffered, notifyAgreementAccepted, notifyAgreementStatus,
 import { getAdapterForSource } from "../adapters/registry.js";
 import { auditLog } from "../services/audit.js";
 import { SourceHealthService } from "../services/health.js";
+import { hasActiveSubscription } from "../services/subscriptionCheck.js";
 import { VerificationRunner } from "../services/verificationRunner.js";
 import { AvailabilityStore } from "../services/availabilityStore.js";
 import { buildAvailabilityResponse, buildBookingResponse, buildCheckBookingResponse } from "../services/otaResponseBuilder.js";
@@ -157,15 +158,17 @@ export async function startGrpcServers() {
                     const okPick = await isLocationAllowedForAgreement(ag.id, c.pickup_unlocode);
                     const okDrop = await isLocationAllowedForAgreement(ag.id, c.dropoff_unlocode);
                     const isExcluded = await SourceHealthService.isSourceExcluded(ag.sourceId);
+                    const hasSubscription = await hasActiveSubscription(ag.sourceId);
                     console.log(`[Availability.Submit] 📍 Agreement ${ag.agreementRef} (source: ${ag.sourceId}):`, {
                         pickup: c.pickup_unlocode,
                         dropoff: c.dropoff_unlocode,
                         okPick,
                         okDrop,
                         isExcluded,
-                        eligible: okPick && okDrop && !isExcluded
+                        hasSubscription,
+                        eligible: okPick && okDrop && !isExcluded && hasSubscription
                     });
-                    if (okPick && okDrop && !isExcluded) {
+                    if (okPick && okDrop && !isExcluded && hasSubscription) {
                         eligible.push({ ag });
                     }
                 }

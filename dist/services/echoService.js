@@ -2,6 +2,7 @@ import { prisma } from "../data/prisma.js";
 import { v4 as uuidv4 } from "uuid";
 import { getAdapterForSource } from "../adapters/registry.js";
 import { SourceHealthService } from "./health.js";
+import { hasActiveSubscription } from "./subscriptionCheck.js";
 import { logger } from "../infra/logger.js";
 import pLimit from "p-limit";
 import crypto from "crypto";
@@ -40,11 +41,12 @@ export async function submitEcho(requestRef, agentId, agreementRef, payload) {
             },
         },
     });
-    // Filter out excluded sources
+    // Filter out excluded sources and sources without active subscription
     const eligible = [];
     for (const ag of eligibleAgreements) {
         const isExcluded = await SourceHealthService.isSourceExcluded(ag.sourceId);
-        if (!isExcluded && ag.source.status === "ACTIVE" && ag.source.approvalStatus === "APPROVED") {
+        const hasSubscription = await hasActiveSubscription(ag.sourceId);
+        if (!isExcluded && hasSubscription && ag.source.status === "ACTIVE" && ag.source.approvalStatus === "APPROVED") {
             eligible.push({
                 agreementId: ag.id,
                 sourceId: ag.sourceId,

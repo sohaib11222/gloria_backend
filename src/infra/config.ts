@@ -48,6 +48,10 @@ export interface ServiceConfig {
   
   // Health monitoring
   enableHealthMonitor: boolean;
+
+  // Stripe
+  stripeSecretKey: string;
+  stripeWebhookSecret: string;
 }
 
 function getEnvVar(key: string, defaultValue: string = ''): string {
@@ -109,6 +113,10 @@ export const config: ServiceConfig = {
   
   // Health monitoring
   enableHealthMonitor: getEnvBoolean('ENABLE_HEALTH_MONITOR', true),
+
+  // Stripe
+  stripeSecretKey: getEnvVar('STRIPE_SECRET_KEY', ''),
+  stripeWebhookSecret: getEnvVar('STRIPE_WEBHOOK_SECRET', ''),
 };
 
 export function getServiceConfig(serviceName: 'middleware' | 'source' | 'agent'): Partial<ServiceConfig> {
@@ -129,6 +137,8 @@ export function getServiceConfig(serviceName: 'middleware' | 'source' | 'agent')
         rateLimitMax: config.rateLimitMax,
         emailFrom: config.emailFrom,
         enableHealthMonitor: config.enableHealthMonitor,
+        stripeSecretKey: config.stripeSecretKey,
+        stripeWebhookSecret: config.stripeWebhookSecret,
       };
     case 'source':
       return {

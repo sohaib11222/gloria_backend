@@ -51,6 +51,56 @@ enum BookingStatus {
   FAILED
 }
 
+enum PlanInterval {
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  active
+  canceled
+  past_due
+  trialing
+}
+
+model Plan {
+  id            String        @id @default(cuid())
+  name          String        // e.g. "Weekly", "Monthly", "Yearly"
+  interval      PlanInterval
+  stripePriceId String?       // Stripe Price ID for checkout
+  amountCents   Int           // Price in cents
+  branchLimit   Int           // Max branches/locations for this plan
+  active        Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  sourceSubscriptions SourceSubscription[]
+
+  @@index([active])
+}
+
+model SourceSubscription {
+  id                   String             @id @default(cuid())
+  sourceId             String             // Company (type SOURCE)
+  planId               String
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  status               SubscriptionStatus  @default(active)
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?          // Expiry
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  source Company @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  plan   Plan    @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@unique([sourceId])
+  @@index([sourceId])
+  @@index([currentPeriodEnd])
+  @@index([status])
+}
+
 model Company {
   id           String        @id @default(cuid())
   companyName  String
@@ -103,6 +153,7 @@ model Company {
   echoJobs         EchoJob[]
   locationRequests LocationRequest[]
   createdTickets   SupportTicket[]   @relation("CreatedTickets")
+  sourceSubscriptions SourceSubscription[]
 }
 
 model User {
