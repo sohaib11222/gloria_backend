@@ -7,6 +7,7 @@ import { requireCompanyType } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
 import { parseXMLToGloria, extractBranchesFromGloria, validateXMLStructure } from "../../services/xmlParser.js";
 import { isOtaVehAvailResponse, parseOtaVehAvailResponse } from "../../adapters/grpc.adapter.js";
+import { convertPhpVarDumpToVehAvailRS } from "../../services/phpVarDumpVehAvail.js";
 
 /** Require active subscription for source; return null if ok, or { status, body } to send as 402 */
 async function requireActiveSubscription(sourceId: string): Promise<{ status: number; body: object } | null> {
@@ -2812,10 +2813,27 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
         }
       }
 
+      if (typeof raw === "string" && (raw.includes("VehAvailRSCore") && raw.includes("VehVendorAvails"))) {
+        try {
+          const parsed = convertPhpVarDumpToVehAvailRS(raw);
+          if (parsed && isOtaVehAvailResponse(parsed)) raw = parsed;
+        } catch (phpErr: any) {
+          console.warn("[fetch-availability] PHP var_dump parse failed:", phpErr?.message);
+        }
+      }
+
       if (typeof raw !== "object" || !isOtaVehAvailResponse(raw)) {
         return res.status(400).json({
           error: "INVALID_FORMAT",
           message: "Response must be JSON with OTA VehAvailRSCore (VehAvailRSCore and VehVendorAvails)",
+          details: {
+            expectedFormats: [
+              "JSON object with root keys VehAvailRSCore and VehVendorAvails (Content-Type: application/json)",
+              "PHP var_dump text containing VehAvailRSCore and VehVendorAvails (parsed automatically)",
+            ],
+            help: "Return JSON (e.g. json_encode($array) in PHP) or PHP var_dump of the same OTA structure.",
+            dataPreview: typeof raw === "string" ? raw.slice(0, 500) + (raw.length > 500 ? "…" : "") : undefined,
+          },
         });
       }
 
