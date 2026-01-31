@@ -28,5 +28,5 @@ export async function sourceIdsWithActiveSubscription(sourceIds: string[]): Prom
     },
     select: { sourceId: true },
   });
-  return new Set(subs.map((s) => s.sourceId));
+  return new Set(subs.map((s: { sourceId: string }) => s.sourceId));
 }
