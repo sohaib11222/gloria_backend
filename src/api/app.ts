@@ -187,10 +187,11 @@ export function buildApp() {
   app.use(supportRouter);
   // Mount support router with /api prefix to match frontend expectations
   app.use("/api", supportRouter);
-  // Mount sources router with /api prefix to match frontend expectations
-  app.use("/api", sourcesRouter);
+  // Mount billing router BEFORE sources so /api/sources/plans and /api/sources/me/subscription are matched
   app.use("/api", billingRouter);
   app.use(billingRouter);
+  // Mount sources router with /api prefix to match frontend expectations
+  app.use("/api", sourcesRouter);
   // Mount endpoints router with /api prefix to match frontend expectations
   app.use("/api", endpointsRouter);
   // Mount health router with /api prefix to match frontend expectations

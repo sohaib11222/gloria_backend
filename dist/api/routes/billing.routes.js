@@ -174,6 +174,34 @@ const checkoutSessionSchema = z.object({
     successUrl: z.string().url().optional(),
     cancelUrl: z.string().url().optional(),
 });
+const STRIPE_INTERVAL = {
+    WEEKLY: "week",
+    MONTHLY: "month",
+    YEARLY: "year",
+};
+async function ensurePlanStripePrice(plan) {
+    if (plan.stripePriceId)
+        return plan.stripePriceId;
+    if (!stripe)
+        throw new Error("Stripe not configured");
+    const interval = STRIPE_INTERVAL[plan.interval] ?? "month";
+    const product = await stripe.products.create({
+        name: `Gloria Source – ${plan.name}`,
+        metadata: { planId: plan.id },
+    });
+    const price = await stripe.prices.create({
+        product: product.id,
+        unit_amount: plan.amountCents,
+        currency: "usd",
+        recurring: { interval },
+        metadata: { planId: plan.id },
+    });
+    await prisma.plan.update({
+        where: { id: plan.id },
+        data: { stripePriceId: price.id },
+    });
+    return price.id;
+}
 billingRouter.post("/sources/checkout-session", requireAuth(), requireCompanyType("SOURCE"), async (req, res, next) => {
     try {
         if (!stripe)
@@ -186,9 +214,10 @@ billingRouter.post("/sources/checkout-session", requireAuth(), requireCompanyTyp
         const plan = await prisma.plan.findFirst({
             where: { id: body.planId, active: true },
         });
-        if (!plan || !plan.stripePriceId) {
-            return res.status(400).json({ error: "INVALID_PLAN", message: "Plan not found or has no Stripe price" });
+        if (!plan) {
+            return res.status(400).json({ error: "INVALID_PLAN", message: "Plan not found or inactive" });
         }
+        const stripePriceId = await ensurePlanStripePrice(plan);
         const existing = await prisma.sourceSubscription.findUnique({
             where: { sourceId: companyId },
         });
@@ -197,7 +226,7 @@ billingRouter.post("/sources/checkout-session", requireAuth(), requireCompanyTyp
         const cancelUrl = body.cancelUrl || `${baseUrl}?checkout=cancel`;
         const sessionParams = {
             mode: "subscription",
-            line_items: [{ price: plan.stripePriceId, quantity: 1 }],
+            line_items: [{ price: stripePriceId, quantity: 1 }],
             success_url: successUrl,
             cancel_url: cancelUrl,
             metadata: { sourceId: companyId, planId: plan.id },
