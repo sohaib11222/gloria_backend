@@ -208,6 +208,7 @@ billingRouter.get(
 );
 
 // --- Source: checkout session ---
+// Stripe Price IDs (plan.stripePriceId) should be created in Stripe Dashboard with currency EUR.
 
 const checkoutSessionSchema = z.object({
   planId: z.string(),

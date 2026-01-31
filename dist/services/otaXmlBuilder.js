@@ -1,6 +1,48 @@
 import { create } from 'xmlbuilder2';
 import { logger } from '../infra/logger.js';
 /**
+ * Builds OTA_VehAvailRateRQ XML for vehicle availability requests.
+ * Used when calling endpoints like pricetest2.php that expect OTA XML.
+ */
+export function buildOtaVehAvailRateRQ(criteria, requestorId = '1000097') {
+    try {
+        const root = create({ version: '1.0', encoding: 'UTF-8' })
+            .ele('OTA_VehAvailRateRQ', {
+            'xmlns': 'http://www.opentravel.org/OTA/2003/05',
+            'xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance',
+            'xsi:schemaLocation': 'http://www.opentravel.org/OTA/2003/05 OTA_VehAvailRateRQ.xsd',
+            TimeStamp: new Date().toISOString().replace(/\.\d{3}Z$/, ''),
+            Target: 'Production',
+            Version: '1.002'
+        });
+        // POS - Point of Sale
+        const pos = root.ele('POS');
+        const source = pos.ele('Source');
+        source.ele('RequestorID', { Type: '5', ID: requestorId });
+        // VehAvailRQCore
+        const core = root.ele('VehAvailRQCore', { Status: 'Available' });
+        const vehRentalCore = core.ele('VehRentalCore', {
+            PickUpDateTime: criteria.pickup_iso,
+            ReturnDateTime: criteria.dropoff_iso
+        });
+        vehRentalCore.ele('PickUpLocation', { LocationCode: criteria.pickup_unlocode });
+        vehRentalCore.ele('ReturnLocation', { LocationCode: criteria.dropoff_unlocode });
+        core.ele('DriverType', { Age: String(criteria.driver_age ?? 30) });
+        // VehAvailRQInfo - Customer (citizen country)
+        const info = root.ele('VehAvailRQInfo');
+        const customer = info.ele('Customer');
+        const primary = customer.ele('Primary');
+        primary.ele('CitizenCountryName', { Code: criteria.residency_country ?? 'US' });
+        const xmlString = root.end({ prettyPrint: true });
+        logger.debug({ pickup: criteria.pickup_unlocode, dropoff: criteria.dropoff_unlocode }, 'Generated OTA_VehAvailRateRQ XML');
+        return xmlString;
+    }
+    catch (error) {
+        logger.error({ error: error.message, criteria }, 'Failed to build OTA_VehAvailRateRQ');
+        throw new Error(`Failed to build OTA_VehAvailRateRQ: ${error.message}`);
+    }
+}
+/**
  * Builds OTA_VehResRQ XML structure for vehicle reservation requests
  * Based on OTA XML 2024A specification
  */

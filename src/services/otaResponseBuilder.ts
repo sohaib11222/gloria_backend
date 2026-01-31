@@ -15,6 +15,56 @@ export interface AvailabilityCriteria {
   vehicle_classes?: string[];
 }
 
+/** OTA VehTerms item (Included / NotIncluded) */
+export interface VehTermAttr {
+  code?: string;
+  mandatory?: string;
+  header?: string;
+  price?: string;
+  excess?: string;
+  deposit?: string;
+  details?: string;
+}
+
+/** OTA VehicleCharge item */
+export interface VehicleChargeItem {
+  Amount?: string;
+  CurrencyCode?: string;
+  TaxInclusive?: string;
+  GuaranteedInd?: string;
+  Purpose?: string;
+  TaxAmounts?: { TaxAmount?: Array<{ "@attributes"?: { Total?: string; CurrencyCode?: string; Percentage?: string; Description?: string } }> };
+  Calculation?: { "@attributes"?: { UnitCharge?: string; UnitName?: string; Quantity?: string; taxInclusive?: string } };
+}
+
+/** OTA PricedEquip item */
+export interface PricedEquipItem {
+  description?: string;
+  equip_type?: string;
+  vendor_equip_id?: string;
+  charge?: {
+    Amount?: string;
+    UnitCharge?: string;
+    Quantity?: string;
+    TaxInclusive?: string;
+    Taxamounts?: any;
+    Calculation?: any;
+  };
+}
+
+/** Location details for VehRentalCore PickUpLocation/ReturnLocation */
+export interface LocationDetails {
+  LocationCode?: string;
+  locationname?: string;
+  locationaddress?: string;
+  locationcity?: string;
+  locationpostcode?: string;
+  locationtele?: string;
+  emailaddress?: string;
+  locationlong?: string;
+  locationlat?: string;
+}
+
 export interface AvailabilityOffer {
   source_id?: string;
   agreement_ref?: string;
@@ -28,6 +78,24 @@ export interface AvailabilityOffer {
   availability_request_id?: string;
   error?: string;
   message?: string;
+  /** Rich OTA vehicle fields */
+  veh_id?: string;
+  picture_url?: string;
+  door_count?: string;
+  baggage?: string;
+  vehicle_category?: string;
+  air_condition_ind?: string;
+  transmission_type?: string;
+  veh_terms_included?: VehTermAttr[];
+  veh_terms_not_included?: VehTermAttr[];
+  vehicle_charges?: VehicleChargeItem[];
+  total_charge?: { rate_total_amount?: string; currency_code?: string; tax_inclusive?: string };
+  rate_distance?: any;
+  rate_qualifier?: any;
+  calculation?: { UnitCharge?: string; UnitName?: string; Quantity?: string; taxInclusive?: string };
+  priced_equips?: PricedEquipItem[];
+  pickup_location_details?: LocationDetails;
+  return_location_details?: LocationDetails;
 }
 
 /**
@@ -52,13 +120,51 @@ export async function buildAvailabilityResponse(
       offersBySource.get(sourceId)!.push(offer);
     }
 
-    // Build VehRentalCore from criteria
+    // Build VehRentalCore from criteria; use first offer's location details if present
+    const firstOfferWithLocation = offers.find(o => !o.error && (o.pickup_location_details || o.return_location_details));
+    const pickupDetails = firstOfferWithLocation?.pickup_location_details;
+    const returnDetails = firstOfferWithLocation?.return_location_details;
+
     const vehRentalCore: any = {};
-    if (criteria.pickup_unlocode) {
-      vehRentalCore.PickUpLocation = { LocationCode: criteria.pickup_unlocode };
+    if (criteria.pickup_unlocode || pickupDetails) {
+      const locCode = criteria.pickup_unlocode || pickupDetails?.LocationCode;
+      if (pickupDetails && (pickupDetails.locationname || pickupDetails.locationaddress || pickupDetails.emailaddress)) {
+        vehRentalCore.PickUpLocation = {
+          "@attributes": {
+            LocationCode: locCode || "",
+            ...(pickupDetails.locationname && { Locationname: pickupDetails.locationname }),
+            ...(pickupDetails.locationaddress && { Locationaddress: pickupDetails.locationaddress }),
+            ...(pickupDetails.locationcity && { Locationcity: pickupDetails.locationcity }),
+            ...(pickupDetails.locationpostcode && { Locationpostcode: pickupDetails.locationpostcode }),
+            ...(pickupDetails.locationtele && { Locationtele: pickupDetails.locationtele }),
+            ...(pickupDetails.emailaddress && { emailaddress: pickupDetails.emailaddress }),
+            ...(pickupDetails.locationlong && { Locationlong: pickupDetails.locationlong }),
+            ...(pickupDetails.locationlat && { Locationlat: pickupDetails.locationlat }),
+          },
+        };
+      } else {
+        vehRentalCore.PickUpLocation = { LocationCode: locCode || criteria.pickup_unlocode };
+      }
     }
-    if (criteria.dropoff_unlocode) {
-      vehRentalCore.ReturnLocation = { LocationCode: criteria.dropoff_unlocode };
+    if (criteria.dropoff_unlocode || returnDetails) {
+      const locCode = criteria.dropoff_unlocode || returnDetails?.LocationCode;
+      if (returnDetails && (returnDetails.locationname || returnDetails.locationaddress || returnDetails.emailaddress)) {
+        vehRentalCore.ReturnLocation = {
+          "@attributes": {
+            LocationCode: locCode || "",
+            ...(returnDetails.locationname && { Locationname: returnDetails.locationname }),
+            ...(returnDetails.locationaddress && { Locationaddress: returnDetails.locationaddress }),
+            ...(returnDetails.locationcity && { Locationcity: returnDetails.locationcity }),
+            ...(returnDetails.locationpostcode && { Locationpostcode: returnDetails.locationpostcode }),
+            ...(returnDetails.locationtele && { Locationtele: returnDetails.locationtele }),
+            ...(returnDetails.emailaddress && { emailaddress: returnDetails.emailaddress }),
+            ...(returnDetails.locationlong && { Locationlong: returnDetails.locationlong }),
+            ...(returnDetails.locationlat && { Locationlat: returnDetails.locationlat }),
+          },
+        };
+      } else {
+        vehRentalCore.ReturnLocation = { LocationCode: locCode || criteria.dropoff_unlocode };
+      }
     }
     if (criteria.pickup_iso) {
       vehRentalCore.PickUpDateTime = criteria.pickup_iso;
@@ -98,40 +204,151 @@ export async function buildAvailabilityResponse(
           },
         };
 
-        // Vehicle information
-        if (offer.vehicle_class) {
-          vehAvail.VehAvailCore.Vehicle.VehicleCategory = "Car";
-          vehAvail.VehAvailCore.Vehicle.Size = offer.vehicle_class;
-        }
-        if (offer.vehicle_make_model) {
-          vehAvail.VehAvailCore.Vehicle.Name = offer.vehicle_make_model;
-        }
-
-        // RentalRate (at least one required)
-        const rentalRate: any = {};
-        
-        if (offer.total_price !== undefined && offer.currency) {
-          rentalRate.TotalCharge = {
-            RateTotalAmount: offer.total_price,
-            CurrencyCode: offer.currency,
+        // VehAvailCore @attributes (VehID)
+        if (offer.veh_id || offer.supplier_offer_ref) {
+          vehAvail.VehAvailCore["@attributes"] = {
+            Status: offer.availability_status || "Available",
+            RStatus: "Inc",
+            VehID: offer.veh_id || offer.supplier_offer_ref || "",
           };
         }
-        
-        // RateDistance (assume unlimited if not specified)
-        rentalRate.RateDistance = { Unlimited: true };
-        
-        // VehicleCharges (empty for now, can be extended)
-        rentalRate.VehicleCharges = { VehicleCharge: [] };
-        
+
+        // Vehicle information (rich when present)
+        const v = vehAvail.VehAvailCore.Vehicle;
+        if (offer.vehicle_category) {
+          v.VehType = v.VehType || {};
+          v.VehType["@attributes"] = {
+            VehicleCategory: offer.vehicle_category,
+            ...(offer.door_count && { DoorCount: offer.door_count }),
+            ...(offer.baggage && { Baggage: offer.baggage }),
+          };
+        }
+        if (offer.vehicle_class) {
+          v.VehClass = { "@attributes": { Size: offer.vehicle_class } };
+        }
+        if (offer.vehicle_make_model) {
+          v.VehMakeModel = v.VehMakeModel || {};
+          v.VehMakeModel["@attributes"] = {
+            Name: offer.vehicle_make_model,
+            ...(offer.picture_url && { PictureURL: offer.picture_url }),
+          };
+        }
+        if (offer.air_condition_ind || offer.transmission_type) {
+          v["@attributes"] = {
+            ...(offer.air_condition_ind && { AirConditionInd: offer.air_condition_ind }),
+            ...(offer.transmission_type && { TransmissionType: offer.transmission_type }),
+          };
+        }
+
+        // VehTerms (Included / NotIncluded)
+        if (offer.veh_terms_included?.length || offer.veh_terms_not_included?.length) {
+          vehAvail.VehAvailCore.VehTerms = {};
+          if (offer.veh_terms_included?.length) {
+            vehAvail.VehAvailCore.VehTerms.Included = offer.veh_terms_included.map(t => ({
+              "@attributes": {
+                code: t.code,
+                mandatory: t.mandatory ?? "Yes",
+                header: t.header,
+                price: t.price,
+                excess: t.excess,
+                deposit: t.deposit,
+                details: t.details,
+              },
+            }));
+          }
+          if (offer.veh_terms_not_included?.length) {
+            vehAvail.VehAvailCore.VehTerms.NotIncluded = offer.veh_terms_not_included.map(t => ({
+              "@attributes": {
+                code: t.code,
+                mandatory: t.mandatory ?? "No",
+                header: t.header,
+                price: t.price,
+                excess: t.excess,
+                deposit: t.deposit,
+                details: t.details,
+              },
+            }));
+          }
+        }
+
+        // RentalRate (rich when present)
+        const rentalRate: any = {};
+        if (offer.rate_distance) {
+          rentalRate.RateDistance = Array.isArray(offer.rate_distance) ? offer.rate_distance[0] : offer.rate_distance;
+        } else {
+          rentalRate.RateDistance = { Unlimited: true };
+        }
+        if (offer.rate_qualifier) {
+          rentalRate.RateQualifier = Array.isArray(offer.rate_qualifier) ? offer.rate_qualifier[0] : offer.rate_qualifier;
+        }
+        if (offer.total_charge?.rate_total_amount !== undefined && offer.total_charge?.currency_code) {
+          rentalRate.TotalCharge = {
+            "@attributes": {
+              RateTotalAmount: offer.total_charge.rate_total_amount,
+              CurrencyCode: offer.total_charge.currency_code,
+              taxInclusive: offer.total_charge.tax_inclusive ?? "true",
+            },
+          };
+        } else if (offer.total_price !== undefined && offer.currency) {
+          rentalRate.TotalCharge = {
+            "@attributes": {
+              RateTotalAmount: String(offer.total_price),
+              CurrencyCode: offer.currency,
+              taxInclusive: "true",
+            },
+          };
+        }
+        if (offer.vehicle_charges?.length) {
+          rentalRate.VehicleCharges = {
+            VehicleCharge: offer.vehicle_charges.map(ch => {
+              const out: any = {};
+              if (ch.Amount !== undefined || ch.CurrencyCode !== undefined) {
+                out["@attributes"] = {
+                  ...(ch.Amount !== undefined && { Amount: ch.Amount }),
+                  ...(ch.CurrencyCode !== undefined && { CurrencyCode: ch.CurrencyCode }),
+                  ...(ch.TaxInclusive !== undefined && { TaxInclusive: ch.TaxInclusive }),
+                  ...(ch.GuaranteedInd !== undefined && { GuaranteedInd: ch.GuaranteedInd }),
+                  ...(ch.Purpose !== undefined && { Purpose: ch.Purpose }),
+                };
+              }
+              if (ch.TaxAmounts) out.TaxAmounts = ch.TaxAmounts;
+              if (ch.Calculation) out.Calculation = ch.Calculation;
+              return out;
+            }),
+          };
+        } else {
+          rentalRate.VehicleCharges = { VehicleCharge: [] };
+        }
         vehAvail.VehAvailCore.RentalRate.push(rentalRate);
 
-        // PricedEquips (empty for now, can be extended)
-        vehAvail.VehAvailCore.PricedEquips = { PricedEquip: [] };
+        // PricedEquips (rich when present)
+        if (offer.priced_equips?.length) {
+          vehAvail.VehAvailCore.PricedEquips = {
+            PricedEquip: offer.priced_equips.map(eq => ({
+              Equipment: {
+                "@attributes": {
+                  Description: eq.description,
+                  EquipType: eq.equip_type,
+                  vendorEquipID: eq.vendor_equip_id,
+                },
+              },
+              Charge: eq.charge ? {
+                ...(eq.charge.Amount !== undefined && { Amount: eq.charge.Amount }),
+                ...(eq.charge.UnitCharge !== undefined && { Calculation: { "@attributes": { UnitCharge: eq.charge.UnitCharge, UnitName: "Day", Quantity: eq.charge.Quantity, TaxInclusive: eq.charge.TaxInclusive ?? "True" } } }),
+                ...(eq.charge.Taxamounts && { Taxamounts: eq.charge.Taxamounts }),
+                ...(eq.charge.Calculation && { Calculation: eq.charge.Calculation }),
+                TaxInclusive: eq.charge.TaxInclusive ?? "true",
+                IncludedRate: "false",
+                IncludedInEstTotalInd: "false",
+              } : {},
+            })),
+          };
+        } else {
+          vehAvail.VehAvailCore.PricedEquips = { PricedEquip: [] };
+        }
 
-        // Fees (empty for now, can be extended)
         vehAvail.VehAvailCore.Fees = { Fee: [] };
 
-        // Supplier offer reference
         if (offer.supplier_offer_ref) {
           vehAvail.VehAvailCore.SupplierOfferRef = offer.supplier_offer_ref;
         }

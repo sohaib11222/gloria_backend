@@ -412,7 +412,7 @@ func main() {
     {
         id: 'availability',
         name: 'Availability',
-        description: 'Submit → Poll model, OTA-ish payload fields.',
+        description: 'Submit → Poll model, OTA-ish payload fields. When sources return rich OTA data (e.g. OTA VehAvailRS from pricetest2.php), the poll response may include full OTA structure (VehTerms, VehicleCharges, TotalCharge, PricedEquips, PictureURL, DoorCount, Baggage, location attributes) in offers and in ota_response.',
         endpoints: [
             {
                 id: 'availability-submit',
@@ -614,7 +614,7 @@ func main() {
                 name: 'Poll availability',
                 method: 'GET',
                 path: '/availability/poll',
-                description: 'Polls availability results, supports since_seq.',
+                description: 'Polls availability results, supports since_seq. Response includes offers (flat array) and optionally ota_response (OTA VehAvailRS structure). When the source provides rich OTA data, offers may contain veh_terms_included, veh_terms_not_included, vehicle_charges, total_charge, priced_equips, picture_url, door_count, baggage, pickup_location_details, return_location_details, and ota_response will mirror this in VehAvailRSCore.',
                 headers: [{ name: 'Authorization', required: true, description: 'Bearer <token>' }],
                 query: [
                     { name: 'requestId', required: true, type: 'string', description: 'Request ID from submit response' },

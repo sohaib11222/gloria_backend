@@ -118,20 +118,17 @@ export function makeGrpcSourceAdapter(address: string) {
             fullResponse: r
           });
           
-          // Transform response to internal format (matching source_provider.proto VehicleOffer)
+          // Transform response to internal format (matching source_provider.proto VehicleOffer + optional rich fields)
           const offers = (r.vehicles || []).map((v: any, index: number) => {
             // Generate supplier_offer_ref if missing
-            let supplier_offer_ref = v.supplier_offer_ref || "";
+            let supplier_offer_ref = v.supplier_offer_ref || v.supplierOfferRef || "";
             if (!supplier_offer_ref) {
-              // Generate a unique reference based on offer characteristics
-              // Format: GEN-{agreement_ref}-{source_id_short}-{index}-{hash}
               const sourceIdShort = (criteria.source_id || "").substring(0, 8);
               const agreementRefShort = (criteria.agreement_ref || "").substring(0, 10);
               const offerHash = Buffer.from(
                 `${criteria.agreement_ref}-${v.vehicle_class || ""}-${v.make_model || ""}-${v.total_price || 0}-${index}`
               ).toString('base64').substring(0, 8).replace(/[^A-Za-z0-9]/g, '');
               supplier_offer_ref = `GEN-${agreementRefShort}-${sourceIdShort}-${index}-${offerHash}`;
-              
               console.log(`[GrpcSourceAdapter] 🔧 Generated supplier_offer_ref for offer ${index}:`, {
                 original: v.supplier_offer_ref || "(missing)",
                 generated: supplier_offer_ref,
@@ -139,18 +136,42 @@ export function makeGrpcSourceAdapter(address: string) {
                 source_id: criteria.source_id
               });
             }
-            
-            return {
+
+            const base: any = {
               source_id: criteria.source_id || "",
               agreement_ref: criteria.agreement_ref,
-              vehicle_class: v.vehicle_class || "",
-              vehicle_make_model: v.make_model || "", // proto field is make_model
-              rate_plan_code: "", // Not in proto response, will be empty
+              vehicle_class: v.vehicle_class || v.vehicleClass || "",
+              vehicle_make_model: v.make_model || v.makeModel || "",
+              rate_plan_code: "",
               currency: v.currency || "",
-              total_price: v.total_price || 0,
-              supplier_offer_ref: supplier_offer_ref,
-              availability_status: v.availability_status || "AVAILABLE",
+              total_price: v.total_price ?? v.totalPrice ?? 0,
+              supplier_offer_ref,
+              availability_status: v.availability_status || v.availabilityStatus || "AVAILABLE",
             };
+
+            // Optional rich OTA fields from proto
+            if (v.picture_url ?? v.pictureUrl) base.picture_url = v.picture_url ?? v.pictureUrl;
+            if (v.door_count ?? v.doorCount) base.door_count = String(v.door_count ?? v.doorCount);
+            if (v.baggage) base.baggage = String(v.baggage);
+            if (v.vehicle_category ?? v.vehicleCategory) base.vehicle_category = v.vehicle_category ?? v.vehicleCategory;
+            if (v.veh_id ?? v.vehId) base.veh_id = v.veh_id ?? v.vehId;
+
+            if (v.ota_vehicle_json ?? v.otaVehicleJson) {
+              try {
+                const rich = JSON.parse(v.ota_vehicle_json ?? v.otaVehicleJson ?? "{}");
+                if (rich.veh_terms_included) base.veh_terms_included = rich.veh_terms_included;
+                if (rich.veh_terms_not_included) base.veh_terms_not_included = rich.veh_terms_not_included;
+                if (rich.vehicle_charges) base.vehicle_charges = rich.vehicle_charges;
+                if (rich.total_charge) base.total_charge = rich.total_charge;
+                if (rich.rate_distance) base.rate_distance = rich.rate_distance;
+                if (rich.rate_qualifier) base.rate_qualifier = rich.rate_qualifier;
+                if (rich.calculation) base.calculation = rich.calculation;
+                if (rich.priced_equips) base.priced_equips = rich.priced_equips;
+              } catch (e) {
+                console.warn(`[GrpcSourceAdapter] Failed to parse ota_vehicle_json for offer ${index}:`, e);
+              }
+            }
+            return base;
           });
           
           console.log(`[GrpcSourceAdapter] 📦 Transformed ${offers.length} offers from gRPC response`);

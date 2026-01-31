@@ -1,6 +1,191 @@
 // HTTP adapter implementation for connecting to external suppliers
 import fetch from 'node-fetch';
-import { buildOtaVehResRQ, convertToOtaBookingData } from '../services/otaXmlBuilder.js';
+import { buildOtaVehResRQ, buildOtaVehAvailRateRQ, convertToOtaBookingData } from '../services/otaXmlBuilder.js';
+/**
+ * Detect if response is OTA VehAvailRS-shaped (VehAvailRSCore with VehVendorAvails).
+ */
+function isOtaVehAvailResponse(response) {
+    if (!response || typeof response !== 'object')
+        return false;
+    const core = response.VehAvailRSCore;
+    if (!core || typeof core !== 'object')
+        return false;
+    const vendorAvails = core.VehVendorAvails;
+    return !!(vendorAvails && typeof vendorAvails === 'object');
+}
+/**
+ * Normalize to array (PHP/JSON may return single object or array).
+ */
+function asArray(v) {
+    if (v == null)
+        return [];
+    return Array.isArray(v) ? v : [v];
+}
+/**
+ * Extract @attributes from OTA node (may be nested under @attributes key).
+ */
+function attrs(node) {
+    if (!node || typeof node !== 'object')
+        return {};
+    const a = node['@attributes'];
+    return (a && typeof a === 'object') ? a : {};
+}
+/**
+ * Parse OTA VehAvailRS response into internal Offer[] with rich fields.
+ */
+function parseOtaVehAvailResponse(response, sourceId, criteria) {
+    const core = response.VehAvailRSCore;
+    if (!core)
+        return [];
+    const vehRentalCore = core.VehRentalCore || {};
+    const pickupLoc = vehRentalCore.PickUpLocation;
+    const returnLoc = vehRentalCore.ReturnLocation;
+    const pickupAttrs = attrs(pickupLoc);
+    const returnAttrs = attrs(returnLoc);
+    const pickup_location_details = (pickupAttrs.LocationCode || pickupAttrs.Locationname) ? {
+        LocationCode: pickupAttrs.LocationCode,
+        locationname: pickupAttrs.Locationname,
+        locationaddress: pickupAttrs.Locationaddress,
+        locationcity: pickupAttrs.Locationcity,
+        locationpostcode: pickupAttrs.Locationpostcode,
+        locationtele: pickupAttrs.Locationtele,
+        emailaddress: pickupAttrs.emailaddress,
+        locationlong: pickupAttrs.Locationlong,
+        locationlat: pickupAttrs.Locationlat,
+    } : undefined;
+    const return_location_details = (returnAttrs.LocationCode || returnAttrs.Locationname) ? {
+        LocationCode: returnAttrs.LocationCode,
+        locationname: returnAttrs.Locationname,
+        locationaddress: returnAttrs.Locationaddress,
+        locationcity: returnAttrs.Locationcity,
+        locationpostcode: returnAttrs.Locationpostcode,
+        locationtele: returnAttrs.Locationtele,
+        emailaddress: returnAttrs.emailaddress,
+        locationlong: returnAttrs.Locationlong,
+        locationlat: returnAttrs.Locationlat,
+    } : undefined;
+    const vendorAvails = core.VehVendorAvails;
+    const vendorAvailList = asArray(vendorAvails?.VehVendorAvail ?? vendorAvails);
+    const offers = [];
+    for (const vva of vendorAvailList) {
+        const vehAvailsNode = vva.VehAvails ?? vva;
+        const vehAvailList = asArray(vehAvailsNode?.VehAvail ?? vehAvailsNode);
+        for (let i = 0; i < vehAvailList.length; i++) {
+            const item = vehAvailList[i];
+            const coreNode = item.VehAvailCore ?? item;
+            const coreAttrs = attrs(coreNode);
+            const vehID = coreAttrs.VehID || coreAttrs.VehId || '';
+            const vehicle = coreNode.Vehicle ?? {};
+            const vehMakeModel = vehicle.VehMakeModel ?? {};
+            const makeModelAttrs = attrs(vehMakeModel);
+            const vehType = vehicle.VehType ?? {};
+            const vehTypeAttrs = attrs(vehType);
+            const vehClass = vehicle.VehClass ?? {};
+            const vehClassAttrs = attrs(vehClass);
+            const vehicleAttrs = attrs(vehicle);
+            const vehTerms = coreNode.VehTerms ?? {};
+            const included = asArray(vehTerms.Included).map((x) => {
+                const inner = Array.isArray(x) ? x[0] : x;
+                const t = inner?.['@attributes'];
+                return t ? { code: t.code, mandatory: t.mandatory, header: t.header, price: t.price, excess: t.excess, deposit: t.deposit, details: t.details } : {};
+            });
+            const notIncluded = asArray(vehTerms.NotIncluded).map((x) => {
+                const inner = Array.isArray(x) ? x[0] : x;
+                const t = inner?.['@attributes'];
+                return t ? { code: t.code, mandatory: t.mandatory, header: t.header, price: t.price, excess: t.excess, deposit: t.deposit, details: t.details } : {};
+            });
+            const rentalRate = (Array.isArray(coreNode.RentalRate) ? coreNode.RentalRate[0] : coreNode.RentalRate) ?? {};
+            const rateDistance = rentalRate.RateDistance;
+            const rateQualifier = rentalRate.RateQualifier;
+            const vehicleCharges = coreNode.VehicleCharges ?? {};
+            const vehicleChargeList = asArray(vehicleCharges.VehicleCharge).map((ch) => {
+                const a = attrs(ch);
+                const out = { Amount: a.Amount, CurrencyCode: a.CurrencyCode, TaxInclusive: a.TaxInclusive, GuaranteedInd: a.GuaranteedInd, Purpose: a.Purpose };
+                if (ch.TaxAmounts)
+                    out.TaxAmounts = ch.TaxAmounts;
+                if (ch.Calculation)
+                    out.Calculation = ch.Calculation;
+                return out;
+            });
+            const totalChargeNode = coreNode.TotalCharge ?? {};
+            const totalChargeAttrs = attrs(totalChargeNode);
+            const total_charge = (totalChargeAttrs.RateTotalAmount != null || totalChargeAttrs.CurrencyCode) ? {
+                rate_total_amount: totalChargeAttrs.RateTotalAmount,
+                currency_code: totalChargeAttrs.CurrencyCode,
+                tax_inclusive: totalChargeAttrs.taxInclusive ?? 'true',
+            } : undefined;
+            const calculationNode = vehicleChargeList[0]?.Calculation;
+            const calcRaw = calculationNode && typeof calculationNode === 'object' && calculationNode['@attributes'] ? calculationNode['@attributes'] : calculationNode;
+            const calcAttrs = calcRaw && typeof calcRaw === 'object' ? calcRaw : {};
+            const calculation = (calcAttrs.UnitCharge || calcAttrs.UnitName) ? {
+                UnitCharge: calcAttrs.UnitCharge,
+                UnitName: calcAttrs.UnitName,
+                Quantity: calcAttrs.Quantity,
+                taxInclusive: calcAttrs.taxInclusive,
+            } : undefined;
+            const pricedEquipsRaw = asArray(coreNode.PricedEquips);
+            const priced_equips = [];
+            for (const pe of pricedEquipsRaw) {
+                const list = Array.isArray(pe) ? pe : (pe && pe.PricedEquip != null ? asArray(pe.PricedEquip) : [pe]);
+                for (const p of list) {
+                    const pricedEquip = p.PricedEquip ?? p;
+                    const equipNode = pricedEquip?.Equipment ?? pricedEquip;
+                    const equipAttrs = attrs(equipNode);
+                    const chargeNode = pricedEquip?.Charge ?? {};
+                    const charge = typeof chargeNode === 'object' ? chargeNode : {};
+                    const calc = charge.Calculation;
+                    const calcA = calc && typeof calc === 'object' && calc['@attributes'] ? calc['@attributes'] : (typeof calc === 'object' ? calc : {});
+                    priced_equips.push({
+                        description: equipAttrs.Description,
+                        equip_type: equipAttrs.EquipType,
+                        vendor_equip_id: equipAttrs.vendorEquipID ?? equipAttrs.vendorEquipId,
+                        charge: {
+                            Amount: charge.Amount,
+                            UnitCharge: calcA.UnitCharge,
+                            Quantity: calcA.Quantity,
+                            TaxInclusive: charge.TaxInclusive ?? 'true',
+                            Taxamounts: charge.Taxamounts ?? charge.TaxAmounts,
+                            Calculation: charge.Calculation,
+                        },
+                    });
+                }
+            }
+            const name = makeModelAttrs.Name ?? vehicle.Name;
+            const totalPriceNum = total_charge?.rate_total_amount != null ? parseFloat(String(total_charge.rate_total_amount)) : NaN;
+            const supplier_offer_ref = vehID || (criteria.agreement_ref && name ? `GEN-${(criteria.agreement_ref || '').substring(0, 10)}-${(sourceId || '').substring(0, 8)}-${i}-${Buffer.from(`${criteria.agreement_ref}-${name}-${totalPriceNum}-${i}`).toString('base64').substring(0, 8).replace(/[^A-Za-z0-9]/g, '')}` : '');
+            const offer = {
+                source_id: sourceId,
+                agreement_ref: criteria.agreement_ref || '',
+                vehicle_class: vehClassAttrs.Size ?? vehicle.Size ?? '',
+                vehicle_make_model: name ?? '',
+                rate_plan_code: '',
+                currency: total_charge?.currency_code ?? '',
+                total_price: Number.isFinite(totalPriceNum) ? totalPriceNum : 0,
+                supplier_offer_ref: supplier_offer_ref || `GEN-${sourceId}-${i}-${Date.now()}`,
+                availability_status: coreAttrs.Status ?? 'Available',
+                veh_id: vehID || undefined,
+                picture_url: makeModelAttrs.PictureURL ?? undefined,
+                door_count: vehTypeAttrs.DoorCount ?? undefined,
+                baggage: vehTypeAttrs.Baggage ?? undefined,
+                vehicle_category: vehTypeAttrs.VehicleCategory ?? undefined,
+                air_condition_ind: vehicleAttrs.AirConditionInd ?? undefined,
+                transmission_type: vehicleAttrs.TransmissionType ?? undefined,
+                veh_terms_included: included.length ? included : undefined,
+                veh_terms_not_included: notIncluded.length ? notIncluded : undefined,
+                vehicle_charges: vehicleChargeList.length ? vehicleChargeList : undefined,
+                total_charge: total_charge ?? undefined,
+                rate_distance: rateDistance,
+                rate_qualifier: rateQualifier,
+                calculation,
+                priced_equips: priced_equips.length ? priced_equips : undefined,
+                pickup_location_details: i === 0 ? pickup_location_details : undefined,
+                return_location_details: i === 0 ? return_location_details : undefined,
+            };
+            offers.push(offer);
+        }
+    }
+    return offers;
+}
 export class GrpcAdapter {
     config;
     constructor(config) {
@@ -109,25 +294,56 @@ export class GrpcAdapter {
                 DriverAge: criteria.driver_age,
                 ResidencyCountry: criteria.residency_country
             };
-            const url = `${this.config.endpoint}/availability`;
+            const useOtaAvailabilityXml = this.config.useOtaAvailabilityXml === true;
+            const path = '/availability';
+            const url = `${this.config.endpoint}${path}`;
             console.log(`[GrpcAdapter] Making availability request to: ${url}`, {
                 sourceId: this.config.sourceId,
-                criteria: otaCriteria,
+                useOtaAvailabilityXml,
                 endpoint: this.config.endpoint
             });
-            const response = await this.makeRequest('POST', '/availability', otaCriteria);
+            let response;
+            if (useOtaAvailabilityXml) {
+                const xmlBody = buildOtaVehAvailRateRQ({
+                    pickup_unlocode: criteria.pickup_unlocode || '',
+                    dropoff_unlocode: criteria.dropoff_unlocode || '',
+                    pickup_iso: criteria.pickup_iso || '',
+                    dropoff_iso: criteria.dropoff_iso || '',
+                    driver_age: criteria.driver_age,
+                    residency_country: criteria.residency_country || 'US',
+                    vehicle_classes: criteria.vehicle_classes,
+                }, this.config.availabilityRequestorId || '1000097');
+                response = await this.makeRequest('POST', path, xmlBody, true);
+                if (typeof response === 'string') {
+                    try {
+                        response = JSON.parse(response);
+                    }
+                    catch {
+                        // Leave as string if not JSON (e.g. XML response)
+                    }
+                }
+            }
+            else {
+                response = await this.makeRequest('POST', path, otaCriteria);
+            }
             console.log(`[GrpcAdapter] Availability response:`, {
                 sourceId: this.config.sourceId,
                 responseType: Array.isArray(response) ? 'array' : typeof response,
                 responseLength: Array.isArray(response) ? response.length : 'N/A',
-                response: response
+                hasVehAvailRSCore: !!(response && typeof response === 'object' && response.VehAvailRSCore)
             });
-            // Handle case where response is not an array
+            // OTA-shaped response (e.g. from pricetest2.php returning VehAvailRS as JSON)
+            if (typeof response === 'object' && isOtaVehAvailResponse(response)) {
+                const offers = parseOtaVehAvailResponse(response, this.config.sourceId, criteria);
+                console.log(`[GrpcAdapter] Parsed OTA VehAvailRS: ${offers.length} offers for source ${this.config.sourceId}`);
+                return offers;
+            }
+            // Handle case where response is not an array (flat format)
             if (!Array.isArray(response)) {
-                console.warn(`[GrpcAdapter] Expected array response, got:`, typeof response, response);
+                console.warn(`[GrpcAdapter] Expected array or OTA response, got:`, typeof response);
                 return [];
             }
-            // Convert OTA response to internal format
+            // Convert flat array to internal format
             const offers = response.map((offer, index) => {
                 // Generate supplier_offer_ref if missing
                 let supplier_offer_ref = offer.SupplierOfferRef || offer.supplier_offer_ref || "";

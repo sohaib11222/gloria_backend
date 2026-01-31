@@ -35,6 +35,13 @@ message VehicleOffer {
   string currency           = 4;
   double total_price        = 5;
   string availability_status = 6; // AVAILABLE/ON_REQUEST/SOLD_OUT
+  // Optional rich OTA fields (when source returns VehAvailRS-style data)
+  string picture_url        = 7;
+  string door_count         = 8;
+  string baggage            = 9;
+  string vehicle_category   = 10; // ACRISS e.g. CCAR
+  string veh_id             = 11;
+  string ota_vehicle_json    = 12; // JSON blob for VehTerms, VehicleCharges, PricedEquips, total_charge, etc.
 }
 message AvailabilityResponse { 
   repeated VehicleOffer vehicles = 1; 

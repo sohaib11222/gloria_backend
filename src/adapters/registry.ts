@@ -12,6 +12,7 @@ export interface AvailabilityCriteria {
   agreement_ref: string;
 }
 
+/** Optional rich OTA fields (VehTerms, VehicleCharges, PricedEquips, etc.) - same shape as AvailabilityOffer extensions */
 export interface Offer {
   source_id: string;
   agreement_ref: string;
@@ -22,6 +23,24 @@ export interface Offer {
   total_price: number;
   supplier_offer_ref: string;
   availability_status?: string; // AVAILABLE, ON_REQUEST, etc.
+  // Rich OTA optional fields (when source returns VehAvailRS-style data)
+  veh_id?: string;
+  picture_url?: string;
+  door_count?: string;
+  baggage?: string;
+  vehicle_category?: string;
+  air_condition_ind?: string;
+  transmission_type?: string;
+  veh_terms_included?: Array<{ code?: string; mandatory?: string; header?: string; price?: string; excess?: string; deposit?: string; details?: string }>;
+  veh_terms_not_included?: Array<{ code?: string; mandatory?: string; header?: string; price?: string; excess?: string; deposit?: string; details?: string }>;
+  vehicle_charges?: any[];
+  total_charge?: { rate_total_amount?: string; currency_code?: string; tax_inclusive?: string };
+  rate_distance?: any;
+  rate_qualifier?: any;
+  calculation?: { UnitCharge?: string; UnitName?: string; Quantity?: string; taxInclusive?: string };
+  priced_equips?: any[];
+  pickup_location_details?: Record<string, string | undefined>;
+  return_location_details?: Record<string, string | undefined>;
 }
 
 export interface CreateBookingInput {
