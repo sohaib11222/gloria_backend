@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
 import fetch from "node-fetch";
+import crypto from "crypto";
 import { requireAuth } from "../../infra/auth.js";
 import { requireCompanyType } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
 import { parseXMLToGloria, extractBranchesFromGloria, validateXMLStructure } from "../../services/xmlParser.js";
+import { isOtaVehAvailResponse, parseOtaVehAvailResponse } from "../../adapters/grpc.adapter.js";
 
 /** Require active subscription for source; return null if ok, or { status, body } to send as 402 */
 async function requireActiveSubscription(sourceId: string): Promise<{ status: number; body: object } | null> {
@@ -2713,6 +2715,168 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
   } catch (error: any) {
     console.error('[import-locations] Error:', error);
     next(error);
+  }
+});
+
+/**
+ * POST /sources/fetch-availability
+ * Fetches availability from source's availability endpoint, parses OTA VehAvailRS, and stores with dedupe (no duplicate for same criteria).
+ */
+sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
+  try {
+    const sourceId = req.user.companyId;
+    const body = (req.body || {}) as { url?: string; pickupDateTime?: string; returnDateTime?: string; pickupLoc?: string; returnLoc?: string };
+
+    const source = await prisma.company.findUnique({
+      where: { id: sourceId },
+      select: {
+        id: true,
+        httpEndpoint: true,
+        availabilityEndpointUrl: true,
+      },
+    });
+
+    if (!source) {
+      return res.status(404).json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
+    }
+
+    let endpointUrl = (body.url || source.availabilityEndpointUrl || "").trim();
+    if (!endpointUrl && source.httpEndpoint) {
+      endpointUrl = source.httpEndpoint.replace(/\/$/, "") + "/availability";
+    }
+    if (!endpointUrl) {
+      return res.status(400).json({
+        error: "ENDPOINT_NOT_CONFIGURED",
+        message: "Configure an availability endpoint URL (Pricing tab) or set availabilityEndpointUrl / httpEndpoint",
+      });
+    }
+
+    if (!endpointUrl.startsWith("http://") && !endpointUrl.startsWith("https://")) {
+      endpointUrl = `http://${endpointUrl}`;
+    }
+
+    const pickupIso = body.pickupDateTime || "2026-02-22T12:00:00";
+    const returnIso = body.returnDateTime || "2026-02-27T12:00:00";
+    const pickupLoc = body.pickupLoc || "DXBA02";
+    const returnLoc = body.returnLoc || "DXBA02";
+
+    const criteria = {
+      pickup_unlocode: pickupLoc,
+      dropoff_unlocode: returnLoc,
+      pickup_iso: pickupIso,
+      dropoff_iso: returnIso,
+      driver_age: 30,
+      residency_country: "AE",
+    };
+
+    const criteriaHash = crypto.createHash("sha256").update(`${sourceId}|${pickupIso}|${returnIso}|${pickupLoc}|${returnLoc}`).digest("hex").slice(0, 32);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    try {
+      const fetchResponse = await fetch(endpointUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          PickupLocation: pickupLoc,
+          DropOffLocation: returnLoc,
+          PickupDateTime: pickupIso,
+          DropOffDateTime: returnIso,
+        }),
+        signal: controller.signal,
+      } as any);
+
+      clearTimeout(timeoutId);
+
+      if (!fetchResponse.ok) {
+        return res.status(fetchResponse.status).json({
+          error: "SUPPLIER_ERROR",
+          message: `Availability endpoint returned ${fetchResponse.status}`,
+        });
+      }
+
+      let raw: string | object = await fetchResponse.text();
+      const contentType = fetchResponse.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        try {
+          raw = JSON.parse(raw as string);
+        } catch {
+          // leave as string
+        }
+      } else if (typeof raw === "string" && (raw.trim().startsWith("{") && (raw as string).includes("VehAvailRSCore"))) {
+        try {
+          raw = JSON.parse(raw as string);
+        } catch {
+          // leave as string
+        }
+      }
+
+      if (typeof raw !== "object" || !isOtaVehAvailResponse(raw)) {
+        return res.status(400).json({
+          error: "INVALID_FORMAT",
+          message: "Response must be JSON with OTA VehAvailRSCore (VehAvailRSCore and VehVendorAvails)",
+        });
+      }
+
+      const offers = parseOtaVehAvailResponse(raw, sourceId, criteria);
+      const offersCount = offers.length;
+      const sampleJson = offers.length > 0
+        ? { count: offersCount, firstOffer: { vehicle_class: offers[0].vehicle_class, vehicle_make_model: offers[0].vehicle_make_model } }
+        : { count: 0 };
+
+      const existing = await prisma.sourceAvailabilitySample.findUnique({
+        where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
+      });
+
+      await prisma.sourceAvailabilitySample.upsert({
+        where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
+        update: {
+          pickupIso,
+          returnIso,
+          pickupLoc,
+          returnLoc,
+          offersCount,
+          sampleJson: sampleJson as any,
+          updatedAt: new Date(),
+        },
+        create: {
+          sourceId,
+          criteriaHash,
+          pickupIso,
+          returnIso,
+          pickupLoc,
+          returnLoc,
+          offersCount,
+          sampleJson: sampleJson as any,
+        },
+      });
+
+      res.json({
+        message: existing ? "Availability data updated (no duplicate stored)" : "Availability data stored",
+        offersCount,
+        stored: true,
+        isNew: !existing,
+      });
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === "AbortError" || fetchError.code === "ETIMEDOUT") {
+        return res.status(504).json({
+          error: "TIMEOUT",
+          message: "Availability endpoint timeout after 15s",
+        });
+      }
+      if (fetchError.message?.includes("fetch failed") || fetchError.code === "ECONNREFUSED" || fetchError.code === "ENOTFOUND") {
+        return res.status(503).json({
+          error: "ENDPOINT_CONNECTION_ERROR",
+          message: "Cannot connect to availability endpoint",
+          details: fetchError.message || fetchError.code,
+        });
+      }
+      throw fetchError;
+    }
+  } catch (e: any) {
+    next(e);
   }
 });
 

@@ -131,6 +131,7 @@ model Company {
   httpEndpoint String? // Optional HTTP endpoint for JSON fallback/test
   branchEndpointUrl String? // Branch import endpoint URL (supports XML and JSON)
   locationEndpointUrl String? // Location import endpoint URL (supports XML and JSON)
+  availabilityEndpointUrl String? // Availability/pricing endpoint URL (OTA VehAvailRS JSON)
 
   // TLS/mTLS configuration for gRPC (JSON)
   tlsProfile Json?
@@ -154,6 +155,26 @@ model Company {
   locationRequests LocationRequest[]
   createdTickets   SupportTicket[]   @relation("CreatedTickets")
   sourceSubscriptions SourceSubscription[]
+  availabilitySamples SourceAvailabilitySample[]
+}
+
+model SourceAvailabilitySample {
+  id          String   @id @default(cuid())
+  sourceId    String
+  criteriaHash String  // hash of pickup+return+locations for dedupe
+  pickupIso   String?
+  returnIso   String?
+  pickupLoc   String?
+  returnLoc   String?
+  offersCount Int      @default(0)
+  sampleJson  Json?    // parsed offers summary or raw response snippet
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  source Company @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, criteriaHash])
+  @@index([sourceId])
 }
 
 model User {
