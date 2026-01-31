@@ -4,7 +4,7 @@ import { buildOtaVehResRQ, buildOtaVehAvailRateRQ, convertToOtaBookingData } fro
 /**
  * Detect if response is OTA VehAvailRS-shaped (VehAvailRSCore with VehVendorAvails).
  */
-function isOtaVehAvailResponse(response) {
+export function isOtaVehAvailResponse(response) {
     if (!response || typeof response !== 'object')
         return false;
     const core = response.VehAvailRSCore;
@@ -33,7 +33,7 @@ function attrs(node) {
 /**
  * Parse OTA VehAvailRS response into internal Offer[] with rich fields.
  */
-function parseOtaVehAvailResponse(response, sourceId, criteria) {
+export function parseOtaVehAvailResponse(response, sourceId, criteria) {
     const core = response.VehAvailRSCore;
     if (!core)
         return [];
@@ -325,6 +325,20 @@ export class GrpcAdapter {
             }
             else {
                 response = await this.makeRequest('POST', path, otaCriteria);
+            }
+            // If response is string (e.g. wrong Content-Type or PHP returning JSON as text), try parsing as JSON
+            if (typeof response === 'string') {
+                const trimmed = response.trim();
+                if ((trimmed.startsWith('{') && trimmed.includes('VehAvailRSCore')) || trimmed.startsWith('[')) {
+                    try {
+                        const parsed = JSON.parse(response);
+                        response = parsed;
+                        console.log(`[GrpcAdapter] Parsed availability response as JSON (was string)`);
+                    }
+                    catch {
+                        // Leave as string; will fall through and return [] for non-OTA
+                    }
+                }
             }
             console.log(`[GrpcAdapter] Availability response:`, {
                 sourceId: this.config.sourceId,

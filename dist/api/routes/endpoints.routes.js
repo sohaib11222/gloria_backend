@@ -14,6 +14,7 @@ const endpointConfigSchema = z.object({
     description: z.string().optional(),
     branchEndpointUrl: z.string().url().optional(),
     locationEndpointUrl: z.string().url().optional(),
+    availabilityEndpointUrl: z.string().url().optional(),
 });
 /**
  * @openapi
@@ -85,6 +86,7 @@ endpointsRouter.get("/endpoints/config", requireAuth(), async (req, res, next) =
                 httpEndpoint: true,
                 branchEndpointUrl: true,
                 locationEndpointUrl: true,
+                availabilityEndpointUrl: true,
                 updatedAt: true,
                 lastGrpcTestResult: true,
                 lastGrpcTestAt: true,
@@ -109,6 +111,7 @@ endpointsRouter.get("/endpoints/config", requireAuth(), async (req, res, next) =
             grpcEndpoint: company.grpcEndpoint || null,
             branchEndpointUrl: company.branchEndpointUrl || null,
             locationEndpointUrl: company.locationEndpointUrl || null,
+            availabilityEndpointUrl: company.availabilityEndpointUrl || null,
             adapterType: company.adapterType,
             description: `${company.companyName} ${company.type.toLowerCase()} endpoints`,
             status: company.status,
@@ -260,6 +263,18 @@ endpointsRouter.put("/endpoints/config", requireAuth(), async (req, res, next) =
                 });
             }
         }
+        // Validate availability endpoint URL format if provided
+        if (body.availabilityEndpointUrl) {
+            try {
+                new URL(body.availabilityEndpointUrl);
+            }
+            catch {
+                return res.status(400).json({
+                    error: "INVALID_AVAILABILITY_ENDPOINT",
+                    message: "Availability endpoint URL must be a valid URL (e.g., 'https://example.com/pricetest2.php')",
+                });
+            }
+        }
         // Update company configuration
         const updatedCompany = await prisma.company.update({
             where: { id: req.user.companyId },
@@ -269,6 +284,7 @@ endpointsRouter.put("/endpoints/config", requireAuth(), async (req, res, next) =
                 httpEndpoint: body.httpEndpoint,
                 branchEndpointUrl: body.branchEndpointUrl,
                 locationEndpointUrl: body.locationEndpointUrl,
+                availabilityEndpointUrl: body.availabilityEndpointUrl,
                 updatedAt: new Date(),
             },
             select: {
@@ -280,6 +296,7 @@ endpointsRouter.put("/endpoints/config", requireAuth(), async (req, res, next) =
                 httpEndpoint: true,
                 branchEndpointUrl: true,
                 locationEndpointUrl: true,
+                availabilityEndpointUrl: true,
                 updatedAt: true,
             },
         });
@@ -293,6 +310,7 @@ endpointsRouter.put("/endpoints/config", requireAuth(), async (req, res, next) =
             grpcEndpoint: updatedCompany.grpcEndpoint,
             branchEndpointUrl: updatedCompany.branchEndpointUrl,
             locationEndpointUrl: updatedCompany.locationEndpointUrl,
+            availabilityEndpointUrl: updatedCompany.availabilityEndpointUrl,
             adapterType: updatedCompany.adapterType,
             updatedAt: updatedCompany.updatedAt,
         });
