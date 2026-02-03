@@ -289,6 +289,100 @@ billingRouter.post(
   }
 );
 
+// --- Admin: list all transactions (Stripe invoices) ---
+
+billingRouter.get(
+  "/admin/transactions",
+  requireAuth(),
+  requireRole("ADMIN"),
+  async (_req, res, next) => {
+    try {
+      if (!stripe) {
+        return res.json({ items: [], message: "Stripe not configured" });
+      }
+      const invoices = await stripe.invoices.list({
+        limit: 100,
+        expand: ["data.subscription", "data.customer"],
+      });
+      const customerIds = [...new Set(invoices.data.map((inv) => inv.customer as string).filter(Boolean))];
+      const subsByCustomer = await prisma.sourceSubscription.findMany({
+        where: { stripeCustomerId: { in: customerIds } },
+        include: { source: { select: { id: true, companyName: true, email: true } }, plan: true },
+      });
+      const byCustomer = new Map(subsByCustomer.map((s) => [s.stripeCustomerId, s]));
+      const items = invoices.data.map((inv) => {
+        const sub = inv.customer ? byCustomer.get(inv.customer as string) : null;
+        return {
+          id: inv.id,
+          stripeInvoiceId: inv.id,
+          sourceId: sub?.sourceId ?? null,
+          sourceName: sub?.source?.companyName ?? null,
+          customerEmail: sub?.source?.email ?? (inv.customer_email || null),
+          planName: sub?.plan?.name ?? null,
+          status: inv.status ?? "draft",
+          amountPaid: inv.amount_paid ?? 0,
+          amountDue: inv.amount_due ?? 0,
+          currency: (inv.currency ?? "usd").toUpperCase(),
+          createdAt: inv.created ? new Date(inv.created * 1000).toISOString() : null,
+          periodStart: inv.period_start ? new Date(inv.period_start * 1000).toISOString() : null,
+          periodEnd: inv.period_end ? new Date(inv.period_end * 1000).toISOString() : null,
+          invoicePdf: inv.invoice_pdf ?? null,
+          hostedInvoiceUrl: inv.hosted_invoice_url ?? null,
+        };
+      });
+      res.json({ items });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+// --- Source: my transactions (Stripe invoices for my customer) ---
+
+billingRouter.get(
+  "/sources/me/transactions",
+  requireAuth(),
+  requireCompanyType("SOURCE"),
+  async (req: any, res, next) => {
+    try {
+      const companyId = req.user?.companyId;
+      if (!companyId) return res.status(401).json({ error: "AUTH_ERROR", message: "Company not found" });
+      const sub = await prisma.sourceSubscription.findUnique({
+        where: { sourceId: companyId },
+        include: { plan: true },
+      });
+      if (!sub?.stripeCustomerId) {
+        return res.json({ items: [] });
+      }
+      if (!stripe) {
+        return res.json({ items: [] });
+      }
+      const invoices = await stripe.invoices.list({
+        customer: sub.stripeCustomerId,
+        limit: 50,
+        expand: ["data.subscription"],
+      });
+      const items = invoices.data.map((inv) => ({
+        id: inv.id,
+        stripeInvoiceId: inv.id,
+        planName: sub.plan?.name ?? null,
+        status: inv.status ?? "draft",
+        amountPaid: inv.amount_paid ?? 0,
+        amountDue: inv.amount_due ?? 0,
+        currency: (inv.currency ?? "usd").toUpperCase(),
+        createdAt: inv.created ? new Date(inv.created * 1000).toISOString() : null,
+        periodStart: inv.period_start ? new Date(inv.period_start * 1000).toISOString() : null,
+        periodEnd: inv.period_end ? new Date(inv.period_end * 1000).toISOString() : null,
+        invoicePdf: inv.invoice_pdf ?? null,
+        hostedInvoiceUrl: inv.hosted_invoice_url ?? null,
+      }));
+      res.json({ items });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
 // --- Webhook (called with raw body from app.ts) ---
 
 export async function handleStripeWebhook(req: Request, res: Response): Promise<void> {
