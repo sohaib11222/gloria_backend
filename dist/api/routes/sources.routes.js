@@ -2626,9 +2626,31 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
             const sampleJson = offers.length > 0
                 ? { count: offersCount, firstOffer: { vehicle_class: offers[0].vehicle_class, vehicle_make_model: offers[0].vehicle_make_model } }
                 : { count: 0 };
+            const offersSummary = offers.map((o) => ({
+                vehicle_class: o.vehicle_class ?? "",
+                vehicle_make_model: o.vehicle_make_model ?? "",
+                total_price: o.total_price,
+                currency: o.currency ?? "",
+                availability_status: o.availability_status ?? "",
+            }));
+            const criteriaDisplay = { pickupLoc, returnLoc, pickupIso, returnIso };
             const existing = await prisma.sourceAvailabilitySample.findUnique({
                 where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
             });
+            const isSameContent = existing &&
+                existing.offersCount === offersCount &&
+                JSON.stringify(existing.sampleJson ?? null) === JSON.stringify(sampleJson ?? null);
+            if (isSameContent) {
+                return res.json({
+                    message: "Data unchanged (same as existing); not stored.",
+                    offersCount,
+                    stored: false,
+                    duplicate: true,
+                    isNew: false,
+                    offersSummary,
+                    criteria: criteriaDisplay,
+                });
+            }
             await prisma.sourceAvailabilitySample.upsert({
                 where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
                 update: {
@@ -2652,10 +2674,13 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                 },
             });
             res.json({
-                message: existing ? "Availability data updated (no duplicate stored)" : "Availability data stored",
+                message: existing ? "Availability data updated (new data stored)" : "Availability data stored",
                 offersCount,
                 stored: true,
                 isNew: !existing,
+                duplicate: false,
+                offersSummary,
+                criteria: criteriaDisplay,
             });
         }
         catch (fetchError) {

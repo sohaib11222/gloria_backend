@@ -160,6 +160,8 @@ export function buildApp() {
     app.use(supportRouter);
     // Mount support router with /api prefix to match frontend expectations
     app.use("/api", supportRouter);
+    // Also mount at /api/api so frontend using baseURL + "/api/support/..." still works
+    app.use("/api/api", supportRouter);
     // Mount billing router BEFORE sources so /api/sources/plans and /api/sources/me/subscription are matched
     app.use("/api", billingRouter);
     app.use(billingRouter);
