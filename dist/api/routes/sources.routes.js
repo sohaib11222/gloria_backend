@@ -42,6 +42,45 @@ async function checkBranchLimit(sourceId, planBranchLimit, addingBranches, addin
     return null;
 }
 /**
+ * Find the position of the matching closing brace, skipping braces inside double-quoted strings.
+ * PHP var_dump can have "}" inside string values which would break naive brace counting.
+ */
+function findMatchingBraceSkipStrings(text, openBracePos) {
+    let braceCount = 1;
+    let pos = openBracePos + 1;
+    let inString = false;
+    let escape = false;
+    while (pos < text.length && braceCount > 0) {
+        const c = text[pos];
+        if (escape) {
+            escape = false;
+            pos++;
+            continue;
+        }
+        if (inString) {
+            if (c === '\\')
+                escape = true;
+            else if (c === '"')
+                inString = false;
+            pos++;
+            continue;
+        }
+        if (c === '"') {
+            inString = true;
+            pos++;
+            continue;
+        }
+        if (c === '{')
+            braceCount++;
+        else if (c === '}')
+            braceCount--;
+        if (braceCount === 0)
+            return pos;
+        pos++;
+    }
+    return -1;
+}
+/**
  * Convert PHP var_dump output to OTA/Gloria structure
  * This handles the case where PHP endpoints return var_dump() output instead of JSON/XML
  * The PHP var_dump shows an OTA_VehLocSearchRS structure that we need to convert
@@ -71,21 +110,7 @@ function convertPhpVarDumpToOta(phpText) {
         if (bracePos === -1) {
             throw new Error("Could not find opening brace for VehMatchedLocs");
         }
-        // Find matching closing brace - count braces to find the end
-        let braceCount = 1;
-        let pos = bracePos + 1;
-        let vehMatchedLocsEnd = -1;
-        while (pos < phpText.length && braceCount > 0) {
-            if (phpText[pos] === '{')
-                braceCount++;
-            if (phpText[pos] === '}')
-                braceCount--;
-            if (braceCount === 0) {
-                vehMatchedLocsEnd = pos;
-                break;
-            }
-            pos++;
-        }
+        const vehMatchedLocsEnd = findMatchingBraceSkipStrings(phpText, bracePos);
         if (vehMatchedLocsEnd === -1) {
             throw new Error("Could not find closing brace for VehMatchedLocs");
         }
@@ -109,21 +134,7 @@ function convertPhpVarDumpToOta(phpText) {
             const contentStart = vehMatchedLocsText.indexOf('{', arrayStart);
             if (contentStart === -1)
                 break;
-            // Find matching closing brace for this LocationDetail
-            let detailBraceCount = 1;
-            let detailPos = contentStart + 1;
-            let detailEnd = -1;
-            while (detailPos < vehMatchedLocsText.length && detailBraceCount > 0) {
-                if (vehMatchedLocsText[detailPos] === '{')
-                    detailBraceCount++;
-                if (vehMatchedLocsText[detailPos] === '}')
-                    detailBraceCount--;
-                if (detailBraceCount === 0) {
-                    detailEnd = detailPos;
-                    break;
-                }
-                detailPos++;
-            }
+            const detailEnd = findMatchingBraceSkipStrings(vehMatchedLocsText, contentStart);
             if (detailEnd === -1)
                 break;
             const locationText = vehMatchedLocsText.substring(contentStart + 1, detailEnd);
@@ -165,21 +176,7 @@ function convertPhpVarDumpToOta(phpText) {
                         if (arrayStart !== -1) {
                             const contentStart = vehMatchedLocsText.indexOf('{', arrayStart);
                             if (contentStart !== -1) {
-                                // Find matching closing brace
-                                let braceCount = 1;
-                                let pos = contentStart + 1;
-                                let detailEnd = -1;
-                                while (pos < vehMatchedLocsText.length && braceCount > 0) {
-                                    if (vehMatchedLocsText[pos] === '{')
-                                        braceCount++;
-                                    if (vehMatchedLocsText[pos] === '}')
-                                        braceCount--;
-                                    if (braceCount === 0) {
-                                        detailEnd = pos;
-                                        break;
-                                    }
-                                    pos++;
-                                }
+                                const detailEnd = findMatchingBraceSkipStrings(vehMatchedLocsText, contentStart);
                                 if (detailEnd !== -1) {
                                     const locationText = vehMatchedLocsText.substring(contentStart + 1, detailEnd);
                                     const locationDetail = parsePhpLocationDetail(locationText);
@@ -237,22 +234,7 @@ function parsePhpLocationDetail(locationText) {
             // Find opening brace
             const braceStart = locationText.indexOf('{', arrayStart);
             if (braceStart !== -1) {
-                // Find matching closing brace - need to count nested braces
-                let braceCount = 1;
-                let pos = braceStart + 1;
-                let braceEnd = -1;
-                while (pos < locationText.length && braceCount > 0) {
-                    const char = locationText[pos];
-                    if (char === '{')
-                        braceCount++;
-                    else if (char === '}')
-                        braceCount--;
-                    if (braceCount === 0) {
-                        braceEnd = pos;
-                        break;
-                    }
-                    pos++;
-                }
+                const braceEnd = findMatchingBraceSkipStrings(locationText, braceStart);
                 if (braceEnd !== -1) {
                     const attrSection = locationText.substring(braceStart + 1, braceEnd);
                     // Match: ["Key"]=> string(length) "value"
@@ -2217,17 +2199,24 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
                                         unlocode = code;
                                     }
                                 }
-                                // 3. Derive from country code + location identifier
+                                // 3. Derive from country code + location identifier (last 3 chars for 5-char UN/LOCODE)
                                 if (!unlocode && countryCode && attrs.Code) {
                                     const code = String(attrs.Code).toUpperCase().trim();
-                                    // Use last 3 characters of code to form UN/LOCODE
                                     const locationSuffix = code.length >= 3 ? code.substring(code.length - 3) : code;
                                     unlocode = `${countryCode}${locationSuffix}`;
+                                }
+                                // 4. When Code/BranchType is 6 chars (e.g. DXBA02), use country + first 3 chars for AEDXB-style
+                                if (!unlocode && countryCode && (attrs.Code || attrs.BranchType)) {
+                                    const code = String(attrs.Code || attrs.BranchType).toUpperCase().trim();
+                                    if (code.length >= 3) {
+                                        const locPart = code.length >= 5 ? code.substring(0, 3) : code;
+                                        unlocode = `${countryCode}${locPart}`;
+                                    }
                                 }
                                 // Extract location fields
                                 const extractedLocation = {
                                     unlocode: unlocode,
-                                    country: countryCode,
+                                    country: countryCode || (unlocode ? unlocode.substring(0, 2) : ''),
                                     place: (attrs.Name || locationDetail.Name || '').toString().trim(),
                                     iataCode: (attrs.IataCode || locationDetail.IataCode || '').toString().trim() || null,
                                     latitude: attrs.Latitude ? parseFloat(String(attrs.Latitude)) :
@@ -2316,13 +2305,20 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
                                 // 3. Derive from country code + location identifier
                                 if (!unlocode && countryCode && attrs.Code) {
                                     const code = String(attrs.Code).toUpperCase().trim();
-                                    // Use last 3 characters of code to form UN/LOCODE
                                     const locationSuffix = code.length >= 3 ? code.substring(code.length - 3) : code;
                                     unlocode = `${countryCode}${locationSuffix}`;
                                 }
+                                // 4. When Code/BranchType is 6 chars, use country + first 3 chars (e.g. AEDXB)
+                                if (!unlocode && countryCode && (attrs.Code || attrs.BranchType)) {
+                                    const code = String(attrs.Code || attrs.BranchType).toUpperCase().trim();
+                                    if (code.length >= 3) {
+                                        const locPart = code.length >= 5 ? code.substring(0, 3) : code;
+                                        unlocode = `${countryCode}${locPart}`;
+                                    }
+                                }
                                 const extractedLocation = {
                                     unlocode: unlocode,
-                                    country: countryCode,
+                                    country: countryCode || (unlocode ? unlocode.substring(0, 2) : ''),
                                     place: (attrs.Name || locationDetail.Name || '').toString().trim(),
                                     iataCode: (attrs.IataCode || locationDetail.IataCode || '').toString().trim() || null,
                                     latitude: attrs.Latitude ? parseFloat(String(attrs.Latitude)) :
@@ -2405,7 +2401,8 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
                     if (!unlocode) {
                         errors.push({
                             index: i,
-                            error: "Missing unlocode field",
+                            unlocode: (loc.unlocode || loc.code || loc.Code || loc.UnLocode || '').toString() || undefined,
+                            error: "Missing unlocode (could not derive from Code/BranchType and country)",
                         });
                         skipped++;
                         continue;
@@ -2415,7 +2412,7 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
                         errors.push({
                             index: i,
                             unlocode,
-                            error: `Invalid unlocode format: ${unlocode} (should be 4-5 characters)`,
+                            error: `Invalid unlocode format: "${unlocode}" (must be 4–5 characters, e.g. AEDXB)`,
                         });
                         skipped++;
                         continue;
@@ -2467,8 +2464,10 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
                 }
                 catch (locError) {
                     console.error(`[import-locations] Error processing location ${i}:`, locError);
+                    const locUnlocode = (loc?.unlocode || loc?.code || loc?.Code || loc?.UnLocode || '').toString() || undefined;
                     errors.push({
                         index: i,
+                        unlocode: locUnlocode || undefined,
                         error: locError.message || String(locError),
                     });
                     skipped++;
