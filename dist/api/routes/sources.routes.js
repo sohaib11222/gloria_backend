@@ -107,9 +107,26 @@ function convertPhpVarDumpToOta(phpText) {
         // We need to extract each VehMatchedLoc block
         // Find the VehMatchedLocs array - match the opening and find the content
         // Pattern: ["VehMatchedLocs"]=> array(2) { ...content... }
-        const vehMatchedLocsStart = phpText.indexOf('["VehMatchedLocs"]');
+        // Try different bracket formats: ["VehMatchedLocs"], ['VehMatchedLocs'], or escaped versions
+        let vehMatchedLocsStart = phpText.indexOf('["VehMatchedLocs"]');
         if (vehMatchedLocsStart === -1) {
-            throw new Error("Could not find VehMatchedLocs in PHP var_dump");
+            vehMatchedLocsStart = phpText.indexOf("['VehMatchedLocs']");
+        }
+        if (vehMatchedLocsStart === -1) {
+            // Try HTML-escaped versions
+            vehMatchedLocsStart = phpText.indexOf('[&quot;VehMatchedLocs&quot;]');
+            if (vehMatchedLocsStart !== -1) {
+                // Decode HTML entities in the text
+                phpText = phpText.replace(/&quot;/g, '"').replace(/&#91;/g, '[').replace(/&#93;/g, ']');
+                vehMatchedLocsStart = phpText.indexOf('["VehMatchedLocs"]');
+            }
+        }
+        if (vehMatchedLocsStart === -1) {
+            // Log debug info to help diagnose
+            const preview = phpText.substring(0, Math.min(1000, phpText.length));
+            const containsOta = phpText.includes('OTA_VehLocSearchRS');
+            const containsArray = phpText.includes('array(');
+            throw new Error(`Could not find VehMatchedLocs in PHP var_dump. Contains OTA_VehLocSearchRS: ${containsOta}, Contains array(: ${containsArray}. Preview: ${preview.substring(0, 200)}...`);
         }
         // Find the opening brace after array(count)
         let bracePos = phpText.indexOf('{', vehMatchedLocsStart);
@@ -2217,6 +2234,59 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
                     responseText = responseText.replace(/<[^>]+>/g, '');
                 }
             }
+            // Decode HTML entities that might escape brackets (e.g. &quot; or [)
+            responseText = responseText.replace(/&quot;/g, '"').replace(/&#91;/g, '[').replace(/&#93;/g, ']');
+            // Strip trailing PHP string dump (e.g. final string(3961) " ... ") so it doesn't break brace matching.
+            // Strategy: Find the closing braces of the main OTA structure, then look for string( patterns after that.
+            if (responseText.includes('OTA_VehLocSearchRS')) {
+                const originalLength = responseText.length;
+                const hadVehMatchedLocs = responseText.includes('["VehMatchedLocs"]') || responseText.includes("['VehMatchedLocs']");
+                // Find the end of the main array structure: array(1) { ["OTA_VehLocSearchRS"]=> ... }
+                // Look for pattern: } } } followed by optional whitespace/newlines and then string(
+                const trailingDumpMatch = responseText.match(/\}\s*\}\s*\}\s*[\r\n\s]*string\s*\(/);
+                if (trailingDumpMatch && typeof trailingDumpMatch.index === 'number') {
+                    // Find the start of the string( pattern
+                    const stringStart = responseText.indexOf('string(', trailingDumpMatch.index);
+                    if (stringStart !== -1) {
+                        const beforeStrip = responseText;
+                        responseText = responseText.substring(0, stringStart);
+                        // Safety check: ensure VehMatchedLocs is still present after stripping
+                        if (!responseText.includes('["VehMatchedLocs"]') && !responseText.includes("['VehMatchedLocs']")) {
+                            console.warn('[import-locations] WARNING: Stripping removed VehMatchedLocs, reverting. String start was at:', stringStart);
+                            responseText = beforeStrip; // Revert if we removed too much
+                        }
+                        else {
+                            console.log('[import-locations] Stripped trailing PHP string dump, response length:', originalLength, '->', responseText.length);
+                        }
+                    }
+                }
+                else {
+                    // Fallback: if pattern not found, try finding string( patterns that appear after multiple closing braces
+                    // This handles cases where the structure might be slightly different
+                    const closingBracesMatch = responseText.match(/\}\s*\}\s*\}\s*\}\s*[\r\n\s]*string\s*\(/);
+                    if (closingBracesMatch && typeof closingBracesMatch.index === 'number') {
+                        const stringStart = responseText.indexOf('string(', closingBracesMatch.index);
+                        if (stringStart !== -1) {
+                            const beforeStrip = responseText;
+                            responseText = responseText.substring(0, stringStart);
+                            // Safety check: ensure VehMatchedLocs is still present after stripping
+                            if (!responseText.includes('["VehMatchedLocs"]') && !responseText.includes("['VehMatchedLocs']")) {
+                                console.warn('[import-locations] WARNING: Fallback stripping removed VehMatchedLocs, reverting.');
+                                responseText = beforeStrip; // Revert if we removed too much
+                            }
+                            else {
+                                console.log('[import-locations] Stripped trailing PHP string dump (fallback), response length:', originalLength, '->', responseText.length);
+                            }
+                        }
+                    }
+                }
+                // Final check: Log if VehMatchedLocs is missing
+                if (!responseText.includes('["VehMatchedLocs"]') && !responseText.includes("['VehMatchedLocs']")) {
+                    console.error('[import-locations] ERROR: VehMatchedLocs not found after processing. Had it before:', hadVehMatchedLocs);
+                    console.error('[import-locations] Response preview (last 500 chars):', responseText.substring(Math.max(0, responseText.length - 500)));
+                    console.error('[import-locations] Response length:', responseText.length, 'Contains OTA_VehLocSearchRS:', responseText.includes('OTA_VehLocSearchRS'));
+                }
+            }
             let data;
             let locations = [];
             // Check if it's PHP var_dump format with OTA_VehLocSearchRS
@@ -2253,13 +2323,20 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
                                         unlocode = code;
                                     }
                                 }
-                                // 3. Derive from country code + location identifier (last 3 chars for 5-char UN/LOCODE)
+                                // 3. When Code/BranchType is 6 chars (e.g. DXBA02), use country + first 3 chars for AEDXB-style (prefer over AEA02)
+                                if (!unlocode && countryCode && (attrs.Code || attrs.BranchType)) {
+                                    const code = String(attrs.Code || attrs.BranchType).toUpperCase().trim();
+                                    if (code.length === 6) {
+                                        unlocode = `${countryCode}${code.substring(0, 3)}`;
+                                    }
+                                }
+                                // 4. Derive from country code + location identifier (last 3 chars for 5-char UN/LOCODE)
                                 if (!unlocode && countryCode && attrs.Code) {
                                     const code = String(attrs.Code).toUpperCase().trim();
                                     const locationSuffix = code.length >= 3 ? code.substring(code.length - 3) : code;
                                     unlocode = `${countryCode}${locationSuffix}`;
                                 }
-                                // 4. When Code/BranchType is 6 chars (e.g. DXBA02), use country + first 3 chars for AEDXB-style
+                                // 5. Fallback: country + first 3 chars of code
                                 if (!unlocode && countryCode && (attrs.Code || attrs.BranchType)) {
                                     const code = String(attrs.Code || attrs.BranchType).toUpperCase().trim();
                                     if (code.length >= 3) {
