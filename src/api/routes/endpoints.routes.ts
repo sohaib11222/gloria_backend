@@ -9,12 +9,17 @@ import { normalizeWhitelist } from "../../infra/whitelistEnforcement.js";
 export const endpointsRouter = Router();
 
 // Schema for endpoint configuration
+const branchEndpointFormatEnum = z.enum(["XML", "JSON", "PHP", "CSV", "EXCEL"]);
+export type BranchEndpointFormat = z.infer<typeof branchEndpointFormatEnum>;
+
 const endpointConfigSchema = z.object({
   httpEndpoint: z.string().url().optional(),
   grpcEndpoint: z.string().optional(),
   adapterType: z.enum(["mock", "grpc", "http"]).optional(),
   description: z.string().optional(),
   branchEndpointUrl: z.string().url().optional(),
+  branchEndpointFormat: branchEndpointFormatEnum.optional(),
+  branchDefaultCountryCode: z.string().max(3).optional(),
   locationEndpointUrl: z.string().url().optional(),
   availabilityEndpointUrl: z.string().url().optional(),
 });
@@ -92,6 +97,8 @@ endpointsRouter.get(
           grpcEndpoint: true,
           httpEndpoint: true,
           branchEndpointUrl: true,
+          branchEndpointFormat: true,
+          branchDefaultCountryCode: true,
           locationEndpointUrl: true,
           availabilityEndpointUrl: true,
           updatedAt: true,
@@ -121,6 +128,8 @@ endpointsRouter.get(
         httpEndpoint,
         grpcEndpoint: company.grpcEndpoint || null,
         branchEndpointUrl: company.branchEndpointUrl || null,
+        branchEndpointFormat: company.branchEndpointFormat || null,
+        branchDefaultCountryCode: company.branchDefaultCountryCode || null,
         locationEndpointUrl: company.locationEndpointUrl || null,
         availabilityEndpointUrl: company.availabilityEndpointUrl || null,
         adapterType: company.adapterType,
@@ -310,6 +319,8 @@ endpointsRouter.put(
           grpcEndpoint: body.grpcEndpoint,
           httpEndpoint: body.httpEndpoint,
           branchEndpointUrl: body.branchEndpointUrl,
+          branchEndpointFormat: body.branchEndpointFormat,
+          branchDefaultCountryCode: body.branchDefaultCountryCode ? String(body.branchDefaultCountryCode).trim().toUpperCase().slice(0, 3) : null,
           locationEndpointUrl: body.locationEndpointUrl,
           availabilityEndpointUrl: body.availabilityEndpointUrl,
           updatedAt: new Date(),
@@ -322,6 +333,8 @@ endpointsRouter.put(
           grpcEndpoint: true,
           httpEndpoint: true,
           branchEndpointUrl: true,
+          branchEndpointFormat: true,
+          branchDefaultCountryCode: true,
           locationEndpointUrl: true,
           availabilityEndpointUrl: true,
           updatedAt: true,
@@ -338,6 +351,8 @@ endpointsRouter.put(
             : "http://localhost:9090"),
         grpcEndpoint: updatedCompany.grpcEndpoint,
         branchEndpointUrl: updatedCompany.branchEndpointUrl,
+        branchEndpointFormat: updatedCompany.branchEndpointFormat,
+        branchDefaultCountryCode: updatedCompany.branchDefaultCountryCode,
         locationEndpointUrl: updatedCompany.locationEndpointUrl,
         availabilityEndpointUrl: updatedCompany.availabilityEndpointUrl,
         adapterType: updatedCompany.adapterType,

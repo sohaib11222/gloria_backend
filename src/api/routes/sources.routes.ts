@@ -25,10 +25,10 @@ async function requireActiveSubscription(sourceId: string): Promise<{ status: nu
   return null;
 }
 
-/** Check branch/location limit; return null if ok, or { status, body } for 402 */
-async function checkBranchLimit(
+/** Check branch/location quota (subscribed quantity); return null if ok, or { status, body } for 402 */
+async function checkBranchQuota(
   sourceId: string,
-  planBranchLimit: number,
+  subscribedBranchCount: number,
   addingBranches: number,
   addingLocations: number
 ): Promise<{ status: number; body: object } | null> {
@@ -36,14 +36,20 @@ async function checkBranchLimit(
     prisma.branch.count({ where: { sourceId } }),
     prisma.sourceLocation.count({ where: { sourceId } }),
   ]);
-  const current = branchCount + locationCount;
-  const after = current + addingBranches + addingLocations;
-  if (after > planBranchLimit) {
+  const currentCount = branchCount + locationCount;
+  const adding = addingBranches + addingLocations;
+  const after = currentCount + adding;
+  if (after > subscribedBranchCount) {
+    const needToAdd = after - subscribedBranchCount;
     return {
       status: 402,
       body: {
-        error: "BRANCH_LIMIT_REACHED",
-        message: `Branch/location limit reached for your plan (${current + addingBranches + addingLocations} would exceed limit of ${planBranchLimit}).`,
+        error: "BRANCH_QUOTA_EXCEEDED",
+        message: `Your plan covers ${subscribedBranchCount} branches/locations. You have ${currentCount} and are adding ${adding}; add ${needToAdd} more to continue.`,
+        currentCount,
+        subscribedCount: subscribedBranchCount,
+        adding,
+        needToAdd,
       },
     };
   }
@@ -842,6 +848,8 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
         companyCode: true,
         httpEndpoint: true,
         branchEndpointUrl: true,
+        branchEndpointFormat: true,
+        branchDefaultCountryCode: true,
         whitelistedDomains: true,
       },
     });
@@ -927,90 +935,88 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
         });
       }
 
-      // Get response text first to handle both JSON and PHP var_dump formats
-      let responseText = await fetchResponse.text();
-      
-      // Clean up response text - remove HTML tags if present
-      if (responseText.includes('<html') || responseText.includes('<!DOCTYPE')) {
-        console.log('[import-branches] Response appears to be HTML, attempting to extract text content');
-        // Try to extract text between <pre> tags or body content
-        const preMatch = responseText.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
-        if (preMatch) {
-          responseText = preMatch[1];
-        } else {
-          // Remove HTML tags
-          responseText = responseText.replace(/<[^>]+>/g, '');
-        }
-      }
-      
+      const branchFormat = (source as any).branchEndpointFormat?.toUpperCase?.() || null;
+      const defaultCountryCode = (source as any).branchDefaultCountryCode?.trim?.() || null;
+
+      let responseText: string;
       let data: any;
       let branches: any[] = [];
 
-      // Try to parse as JSON first
-      try {
-        data = JSON.parse(responseText);
-        console.log('[import-branches] Successfully parsed as JSON');
-      } catch (jsonError) {
-        // If JSON parsing fails, try to parse as PHP var_dump format
-        console.log('[import-branches] Response is not JSON, attempting PHP var_dump parsing');
-        console.log('[import-branches] Response text length:', responseText.length);
-        console.log('[import-branches] Response text preview (first 1000 chars):', responseText.substring(0, 1000));
-        console.log('[import-branches] Response text preview (last 500 chars):', responseText.substring(Math.max(0, responseText.length - 500)));
-        try {
-          const gloriaResponse = convertPhpVarDumpToOta(responseText);
-          console.log('[import-branches] Converted to OTA format, structure:', {
-            hasOTA: !!gloriaResponse.OTA_VehLocSearchRS,
-            hasGloria: !!gloriaResponse.gloria,
-            vehMatchedLocsCount: gloriaResponse.OTA_VehLocSearchRS?.VehMatchedLocs?.length || gloriaResponse.gloria?.VehMatchedLocs?.length || 0
-          });
-          // Extract branches from OTA/Gloria format
-          const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-          branches = extractBranchesFromGloria(gloriaResponse);
-          console.log(`[import-branches] Extracted ${branches.length} branches from PHP var_dump format`);
-          if (branches.length > 0) {
-            console.log('[import-branches] First branch sample:', JSON.stringify(branches[0], null, 2).substring(0, 2000));
-          } else {
-            console.error('[import-branches] WARNING: No branches extracted from PHP var_dump!');
-            console.error('[import-branches] Gloria response structure:', JSON.stringify(gloriaResponse, null, 2).substring(0, 2000));
+      // EXCEL format: consume as buffer (must do before .text())
+      if (branchFormat === "EXCEL") {
+        const buffer = Buffer.from(await fetchResponse.arrayBuffer());
+        const { parseExcelToBranches } = await import("../../services/branchCsvExcelParser.js");
+        branches = await parseExcelToBranches(buffer, defaultCountryCode);
+        console.log(`[import-branches] Parsed ${branches.length} branches from Excel (format=EXCEL)`);
+        responseText = "";
+      } else {
+        responseText = await fetchResponse.text();
+      }
+
+      // CSV format or auto-detect CSV (when not EXCEL)
+      if (branchFormat !== "EXCEL" && responseText) {
+        const { parseCsvToBranches, looksLikeCsv } = await import("../../services/branchCsvExcelParser.js");
+        if (branchFormat === "CSV" || looksLikeCsv(responseText)) {
+          const csvBranches = parseCsvToBranches(responseText, defaultCountryCode);
+          if (csvBranches.length > 0) {
+            branches = csvBranches;
+            console.log(`[import-branches] Parsed ${branches.length} branches from CSV`);
           }
-        } catch (phpError: any) {
-          console.error('[import-branches] PHP parsing error:', phpError);
-          console.error('[import-branches] PHP parsing error stack:', phpError.stack);
-          // Don't block import - return 200 with error info (client wants to store data)
-          console.warn('[import-branches] PHP parsing failed, but allowing request to complete as requested');
-          return res.status(200).json({
-            message: "Failed to parse response, but import attempted",
-            imported: 0,
-            updated: 0,
-            skipped: 0,
-            total: 0,
-            summary: {
-              total: 0,
-              valid: 0,
-              invalid: 0,
-              imported: 0,
-              updated: 0,
-              skipped: 0,
-            },
-            error: "INVALID_RESPONSE_FORMAT",
-            validationErrors: [{
-              index: 0,
-              branchCode: "UNKNOWN",
-              branchName: "UNKNOWN",
-              error: {
-                error: `Failed to parse response: ${phpError.message || String(phpError)}. Expected JSON or PHP var_dump format.`,
-                fields: ["Response parsing failed"],
-              },
-            }],
-            warnings: [
-              "Failed to parse supplier response. Please check the endpoint URL and response format.",
-              `Error: ${phpError.message || String(phpError)}`,
-            ],
-          });
         }
       }
 
-      // If we already extracted branches from PHP format, skip JSON processing
+      // Clean HTML from response when we still need to parse JSON/PHP
+      if (branches.length === 0 && responseText) {
+        if (responseText.includes('<html') || responseText.includes('<!DOCTYPE')) {
+          console.log('[import-branches] Response appears to be HTML, attempting to extract text content');
+          const preMatch = responseText.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+          if (preMatch) {
+            responseText = preMatch[1];
+          } else {
+            responseText = responseText.replace(/<[^>]+>/g, '');
+          }
+        }
+      }
+
+      // Try to parse as JSON/PHP only when we don't already have branches (e.g. from CSV/EXCEL)
+      if (branches.length === 0 && responseText) {
+        try {
+          data = JSON.parse(responseText);
+          console.log('[import-branches] Successfully parsed as JSON');
+        } catch (jsonError) {
+          // If JSON parsing fails, try to parse as PHP var_dump format
+          console.log('[import-branches] Response is not JSON, attempting PHP var_dump parsing');
+          try {
+            const gloriaResponse = convertPhpVarDumpToOta(responseText);
+            const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
+            branches = extractBranchesFromGloria(gloriaResponse);
+            console.log(`[import-branches] Extracted ${branches.length} branches from PHP var_dump format`);
+          } catch (phpError: any) {
+            console.error('[import-branches] PHP parsing error:', phpError?.message);
+            return res.status(200).json({
+              message: "Failed to parse response, but import attempted",
+              imported: 0,
+              updated: 0,
+              skipped: 0,
+              total: 0,
+              summary: { total: 0, valid: 0, invalid: 0, imported: 0, updated: 0, skipped: 0 },
+              error: "INVALID_RESPONSE_FORMAT",
+              validationErrors: [{
+                index: 0,
+                branchCode: "UNKNOWN",
+                branchName: "UNKNOWN",
+                error: {
+                  error: `Failed to parse response. Expected XML, JSON, PHP var_dump, CSV, or Excel.`,
+                  fields: ["Response parsing failed"],
+                },
+              }],
+              warnings: ["Failed to parse supplier response. Check the endpoint URL and configured format (XML, JSON, PHP, CSV, Excel)."],
+            });
+          }
+        }
+      }
+
+      // If we have parsed JSON (or still no branches), extract from JSON data
       if (branches.length === 0 && data) {
         // Handle JSON format - check for OTA/Gloria structure
         if (data.OTA_VehLocSearchRS || data.gloria) {
@@ -1108,7 +1114,7 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
         include: { plan: true },
       });
       if (subWithPlan?.plan) {
-        const limitCheck = await checkBranchLimit(sourceId, subWithPlan.plan.branchLimit, branches.length, 0);
+        const limitCheck = await checkBranchQuota(sourceId, subWithPlan.subscribedBranchCount, branches.length, 0);
         if (limitCheck) return res.status(limitCheck.status).json(limitCheck.body);
       }
 
@@ -1242,10 +1248,13 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
                        branch.country ||
                        null;
         
-        const countryCode = branch.Address?.CountryName?.attr?.Code ||
+        let countryCode = branch.Address?.CountryName?.attr?.Code ||
                            branch.Address?.CountryName?.Code ||
                            branch.countryCode ||
                            null;
+        if (!countryCode && defaultCountryCode) {
+          countryCode = defaultCountryCode;
+        }
 
         // Build branch data - store missing fields as null (user can fill later)
         const branchData = {
@@ -1263,7 +1272,7 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
           city: city || null, // Store as null if missing
           postalCode: postalCode || null, // Store as null if missing
           country: country || null, // Store as null if missing
-          countryCode: countryCode || null, // Store as null if missing
+          countryCode: countryCode || null, // Store as null if missing (or default from config)
           natoLocode: branch.NatoLocode || null,
           rawJson: branch, // Store raw data for reference
         };
@@ -1475,6 +1484,7 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
         emailVerified: true,
         companyCode: true,
         httpEndpoint: true,
+        branchDefaultCountryCode: true,
         whitelistedDomains: true,
       },
     });
@@ -1520,21 +1530,35 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
       console.log('[upload-branches] rawContent preview:', (data as any).rawContent?.substring(0, 200) || 'N/A');
     }
 
+    const uploadFormat = (data as any)?.format?.toUpperCase?.() || null;
+    const uploadDefaultCountry = (data as any)?.defaultCountryCode?.trim?.() || (source as any).branchDefaultCountryCode?.trim?.() || null;
+
     let branches: any[] = [];
-    
-    // Check if data is a string (pasted PHP var_dump or XML)
-    // Note: When axios sends a string with Content-Type: application/json,
-    // it JSON-stringifies it: "array(1)..." becomes "\"array(1)...\""
-    // Express body-parser then parses this JSON, so we get the string back
-    let content: string | null = null;
-    
-    // First, check for rawContent key specifically (from frontend) - check this FIRST
+
+    // CSV or Excel upload: rawContent contains CSV text or base64-encoded Excel
     if (data && typeof data === 'object' && (data as any).rawContent && typeof (data as any).rawContent === 'string') {
+      const rawValue = (data as any).rawContent.trim();
+      const { parseCsvToBranches, looksLikeCsv, parseExcelToBranches } = await import("../../services/branchCsvExcelParser.js");
+      if (uploadFormat === 'CSV' || (uploadFormat !== 'EXCEL' && looksLikeCsv(rawValue))) {
+        branches = parseCsvToBranches(rawValue, uploadDefaultCountry);
+        console.log(`[upload-branches] Parsed ${branches.length} branches from CSV`);
+      } else if (uploadFormat === 'EXCEL') {
+        try {
+          const buffer = Buffer.from(rawValue, 'base64');
+          branches = await parseExcelToBranches(buffer, uploadDefaultCountry);
+          console.log(`[upload-branches] Parsed ${branches.length} branches from Excel`);
+        } catch (exErr: any) {
+          console.warn('[upload-branches] Excel parse failed:', exErr?.message);
+        }
+      }
+    }
+
+    // Check if data is a string (pasted PHP var_dump or XML)
+    let content: string | null = null;
+    if (branches.length === 0 && data && typeof data === 'object' && (data as any).rawContent && typeof (data as any).rawContent === 'string') {
       const rawValue = (data as any).rawContent;
-      console.log('[upload-branches] Found rawContent in object, length:', rawValue.length);
       if (rawValue.includes('array(') || rawValue.includes('OTA_VehLocSearchRS') || rawValue.includes('<')) {
         content = rawValue.trim();
-        console.log('[upload-branches] Using rawContent, trimmed length:', content?.length || 0);
       }
     }
     
@@ -1835,7 +1859,7 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
       include: { plan: true },
     });
     if (subUpload?.plan) {
-      const limitCheckUpload = await checkBranchLimit(sourceId, subUpload.plan.branchLimit, branches.length, 0);
+      const limitCheckUpload = await checkBranchQuota(sourceId, subUpload.subscribedBranchCount, branches.length, 0);
       if (limitCheckUpload) return res.status(limitCheckUpload.status).json(limitCheckUpload.body);
     }
 
@@ -1900,7 +1924,10 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
       const city = branch.Address?.CityName?.value || branch.Address?.CityName || null;
       const postalCode = branch.Address?.PostalCode?.value || branch.Address?.PostalCode || null;
       const country = branch.Address?.CountryName?.value || branch.Address?.CountryName || null;
-      const countryCode = branch.Address?.CountryName?.attr?.Code || branch.Address?.CountryName?.Code || null;
+      let countryCode = branch.Address?.CountryName?.attr?.Code || branch.Address?.CountryName?.Code || branch.countryCode || null;
+      if (!countryCode && uploadDefaultCountry) {
+        countryCode = uploadDefaultCountry;
+      }
 
       const branchData = {
         sourceId: source.id,
@@ -2576,7 +2603,7 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
         include: { plan: true },
       });
       if (subLoc?.plan) {
-        const limitCheckLoc = await checkBranchLimit(sourceId, subLoc.plan.branchLimit, 0, locations.length);
+        const limitCheckLoc = await checkBranchQuota(sourceId, subLoc.subscribedBranchCount, 0, locations.length);
         if (limitCheckLoc) return res.status(limitCheckLoc.status).json(limitCheckLoc.body);
       }
 

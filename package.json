@@ -50,6 +50,7 @@
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "uuid": "^9.0.1",
+    "xlsx": "^0.18.5",
     "xmlbuilder2": "^4.0.3",
     "zod": "^3.23.8"
   },

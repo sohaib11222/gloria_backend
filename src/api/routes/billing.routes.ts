@@ -18,6 +18,7 @@ const createPlanSchema = z.object({
   name: z.string().min(1),
   interval: z.enum(["WEEKLY", "MONTHLY", "YEARLY"]),
   amountCents: z.number().int().min(0),
+  pricePerBranchCents: z.number().int().min(0),
   branchLimit: z.number().int().min(0),
   stripePriceId: z.string().optional(),
 });
@@ -26,6 +27,7 @@ const updatePlanSchema = z.object({
   name: z.string().min(1).optional(),
   interval: z.enum(["WEEKLY", "MONTHLY", "YEARLY"]).optional(),
   amountCents: z.number().int().min(0).optional(),
+  pricePerBranchCents: z.number().int().min(0).optional(),
   branchLimit: z.number().int().min(0).optional(),
   stripePriceId: z.string().nullable().optional(),
   active: z.boolean().optional(),
@@ -59,6 +61,7 @@ billingRouter.post(
           name: body.name,
           interval: body.interval,
           amountCents: body.amountCents,
+          pricePerBranchCents: body.pricePerBranchCents,
           branchLimit: body.branchLimit,
           stripePriceId: body.stripePriceId ?? null,
         },
@@ -84,6 +87,7 @@ billingRouter.patch(
           ...(body.name != null && { name: body.name }),
           ...(body.interval != null && { interval: body.interval }),
           ...(body.amountCents != null && { amountCents: body.amountCents }),
+          ...(body.pricePerBranchCents != null && { pricePerBranchCents: body.pricePerBranchCents }),
           ...(body.branchLimit != null && { branchLimit: body.branchLimit }),
           ...(body.stripePriceId !== undefined && { stripePriceId: body.stripePriceId }),
           ...(body.active != null && { active: body.active }),
@@ -110,7 +114,11 @@ billingRouter.get(
         include: { plan: true, source: { select: { id: true, companyName: true, email: true, type: true } } },
       });
       if (!sub) return res.status(404).json({ error: "NOT_FOUND", message: "No subscription for this source" });
-      res.json(sub);
+      const [branchCount, locationCount] = await Promise.all([
+        prisma.branch.count({ where: { sourceId } }),
+        prisma.sourceLocation.count({ where: { sourceId } }),
+      ]);
+      res.json({ ...sub, branchCount, locationCount });
     } catch (e) {
       next(e);
     }
@@ -120,6 +128,7 @@ billingRouter.get(
 const setSourceSubscriptionSchema = z.object({
   planId: z.string(),
   currentPeriodEnd: z.string().datetime().optional(),
+  subscribedBranchCount: z.number().int().min(0).optional(),
 });
 
 billingRouter.patch(
@@ -137,11 +146,13 @@ billingRouter.patch(
       const plan = await prisma.plan.findFirst({ where: { id: body.planId, active: true } });
       if (!plan) return res.status(400).json({ error: "INVALID_PLAN", message: "Plan not found or inactive" });
       const periodEnd = body.currentPeriodEnd ? new Date(body.currentPeriodEnd) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      const subscribedBranchCount = body.subscribedBranchCount ?? 1;
       const sub = await prisma.sourceSubscription.upsert({
         where: { sourceId },
         create: {
           sourceId,
           planId: plan.id,
+          subscribedBranchCount,
           status: "active",
           currentPeriodStart: new Date(),
           currentPeriodEnd: periodEnd,
@@ -150,6 +161,7 @@ billingRouter.patch(
           planId: plan.id,
           status: "active",
           currentPeriodEnd: periodEnd,
+          ...(body.subscribedBranchCount != null && { subscribedBranchCount: body.subscribedBranchCount }),
         },
         include: { plan: true },
       });
@@ -207,6 +219,53 @@ billingRouter.get(
   }
 );
 
+// --- Source: update subscription quantity (add more branches) ---
+
+const updateSubscriptionQuantitySchema = z.object({
+  quantity: z.number().int().min(1),
+});
+
+billingRouter.patch(
+  "/sources/me/subscription/quantity",
+  requireAuth(),
+  requireCompanyType("SOURCE"),
+  async (req: any, res, next) => {
+    try {
+      const companyId = req.user?.companyId;
+      if (!companyId) return res.status(401).json({ error: "AUTH_ERROR", message: "Company not found" });
+      if (!stripe) return res.status(503).json({ error: "STRIPE_DISABLED", message: "Stripe is not configured" });
+      const body = updateSubscriptionQuantitySchema.parse(req.body);
+      const sub = await prisma.sourceSubscription.findUnique({
+        where: { sourceId: companyId },
+        include: { plan: true },
+      });
+      if (!sub?.stripeSubscriptionId) {
+        return res.status(404).json({ error: "NOT_FOUND", message: "No Stripe subscription for this source" });
+      }
+      const subscription = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId, { expand: ["items.data"] });
+      const item = subscription.items?.data?.[0];
+      if (!item?.id) {
+        return res.status(400).json({ error: "NO_SUBSCRIPTION_ITEM", message: "Subscription has no line item" });
+      }
+      await stripe.subscriptions.update(sub.stripeSubscriptionId, {
+        items: [{ id: item.id, quantity: body.quantity }],
+        proration_behavior: "create_prorations",
+      });
+      await prisma.sourceSubscription.update({
+        where: { sourceId: companyId },
+        data: { subscribedBranchCount: body.quantity },
+      });
+      const updated = await prisma.sourceSubscription.findUnique({
+        where: { sourceId: companyId },
+        include: { plan: true },
+      });
+      res.json({ subscribedBranchCount: body.quantity, subscription: updated });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
 // --- Source: checkout session ---
 // Stripe Price IDs (plan.stripePriceId) should be created in Stripe Dashboard with currency EUR.
 
@@ -222,18 +281,18 @@ const STRIPE_INTERVAL: Record<string, "week" | "month" | "year"> = {
   YEARLY: "year",
 };
 
-async function ensurePlanStripePrice(plan: { id: string; name: string; interval: string; amountCents: number; stripePriceId: string | null }): Promise<string> {
+async function ensurePlanStripePrice(plan: { id: string; name: string; interval: string; pricePerBranchCents: number; stripePriceId: string | null }): Promise<string> {
   if (plan.stripePriceId) return plan.stripePriceId;
   if (!stripe) throw new Error("Stripe not configured");
   const interval = STRIPE_INTERVAL[plan.interval] ?? "month";
   const product = await stripe.products.create({
-    name: `Gloria Source – ${plan.name}`,
+    name: `Gloria Source – ${plan.name} (per branch)`,
     metadata: { planId: plan.id },
   });
   const price = await stripe.prices.create({
     product: product.id,
-    unit_amount: plan.amountCents,
-    currency: "usd",
+    unit_amount: plan.pricePerBranchCents,
+    currency: "eur",
     recurring: { interval },
     metadata: { planId: plan.id },
   });
@@ -427,6 +486,7 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
         const periodStart = subscription.current_period_start
           ? new Date(subscription.current_period_start * 1000)
           : null;
+        const quantity = subscription.items?.data?.[0]?.quantity ?? 1;
         await prisma.sourceSubscription.upsert({
           where: { sourceId },
           create: {
@@ -434,6 +494,7 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
             planId,
             stripeCustomerId: subscription.customer as string,
             stripeSubscriptionId: subscription.id,
+            subscribedBranchCount: quantity,
             status,
             currentPeriodStart: periodStart,
             currentPeriodEnd: periodEnd,
@@ -441,6 +502,7 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
           update: {
             stripeCustomerId: subscription.customer as string,
             stripeSubscriptionId: subscription.id,
+            subscribedBranchCount: quantity,
             status,
             currentPeriodStart: periodStart,
             currentPeriodEnd: periodEnd,
@@ -454,7 +516,7 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
       const planId = session.metadata?.planId;
       const subId = session.subscription as string | null;
       if (sourceId && planId && subId && stripe) {
-        const subscription = await stripe.subscriptions.retrieve(subId);
+        const subscription = await stripe.subscriptions.retrieve(subId, { expand: ["items.data"] });
         const periodEnd = subscription.current_period_end
           ? new Date(subscription.current_period_end * 1000)
           : null;
@@ -462,6 +524,7 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
           ? new Date(subscription.current_period_start * 1000)
           : null;
         const customerId = (session.customer as string) || (subscription.customer as string);
+        const quantity = subscription.items?.data?.[0]?.quantity ?? 1;
         await prisma.sourceSubscription.upsert({
           where: { sourceId },
           create: {
@@ -469,6 +532,7 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
             planId,
             stripeCustomerId: customerId,
             stripeSubscriptionId: subscription.id,
+            subscribedBranchCount: quantity,
             status: "active",
             currentPeriodStart: periodStart,
             currentPeriodEnd: periodEnd,
@@ -477,6 +541,7 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
             planId,
             stripeCustomerId: customerId,
             stripeSubscriptionId: subscription.id,
+            subscribedBranchCount: quantity,
             status: "active",
             currentPeriodStart: periodStart,
             currentPeriodEnd: periodEnd,

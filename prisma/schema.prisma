@@ -65,15 +65,16 @@ enum SubscriptionStatus {
 }
 
 model Plan {
-  id            String        @id @default(cuid())
-  name          String        // e.g. "Weekly", "Monthly", "Yearly"
-  interval      PlanInterval
-  stripePriceId String?       // Stripe Price ID for checkout
-  amountCents   Int           // Price in cents
-  branchLimit   Int           // Max branches/locations for this plan
-  active        Boolean       @default(true)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id                   String        @id @default(cuid())
+  name                 String        // e.g. "Weekly", "Monthly", "Yearly"
+  interval             PlanInterval
+  stripePriceId        String?       // Stripe Price ID for checkout (per-branch price)
+  amountCents          Int           // Base price in cents (legacy; can be 0)
+  pricePerBranchCents  Int           // Price per branch per interval (cents)
+  branchLimit          Int           // 0 = unlimited / use subscription quantity
+  active               Boolean       @default(true)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
 
   sourceSubscriptions SourceSubscription[]
 
@@ -81,16 +82,17 @@ model Plan {
 }
 
 model SourceSubscription {
-  id                   String             @id @default(cuid())
-  sourceId             String             // Company (type SOURCE)
-  planId               String
-  stripeCustomerId     String?
-  stripeSubscriptionId String?
-  status               SubscriptionStatus  @default(active)
-  currentPeriodStart   DateTime?
-  currentPeriodEnd     DateTime?          // Expiry
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  id                    String             @id @default(cuid())
+  sourceId              String             // Company (type SOURCE)
+  planId                String
+  stripeCustomerId      String?
+  stripeSubscriptionId  String?
+  subscribedBranchCount Int                @default(1) // Synced from Stripe subscription item quantity
+  status                SubscriptionStatus @default(active)
+  currentPeriodStart    DateTime?
+  currentPeriodEnd      DateTime?          // Expiry
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   source Company @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   plan   Plan    @relation(fields: [planId], references: [id], onDelete: Restrict)
@@ -129,7 +131,9 @@ model Company {
   adapterType  String? // "mock" | "grpc" (or future "http") - must be explicitly set, no default
   grpcEndpoint String?
   httpEndpoint String? // Optional HTTP endpoint for JSON fallback/test
-  branchEndpointUrl String? // Branch import endpoint URL (supports XML and JSON)
+  branchEndpointUrl String? // Branch import endpoint URL (supports XML, JSON, PHP, CSV, Excel)
+  branchEndpointFormat String? // "XML" | "JSON" | "PHP" | "CSV" | "EXCEL" - response/upload format
+  branchDefaultCountryCode String? // ISO country code (e.g. AE, US) for mapping branches to countries
   locationEndpointUrl String? // Location import endpoint URL (supports XML and JSON)
   availabilityEndpointUrl String? // Availability/pricing endpoint URL (OTA VehAvailRS JSON)
 
