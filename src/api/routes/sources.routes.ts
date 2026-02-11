@@ -2419,6 +2419,11 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
           responseText = responseText.replace(/<[^>]+>/g, '');
         }
       }
+      // Strip trailing PHP string dump (e.g. string(3961) " ... ") so it doesn't break brace matching
+      const stringDumpMatch = responseText.match(/\n\s*string\s*\(\s*\d+\s*\)\s*"/);
+      if (stringDumpMatch && responseText.includes('OTA_VehLocSearchRS')) {
+        responseText = responseText.substring(0, stringDumpMatch.index);
+      }
       
       let data: any;
       let locations: any[] = [];
@@ -2461,14 +2466,20 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
                     unlocode = code;
                   }
                 }
-                
-                // 3. Derive from country code + location identifier (last 3 chars for 5-char UN/LOCODE)
+                // 3. When Code/BranchType is 6 chars (e.g. DXBA02), use country + first 3 chars for AEDXB-style (prefer over AEA02)
+                if (!unlocode && countryCode && (attrs.Code || attrs.BranchType)) {
+                  const code = String(attrs.Code || attrs.BranchType).toUpperCase().trim();
+                  if (code.length === 6) {
+                    unlocode = `${countryCode}${code.substring(0, 3)}`;
+                  }
+                }
+                // 4. Derive from country code + location identifier (last 3 chars for 5-char UN/LOCODE)
                 if (!unlocode && countryCode && attrs.Code) {
                   const code = String(attrs.Code).toUpperCase().trim();
                   const locationSuffix = code.length >= 3 ? code.substring(code.length - 3) : code;
                   unlocode = `${countryCode}${locationSuffix}`;
                 }
-                // 4. When Code/BranchType is 6 chars (e.g. DXBA02), use country + first 3 chars for AEDXB-style
+                // 5. Fallback: country + first 3 chars of code
                 if (!unlocode && countryCode && (attrs.Code || attrs.BranchType)) {
                   const code = String(attrs.Code || attrs.BranchType).toUpperCase().trim();
                   if (code.length >= 3) {
