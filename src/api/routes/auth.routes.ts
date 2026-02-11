@@ -710,10 +710,13 @@ authRouter.post("/auth/login", async (req, res, next) => {
         });
       }
       
-      // Generic database error
+      // Generic database error - include Prisma code when present for debugging
+      const code = dbError?.code;
+      const isPrisma = typeof code === "string" && code.startsWith("P");
       return sendError(500, {
         error: "DATABASE_ERROR",
         message: "Database operation failed. Please try again later.",
+        ...(isPrisma && { code }),
         hint: "If this problem persists, please contact support."
       });
     }

@@ -233,24 +233,26 @@ billingRouter.patch(
     try {
       const companyId = req.user?.companyId;
       if (!companyId) return res.status(401).json({ error: "AUTH_ERROR", message: "Company not found" });
-      if (!stripe) return res.status(503).json({ error: "STRIPE_DISABLED", message: "Stripe is not configured" });
       const body = updateSubscriptionQuantitySchema.parse(req.body);
       const sub = await prisma.sourceSubscription.findUnique({
         where: { sourceId: companyId },
         include: { plan: true },
       });
-      if (!sub?.stripeSubscriptionId) {
-        return res.status(404).json({ error: "NOT_FOUND", message: "No Stripe subscription for this source" });
+      if (!sub) {
+        return res.status(404).json({ error: "NOT_FOUND", message: "No subscription for this source. Subscribe to a plan first." });
       }
-      const subscription = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId, { expand: ["items.data"] });
-      const item = subscription.items?.data?.[0];
-      if (!item?.id) {
-        return res.status(400).json({ error: "NO_SUBSCRIPTION_ITEM", message: "Subscription has no line item" });
+      // If we have Stripe, sync quantity there and then to DB
+      if (sub.stripeSubscriptionId && stripe) {
+        const subscription = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId, { expand: ["items.data"] });
+        const item = subscription.items?.data?.[0];
+        if (item?.id) {
+          await stripe.subscriptions.update(sub.stripeSubscriptionId, {
+            items: [{ id: item.id, quantity: body.quantity }],
+            proration_behavior: "create_prorations",
+          });
+        }
       }
-      await stripe.subscriptions.update(sub.stripeSubscriptionId, {
-        items: [{ id: item.id, quantity: body.quantity }],
-        proration_behavior: "create_prorations",
-      });
+      // Always update local quantity (works for Stripe and non-Stripe / admin-created subscriptions)
       await prisma.sourceSubscription.update({
         where: { sourceId: companyId },
         data: { subscribedBranchCount: body.quantity },

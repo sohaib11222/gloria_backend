@@ -1123,23 +1123,31 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
                     null;
                 // Extract email - use null if missing
                 const email = branch.EmailAddress || branch.email || null;
-                // Extract address components
-                const addressLine = branch.Address?.AddressLine?.value ||
-                    branch.Address?.AddressLine ||
-                    branch.addressLine ||
-                    null;
-                const city = branch.Address?.CityName?.value ||
-                    branch.Address?.CityName ||
-                    branch.city ||
-                    null;
-                const postalCode = branch.Address?.PostalCode?.value ||
-                    branch.Address?.PostalCode ||
-                    branch.postalCode ||
-                    null;
-                const country = branch.Address?.CountryName?.value ||
-                    branch.Address?.CountryName ||
-                    branch.country ||
-                    null;
+                // Extract address components, normalising nested { value } objects to plain strings
+                const rawAddressLine = branch.Address?.AddressLine ?? branch.addressLine ?? null;
+                const rawCity = branch.Address?.CityName ?? branch.city ?? null;
+                const rawPostalCode = branch.Address?.PostalCode ?? branch.postalCode ?? null;
+                const rawCountry = branch.Address?.CountryName ?? branch.country ?? null;
+                const addressLine = typeof rawAddressLine === "string"
+                    ? rawAddressLine
+                    : typeof rawAddressLine === "object" && rawAddressLine !== null && "value" in rawAddressLine
+                        ? rawAddressLine.value
+                        : null;
+                const city = typeof rawCity === "string"
+                    ? rawCity
+                    : typeof rawCity === "object" && rawCity !== null && "value" in rawCity
+                        ? rawCity.value
+                        : null;
+                const postalCode = typeof rawPostalCode === "string"
+                    ? rawPostalCode
+                    : typeof rawPostalCode === "object" && rawPostalCode !== null && "value" in rawPostalCode
+                        ? rawPostalCode.value
+                        : null;
+                const country = typeof rawCountry === "string"
+                    ? rawCountry
+                    : typeof rawCountry === "object" && rawCountry !== null && "value" in rawCountry
+                        ? rawCountry.value
+                        : null;
                 let countryCode = branch.Address?.CountryName?.attr?.Code ||
                     branch.Address?.CountryName?.Code ||
                     branch.countryCode ||
@@ -1769,11 +1777,31 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
             // Extract phone and email
             const phone = branch.Telephone?.attr?.PhoneNumber || branch.Telephone?.PhoneNumber || null;
             const email = branch.EmailAddress || null;
-            // Extract address components
-            const addressLine = branch.Address?.AddressLine?.value || branch.Address?.AddressLine || null;
-            const city = branch.Address?.CityName?.value || branch.Address?.CityName || null;
-            const postalCode = branch.Address?.PostalCode?.value || branch.Address?.PostalCode || null;
-            const country = branch.Address?.CountryName?.value || branch.Address?.CountryName || null;
+            // Extract address components, normalising nested { value } objects to plain strings
+            const rawAddressLine = branch.Address?.AddressLine ?? null;
+            const rawCity = branch.Address?.CityName ?? null;
+            const rawPostalCode = branch.Address?.PostalCode ?? null;
+            const rawCountry = branch.Address?.CountryName ?? null;
+            const addressLine = typeof rawAddressLine === "string"
+                ? rawAddressLine
+                : typeof rawAddressLine === "object" && rawAddressLine !== null && "value" in rawAddressLine
+                    ? rawAddressLine.value
+                    : null;
+            const city = typeof rawCity === "string"
+                ? rawCity
+                : typeof rawCity === "object" && rawCity !== null && "value" in rawCity
+                    ? rawCity.value
+                    : null;
+            const postalCode = typeof rawPostalCode === "string"
+                ? rawPostalCode
+                : typeof rawPostalCode === "object" && rawPostalCode !== null && "value" in rawPostalCode
+                    ? rawPostalCode.value
+                    : null;
+            const country = typeof rawCountry === "string"
+                ? rawCountry
+                : typeof rawCountry === "object" && rawCountry !== null && "value" in rawCountry
+                    ? rawCountry.value
+                    : null;
             let countryCode = branch.Address?.CountryName?.attr?.Code || branch.Address?.CountryName?.Code || branch.countryCode || null;
             if (!countryCode && uploadDefaultCountry) {
                 countryCode = uploadDefaultCountry;
