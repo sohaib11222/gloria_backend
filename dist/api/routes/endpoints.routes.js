@@ -17,6 +17,9 @@ const endpointConfigSchema = z.object({
     branchEndpointFormat: branchEndpointFormatEnum.optional(),
     branchDefaultCountryCode: z.string().max(3).optional(),
     locationEndpointUrl: z.string().url().optional(),
+    locationListEndpointUrl: z.string().url().optional(),
+    locationListRequestRoot: z.string().min(1).optional(),
+    locationListAccountId: z.string().optional(),
     availabilityEndpointUrl: z.string().url().optional(),
 });
 /**
@@ -91,6 +94,9 @@ endpointsRouter.get("/endpoints/config", requireAuth(), async (req, res, next) =
                 branchEndpointFormat: true,
                 branchDefaultCountryCode: true,
                 locationEndpointUrl: true,
+                locationListEndpointUrl: true,
+                locationListRequestRoot: true,
+                locationListAccountId: true,
                 availabilityEndpointUrl: true,
                 updatedAt: true,
                 lastGrpcTestResult: true,
@@ -118,6 +124,9 @@ endpointsRouter.get("/endpoints/config", requireAuth(), async (req, res, next) =
             branchEndpointFormat: company.branchEndpointFormat || null,
             branchDefaultCountryCode: company.branchDefaultCountryCode || null,
             locationEndpointUrl: company.locationEndpointUrl || null,
+            locationListEndpointUrl: company.locationListEndpointUrl ?? null,
+            locationListRequestRoot: company.locationListRequestRoot ?? null,
+            locationListAccountId: company.locationListAccountId ?? null,
             availabilityEndpointUrl: company.availabilityEndpointUrl || null,
             adapterType: company.adapterType,
             description: `${company.companyName} ${company.type.toLowerCase()} endpoints`,
@@ -270,6 +279,18 @@ endpointsRouter.put("/endpoints/config", requireAuth(), async (req, res, next) =
                 });
             }
         }
+        // Validate location list endpoint URL format if provided
+        if (body.locationListEndpointUrl) {
+            try {
+                new URL(body.locationListEndpointUrl);
+            }
+            catch {
+                return res.status(400).json({
+                    error: "INVALID_LOCATION_LIST_ENDPOINT",
+                    message: "Location list endpoint URL must be a valid URL (e.g., 'https://example.com/locationlist.php')",
+                });
+            }
+        }
         // Validate availability endpoint URL format if provided
         if (body.availabilityEndpointUrl) {
             try {
@@ -293,6 +314,9 @@ endpointsRouter.put("/endpoints/config", requireAuth(), async (req, res, next) =
                 branchEndpointFormat: body.branchEndpointFormat,
                 branchDefaultCountryCode: body.branchDefaultCountryCode ? String(body.branchDefaultCountryCode).trim().toUpperCase().slice(0, 3) : null,
                 locationEndpointUrl: body.locationEndpointUrl,
+                locationListEndpointUrl: body.locationListEndpointUrl ?? undefined,
+                locationListRequestRoot: body.locationListRequestRoot ? String(body.locationListRequestRoot).trim() : null,
+                locationListAccountId: body.locationListAccountId ? String(body.locationListAccountId).trim() : null,
                 availabilityEndpointUrl: body.availabilityEndpointUrl,
                 updatedAt: new Date(),
             },
@@ -307,6 +331,9 @@ endpointsRouter.put("/endpoints/config", requireAuth(), async (req, res, next) =
                 branchEndpointFormat: true,
                 branchDefaultCountryCode: true,
                 locationEndpointUrl: true,
+                locationListEndpointUrl: true,
+                locationListRequestRoot: true,
+                locationListAccountId: true,
                 availabilityEndpointUrl: true,
                 updatedAt: true,
             },
@@ -323,6 +350,9 @@ endpointsRouter.put("/endpoints/config", requireAuth(), async (req, res, next) =
             branchEndpointFormat: updatedCompany.branchEndpointFormat,
             branchDefaultCountryCode: updatedCompany.branchDefaultCountryCode,
             locationEndpointUrl: updatedCompany.locationEndpointUrl,
+            locationListEndpointUrl: updatedCompany.locationListEndpointUrl ?? null,
+            locationListRequestRoot: updatedCompany.locationListRequestRoot ?? null,
+            locationListAccountId: updatedCompany.locationListAccountId ?? null,
             availabilityEndpointUrl: updatedCompany.availabilityEndpointUrl,
             adapterType: updatedCompany.adapterType,
             updatedAt: updatedCompany.updatedAt,

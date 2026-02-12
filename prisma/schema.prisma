@@ -135,6 +135,9 @@ model Company {
   branchEndpointFormat String? // "XML" | "JSON" | "PHP" | "CSV" | "EXCEL" - response/upload format
   branchDefaultCountryCode String? // ISO country code (e.g. AE, US) for mapping branches to countries
   locationEndpointUrl String? // Location import endpoint URL (supports XML and JSON)
+  locationListEndpointUrl String? // Location list endpoint URL (POST XML with configurable root, e.g. GLORIA_locationlistrq)
+  locationListRequestRoot String? // Request root element name (e.g. GLORIA_locationlistrq); response root derived as ...rs
+  locationListAccountId String? // Account ID for request template (e.g. 1000097)
   availabilityEndpointUrl String? // Availability/pricing endpoint URL (OTA VehAvailRS JSON)
 
   // TLS/mTLS configuration for gRPC (JSON)
