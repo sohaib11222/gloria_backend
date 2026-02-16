@@ -2981,7 +2981,7 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
     }
 
     const requestRoot = (source.locationListRequestRoot || "GLORIA_locationlistrq").trim();
-    const accountId = (source.locationListAccountId || "1000097").trim();
+    const accountId = (source.locationListAccountId || "Gloria001").trim();
     const responseRoot = requestRoot.replace(/rq$/i, "rs") || "GLORIA_locationlistrs";
     const ts = new Date().toISOString().slice(0, 19);
     const xmlBody = `<?xml version="1.0" encoding="UTF-8"?><${requestRoot} TimeStamp="${ts}" Target="Production" Version="1.00"><ACC><Source><AccountID ID="${accountId}"/></Source></ACC></${requestRoot}>`;
@@ -3049,7 +3049,194 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
     let branches: any[] = [];
     const defaultCountryCode = source.branchDefaultCountryCode?.trim() || null;
 
-    if (responseText.includes("array(") && responseText.includes(responseRoot)) {
+    // Helper: extract location + branch data from a normalized LocationDetail
+    // attrs = XML attributes (Code, Name, Latitude, Longitude, BranchType, etc.)
+    // countryCodeOverride = country code from parent Country element (for XML with CountryList)
+    function extractFromLocationDetail(locationDetail: any, countryCodeOverride?: string) {
+      // Handle both PHP var_dump (attrs in .attr sub-object) and XML (attrs as direct @_ prefixed or direct properties)
+      const attrs = locationDetail.attr || {};
+      const address = locationDetail.Address || {};
+      const countryName = address.CountryName || {};
+      // Country code: from CountryName.Code attribute, or from CountryName.attr.Code (PHP), or from parent Country element, or from attrs
+      let countryCode = "";
+      if (countryCodeOverride) {
+        countryCode = countryCodeOverride;
+      } else if (typeof countryName === "string") {
+        // no code
+      } else {
+        countryCode = (countryName["@_Code"] || countryName.attr?.Code || countryName.Code || attrs.CountryCode || "").toString().toUpperCase().trim();
+      }
+      const code = String(attrs.Code || attrs.BranchType || locationDetail.Code || locationDetail.BranchType || "").toUpperCase().trim();
+      const name = String(attrs.Name || locationDetail.Name || "").trim();
+      const latStr = attrs.Latitude ?? locationDetail.Latitude ?? locationDetail["@_Latitude"];
+      const lonStr = attrs.Longitude ?? locationDetail.Longitude ?? locationDetail["@_Longitude"];
+      const latitude = latStr != null ? parseFloat(String(latStr)) : null;
+      const longitude = lonStr != null ? parseFloat(String(lonStr)) : null;
+
+      // Derive unlocode
+      let unlocode: string | null = null;
+      if (attrs.NatoLocode || locationDetail.NatoLocode) {
+        unlocode = String(attrs.NatoLocode || locationDetail.NatoLocode).toUpperCase().trim();
+      } else if (code && countryCode) {
+        if (code.length === 5 && code.startsWith(countryCode)) {
+          unlocode = code;
+        } else if (code.length === 6) {
+          unlocode = `${countryCode}${code.substring(0, 3)}`;
+        } else if (code.length >= 3) {
+          unlocode = `${countryCode}${code.substring(code.length - 3)}`;
+        } else {
+          unlocode = `${countryCode}${code}`;
+        }
+      }
+
+      if (unlocode) {
+        locations.push({
+          unlocode,
+          country: countryCode || unlocode.substring(0, 2),
+          place: name,
+          iataCode: (attrs.IataCode || locationDetail.IataCode || "").toString().trim() || null,
+          latitude: latitude != null && !isNaN(latitude) ? latitude : null,
+          longitude: longitude != null && !isNaN(longitude) ? longitude : null,
+        });
+      }
+    }
+
+    // ──── Strategy 1: Raw XML response (e.g. <GLORIA_locationlistrs ...>) ────
+    const isXmlResponse = responseText.trimStart().startsWith("<?xml") || responseText.trimStart().startsWith(`<${responseRoot}`);
+    if (isXmlResponse && responseText.includes(responseRoot)) {
+      try {
+        const { XMLParser } = await import("fast-xml-parser");
+        const xmlParser = new XMLParser({
+          ignoreAttributes: false,
+          attributeNamePrefix: "@_",
+          textNodeName: "#text",
+          trimValues: true,
+          isArray: (_name: string) => false,
+        });
+        const parsed = xmlParser.parse(responseText);
+        const root = parsed[responseRoot] || parsed["GLORIA_locationlistrs"];
+        if (!root) {
+          return res.status(400).json({
+            error: "INVALID_RESPONSE_FORMAT",
+            message: `Could not find <${responseRoot}> in XML response`,
+          });
+        }
+
+        // Collect all VehMatchedLoc elements from the response
+        // Structure: CountryList > Country[] > VehMatchedLocs > VehMatchedLoc[]
+        const vehMatchedLocs: any[] = [];
+        const countryCodeMap = new Map<any, string>(); // map locationDetail -> countryCode
+
+        const countryList = root.CountryList;
+        if (countryList) {
+          // Flatten all Country elements (may be nested due to XML quirks)
+          const countries: any[] = [];
+          function collectCountries(node: any) {
+            if (!node) return;
+            if (Array.isArray(node)) {
+              node.forEach(collectCountries);
+              return;
+            }
+            // A Country node can have CountryCode child element and VehMatchedLocs
+            if (node.CountryCode || node.VehMatchedLocs) {
+              countries.push(node);
+            }
+            // Country elements may contain more Country children (nested XML)
+            if (node.Country) {
+              collectCountries(node.Country);
+            }
+            // VehMatchedLocs can contain nested Country too
+            if (node.VehMatchedLocs?.Country) {
+              collectCountries(node.VehMatchedLocs.Country);
+            }
+          }
+          collectCountries(countryList.Country || countryList);
+
+          for (const country of countries) {
+            const cc = (country.CountryCode || "").toString().toUpperCase().trim();
+            const matchedLocs = country.VehMatchedLocs;
+            if (!matchedLocs) continue;
+            let locs = matchedLocs.VehMatchedLoc;
+            if (!locs) continue;
+            if (!Array.isArray(locs)) locs = [locs];
+            for (const loc of locs) {
+              vehMatchedLocs.push(loc);
+              if (loc.LocationDetail) countryCodeMap.set(loc.LocationDetail, cc);
+            }
+          }
+        } else {
+          // Fallback: VehMatchedLocs directly under root (flat structure)
+          let directLocs = root.VehMatchedLocs?.VehMatchedLoc || root.VehMatchedLoc;
+          if (directLocs) {
+            if (!Array.isArray(directLocs)) directLocs = [directLocs];
+            for (const loc of directLocs) {
+              vehMatchedLocs.push(loc);
+            }
+          }
+        }
+
+        console.log(`[import-location-list] XML parsed: ${vehMatchedLocs.length} VehMatchedLoc elements`);
+
+        // Build normalized VehMatchedLocs for extractBranchesFromGloria
+        const normalizedLocs = vehMatchedLocs.map((loc: any) => {
+          const ld = loc.LocationDetail || loc;
+          // Convert @_ prefixed attributes to attr sub-object for compatibility with extractBranchesFromGloria
+          const attrs: any = {};
+          for (const key of Object.keys(ld)) {
+            if (key.startsWith("@_")) {
+              attrs[key.substring(2)] = ld[key];
+            }
+          }
+          // Build normalized LocationDetail
+          const normalized: any = { attr: attrs };
+          // Copy child elements
+          if (ld.Address) {
+            const addr = ld.Address;
+            normalized.Address = {
+              AddressLine: typeof addr.AddressLine === "string" ? { value: addr.AddressLine } : addr.AddressLine,
+              CityName: typeof addr.CityName === "string" ? { value: addr.CityName } : addr.CityName,
+              PostalCode: typeof addr.PostalCode === "string" ? { value: (addr.PostalCode || "").toString() } : addr.PostalCode,
+              CountryName: addr.CountryName ? {
+                value: typeof addr.CountryName === "string" ? addr.CountryName : (addr.CountryName["#text"] || addr.CountryName.value || ""),
+                attr: {
+                  Code: addr.CountryName?.["@_Code"] || addr.CountryName?.Code || countryCodeMap.get(ld) || "",
+                },
+              } : { value: "", attr: { Code: countryCodeMap.get(ld) || "" } },
+            };
+          } else {
+            normalized.Address = { CountryName: { value: "", attr: { Code: countryCodeMap.get(ld) || "" } } };
+          }
+          if (ld.Telephone) {
+            normalized.Telephone = {
+              attr: { PhoneNumber: ld.Telephone?.["@_PhoneNumber"] || ld.Telephone?.PhoneNumber || "" },
+            };
+          }
+          if (ld.Opening) normalized.Opening = ld.Opening;
+          if (ld.PickupInstructions) normalized.PickupInstructions = ld.PickupInstructions;
+          if (ld.Cars) normalized.Cars = ld.Cars;
+
+          // Also extract location for locations list
+          const cc = countryCodeMap.get(ld) || normalized.Address?.CountryName?.attr?.Code || "";
+          extractFromLocationDetail({ ...normalized, ...attrs }, cc);
+
+          return { VehMatchedLoc: { LocationDetail: normalized } };
+        });
+
+        // Extract branches
+        const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
+        branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: normalizedLocs }, gloria: { VehMatchedLocs: normalizedLocs } });
+
+      } catch (parseErr: any) {
+        console.error("[import-location-list] XML parse error:", parseErr);
+        return res.status(400).json({
+          error: "INVALID_RESPONSE_FORMAT",
+          message: `Failed to parse XML response: ${parseErr.message || String(parseErr)}`,
+          details: responseText.substring(0, 500),
+        });
+      }
+    }
+    // ──── Strategy 2: PHP var_dump response ────
+    else if (responseText.includes("array(") && responseText.includes(responseRoot)) {
       try {
         const gloriaList = convertPhpVarDumpToGloriaLocationList(responseText, responseRoot);
         const vehMatchedLocs = gloriaList.VehMatchedLocs || [];
@@ -3059,51 +3246,22 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
         for (const loc of vehMatchedLocs) {
           const locationDetail = loc.VehMatchedLoc?.LocationDetail;
           if (!locationDetail) continue;
-          const attrs = locationDetail.attr || {};
-          const address = locationDetail.Address || {};
-          const countryName = address.CountryName || {};
-          const countryCode = (countryName.attr?.Code || attrs.CountryCode || "").toString().toUpperCase().trim();
-          let unlocode: string | null = null;
-          if (attrs.NatoLocode) unlocode = String(attrs.NatoLocode).toUpperCase().trim();
-          else if (attrs.Code && countryCode) {
-            const code = String(attrs.Code).toUpperCase().trim();
-            if (code.length === 5 && code.startsWith(countryCode)) unlocode = code;
-          }
-          if (!unlocode && countryCode && (attrs.Code || attrs.BranchType)) {
-            const code = String(attrs.Code || attrs.BranchType).toUpperCase().trim();
-            if (code.length === 6) unlocode = `${countryCode}${code.substring(0, 3)}`;
-          }
-          if (!unlocode && countryCode && attrs.Code) {
-            const code = String(attrs.Code).toUpperCase().trim();
-            unlocode = `${countryCode}${code.length >= 3 ? code.substring(code.length - 3) : code}`;
-          }
-          if (!unlocode && countryCode && (attrs.Code || attrs.BranchType)) {
-            const code = String(attrs.Code || attrs.BranchType).toUpperCase().trim();
-            if (code.length >= 3) unlocode = `${countryCode}${code.length >= 5 ? code.substring(0, 3) : code}`;
-          }
-          if (unlocode) {
-            locations.push({
-              unlocode,
-              country: countryCode || unlocode.substring(0, 2),
-              place: (attrs.Name || locationDetail.Name || "").toString().trim(),
-              iataCode: (attrs.IataCode || locationDetail.IataCode || "").toString().trim() || null,
-              latitude: attrs.Latitude ? parseFloat(String(attrs.Latitude)) : (locationDetail.Latitude ? parseFloat(String(locationDetail.Latitude)) : null),
-              longitude: attrs.Longitude ? parseFloat(String(attrs.Longitude)) : (locationDetail.Longitude ? parseFloat(String(locationDetail.Longitude)) : null),
-            });
-          }
+          extractFromLocationDetail(locationDetail);
         }
       } catch (parseErr: any) {
-        console.error("[import-location-list] Parse error:", parseErr);
+        console.error("[import-location-list] PHP parse error:", parseErr);
         return res.status(400).json({
           error: "INVALID_RESPONSE_FORMAT",
-          message: `Failed to parse response: ${parseErr.message || String(parseErr)}`,
+          message: `Failed to parse PHP var_dump response: ${parseErr.message || String(parseErr)}`,
         });
       }
-    } else {
+    }
+    // ──── Strategy 3: JSON response ────
+    else {
       try {
         const data = JSON.parse(responseText);
         const root = data[responseRoot] || data.GLORIA_locationlistrs;
-        const locs = root?.Locs || [];
+        const locs = root?.Locs || root?.CountryList || [];
         if (Array.isArray(locs) && locs.length > 0) {
           const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
           const vehMatchedLocs = locs.map((item: any) => ({
@@ -3114,30 +3272,14 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
           branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: vehMatchedLocs }, gloria: { VehMatchedLocs: vehMatchedLocs } });
           for (const item of locs) {
             const locationDetail = item.location?.LocationDetail || item.LocationDetail || item;
-            const attrs = locationDetail?.attr || locationDetail?.attr || {};
-            const address = locationDetail?.Address || {};
-            const countryName = address?.CountryName || {};
-            const countryCode = (countryName?.attr?.Code || attrs.CountryCode || "").toString().toUpperCase().trim();
-            const code = String(attrs.Code || attrs.BranchType || "").toUpperCase().trim();
-            let unlocode: string | null = (attrs.NatoLocode && String(attrs.NatoLocode).trim()) || null;
-            if (!unlocode && countryCode && code.length === 6) unlocode = `${countryCode}${code.substring(0, 3)}`;
-            if (!unlocode && countryCode && code) unlocode = `${countryCode}${code.length >= 3 ? code.substring(code.length - 3) : code}`;
-            if (unlocode) {
-              locations.push({
-                unlocode,
-                country: countryCode || unlocode.substring(0, 2),
-                place: (attrs.Name || locationDetail?.Name || "").toString().trim(),
-                iataCode: (attrs.IataCode || locationDetail?.IataCode || "").toString().trim() || null,
-                latitude: attrs.Latitude != null ? parseFloat(String(attrs.Latitude)) : (locationDetail?.Latitude != null ? parseFloat(String(locationDetail.Latitude)) : null),
-                longitude: attrs.Longitude != null ? parseFloat(String(attrs.Longitude)) : (locationDetail?.Longitude != null ? parseFloat(String(locationDetail.Longitude)) : null),
-              });
-            }
+            extractFromLocationDetail(locationDetail);
           }
         }
       } catch {
         return res.status(400).json({
           error: "INVALID_RESPONSE_FORMAT",
-          message: "Response must be PHP var_dump with " + responseRoot + " and Locs, or JSON with same structure",
+          message: `Response must be XML with <${responseRoot}>, PHP var_dump, or JSON. Could not parse the response.`,
+          details: responseText.substring(0, 500),
         });
       }
     }

@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
-import { requireAuth } from "../../infra/auth.js";
-import { requireRole } from "../../infra/policies.js";
-import { createHealthClient, createSourceClient, createAgentClient, } from "../../infra/grpcClients.js";
-import { config } from "../../infra/config.js";
+import { requireAuth } from "../../infra/auth";
+import { requireRole } from "../../infra/policies";
+import { createHealthClient, createSourceClient, createAgentClient, } from "../../infra/grpcClients";
+import { config } from "../../infra/config";
 import { prisma } from "../../data/prisma.js";
 import path from "path";
 /* global __dirname */
