@@ -3149,7 +3149,7 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
           textNodeName: "#text",
           trimValues: true,
           // Force arrays for elements that can repeat
-          isArray: (name: string) => ["Country", "VehMatchedLoc", "Code"].includes(name),
+          isArray: (name: string) => ["Country", "VehMatchedLoc", "VehMatchedLocs", "Code"].includes(name),
           stopNodes: [], // don't stop on any node
           processEntities: true,
         });
@@ -3311,29 +3311,47 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
             if (node.Country) {
               collectCountries(node.Country);
             }
-            // VehMatchedLocs can contain nested Country too
-            if (node.VehMatchedLocs?.Country) {
-              collectCountries(node.VehMatchedLocs.Country);
+            // VehMatchedLocs can contain nested Country too (may be array)
+            if (node.VehMatchedLocs) {
+              const vmlArr = Array.isArray(node.VehMatchedLocs) ? node.VehMatchedLocs : [node.VehMatchedLocs];
+              for (const vml of vmlArr) {
+                if (vml.Country) collectCountries(vml.Country);
+              }
             }
           }
           collectCountries(countryList.Country || countryList);
 
           for (const country of countries) {
             const cc = (country.CountryCode || country["#text"] || "").toString().toUpperCase().trim();
-            const matchedLocs = country.VehMatchedLocs;
-            if (!matchedLocs) continue;
-            let locs = matchedLocs.VehMatchedLoc;
-            if (!locs) continue;
-            if (!Array.isArray(locs)) locs = [locs];
-            for (const loc of locs) {
-              vehMatchedLocs.push(loc);
-              if (loc.LocationDetail) countryCodeMap.set(loc.LocationDetail, cc);
+            // VehMatchedLocs may be an array (isArray config) or a single object
+            let matchedLocsArr = country.VehMatchedLocs;
+            if (!matchedLocsArr) continue;
+            if (!Array.isArray(matchedLocsArr)) matchedLocsArr = [matchedLocsArr];
+            for (const matchedLocs of matchedLocsArr) {
+              let locs = matchedLocs.VehMatchedLoc;
+              if (!locs) continue;
+              if (!Array.isArray(locs)) locs = [locs];
+              for (const loc of locs) {
+                vehMatchedLocs.push(loc);
+                if (loc.LocationDetail) countryCodeMap.set(loc.LocationDetail, cc);
+              }
             }
           }
         } else {
           // Fallback: VehMatchedLocs directly under root (flat structure)
-          let directLocs = root.VehMatchedLocs?.VehMatchedLoc || root.VehMatchedLoc;
-          if (directLocs) {
+          let vmlRoot = root.VehMatchedLocs;
+          if (vmlRoot) {
+            if (!Array.isArray(vmlRoot)) vmlRoot = [vmlRoot];
+            for (const vml of vmlRoot) {
+              let directLocs = vml.VehMatchedLoc;
+              if (!directLocs) continue;
+              if (!Array.isArray(directLocs)) directLocs = [directLocs];
+              for (const loc of directLocs) {
+                vehMatchedLocs.push(loc);
+              }
+            }
+          } else if (root.VehMatchedLoc) {
+            let directLocs = root.VehMatchedLoc;
             if (!Array.isArray(directLocs)) directLocs = [directLocs];
             for (const loc of directLocs) {
               vehMatchedLocs.push(loc);
@@ -3341,7 +3359,7 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
           }
         }
 
-        console.log(`[import-location-list] XML parsed: ${vehMatchedLocs.length} VehMatchedLoc elements`);
+        console.log(`[import-location-list] XML parsed: ${vehMatchedLocs.length} VehMatchedLoc elements, countryCodeMap size: ${countryCodeMap.size}`);
 
         // Build normalized VehMatchedLocs for extractBranchesFromGloria
         const normalizedLocs = vehMatchedLocs.map((loc: any) => {
