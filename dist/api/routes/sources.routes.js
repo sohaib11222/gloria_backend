@@ -2300,6 +2300,7 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
                     responseText = responseText.replace(/<[^>]+>/g, '');
                 }
             }
+<<<<<<< HEAD
             // Decode HTML entities that might escape brackets (e.g. &quot; or [)
             responseText = responseText.replace(/&quot;/g, '"').replace(/&#91;/g, '[').replace(/&#93;/g, ']');
             // Strip trailing PHP string dump (e.g. final string(3961) " ... ") so it doesn't break brace matching.
@@ -2352,6 +2353,12 @@ sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyTyp
                     console.error('[import-locations] Response preview (last 500 chars):', responseText.substring(Math.max(0, responseText.length - 500)));
                     console.error('[import-locations] Response length:', responseText.length, 'Contains OTA_VehLocSearchRS:', responseText.includes('OTA_VehLocSearchRS'));
                 }
+=======
+            // Strip trailing PHP string dump (e.g. string(3961) " ... ") so it doesn't break brace matching
+            const stringDumpMatch = responseText.match(/\n\s*string\s*\(\s*\d+\s*\)\s*"/);
+            if (stringDumpMatch && responseText.includes('OTA_VehLocSearchRS')) {
+                responseText = responseText.substring(0, stringDumpMatch.index);
+>>>>>>> 3bc011f4605baa163d460bd73b8ff25a938aca02
             }
             let data;
             let locations = [];
