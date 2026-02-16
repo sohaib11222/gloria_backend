@@ -2775,6 +2775,18 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
         if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
             finalUrl = `http://${finalUrl}`;
         }
+        // Ensure trailing slash on path-like URLs to avoid POST→GET redirect issues
+        // e.g. /gloria → /gloria/ (servers often 301 redirect, which converts POST to GET)
+        try {
+            const parsed = new URL(finalUrl);
+            if (parsed.pathname && !parsed.pathname.endsWith("/") && !parsed.pathname.includes(".")) {
+                parsed.pathname += "/";
+                finalUrl = parsed.toString();
+                console.log(`[import-location-list] Normalized URL with trailing slash: ${finalUrl}`);
+            }
+        }
+        catch { }
+        console.log(`[import-location-list] Request URL: ${finalUrl}, root: ${requestRoot}, accountId: ${accountId}`);
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 60000);
         let responseText;
