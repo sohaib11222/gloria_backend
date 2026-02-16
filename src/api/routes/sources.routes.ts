@@ -808,6 +808,9 @@ const updateSourceBranchSchema = z.object({
   country: z.string().optional().nullable(),
   countryCode: z.string().optional().nullable(),
   natoLocode: z.string().optional().nullable(),
+  pickupTimes: z.any().optional().nullable(),
+  dropoffTimes: z.any().optional().nullable(),
+  rawJson: z.any().optional().nullable(),
 });
 
 sourcesRouter.patch("/sources/branches/:id", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
@@ -841,9 +844,15 @@ sourcesRouter.patch("/sources/branches/:id", requireAuth(), requireCompanyType("
       }
     }
 
+    // Merge rawJson if provided (don't completely replace existing data)
+    let updateData: any = { ...body };
+    if (body.rawJson && existing.rawJson && typeof existing.rawJson === "object") {
+      updateData.rawJson = { ...(existing.rawJson as any), ...body.rawJson };
+    }
+
     const branch = await prisma.branch.update({
       where: { id },
-      data: body,
+      data: updateData,
     });
 
     res.json(branch);
