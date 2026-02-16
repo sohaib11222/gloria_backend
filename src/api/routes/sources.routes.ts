@@ -3027,10 +3027,42 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
       throw fetchErr;
     }
 
+    // If supplier wraps XML in an HTML page, try to extract the real payload
     if (responseText.includes("<html") || responseText.includes("<!DOCTYPE")) {
+      // First, try to pull content from <pre> tags (common for PHP var_dump inside HTML)
       const preMatch = responseText.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
-      if (preMatch) responseText = preMatch[1];
-      else responseText = responseText.replace(/<[^>]+>/g, "");
+      if (preMatch) {
+        responseText = preMatch[1];
+      } else if (responseText.includes(`<${responseRoot}`) || responseText.includes("GLORIA_locationlist")) {
+        // The HTML page contains our XML root — extract the XML block instead of stripping all tags
+        const xmlStartTag = `<${responseRoot}`;
+        const xmlStart = responseText.indexOf(xmlStartTag);
+        if (xmlStart !== -1) {
+          const xmlEndTag = `</${responseRoot}>`;
+          const xmlEnd = responseText.indexOf(xmlEndTag, xmlStart);
+          if (xmlEnd !== -1) {
+            responseText = responseText.substring(xmlStart, xmlEnd + xmlEndTag.length);
+          } else {
+            // No closing tag — take everything from the start tag onward
+            responseText = responseText.substring(xmlStart);
+          }
+        }
+        // If no start tag found either, leave responseText as-is for the parsers to report
+      } else if (responseText.includes("array(")) {
+        // HTML wrapping a PHP var_dump — strip only HTML tags, keep the PHP output
+        const bodyMatch = responseText.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        if (bodyMatch) responseText = bodyMatch[1].replace(/<[^>]+>/g, "").trim();
+        else responseText = responseText.replace(/<[^>]+>/g, "").trim();
+      } else {
+        // Truly an HTML error page with no relevant data
+        const bodyMatch = responseText.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        const htmlText = bodyMatch ? bodyMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : responseText.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        return res.status(400).json({
+          error: "INVALID_RESPONSE_FORMAT",
+          message: "Supplier returned an HTML page instead of XML/JSON. The endpoint may be misconfigured or returning an error page.",
+          supplierResponse: htmlText.substring(0, 800) || "(empty)",
+        });
+      }
     }
     responseText = responseText.replace(/&quot;/g, '"').replace(/&#91;/g, "[").replace(/&#93;/g, "]");
     if (responseText.includes(responseRoot)) {
@@ -3102,23 +3134,157 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
     }
 
     // ──── Strategy 1: Raw XML response (e.g. <GLORIA_locationlistrs ...>) ────
-    const isXmlResponse = responseText.trimStart().startsWith("<?xml") || responseText.trimStart().startsWith(`<${responseRoot}`);
+    const trimmedResponse = responseText.trimStart();
+    const isXmlResponse = trimmedResponse.startsWith("<?xml") || trimmedResponse.startsWith(`<${responseRoot}`) || (trimmedResponse.startsWith("<") && responseText.includes(responseRoot));
     if (isXmlResponse && responseText.includes(responseRoot)) {
       try {
         const { XMLParser } = await import("fast-xml-parser");
+
+        // The supplier XML is often malformed (Country elements nested inside sibling
+        // VehMatchedLocs without proper closing tags). We use a permissive parser
+        // with stopNodes for elements that carry text+children and isArray for lists.
         const xmlParser = new XMLParser({
           ignoreAttributes: false,
           attributeNamePrefix: "@_",
           textNodeName: "#text",
           trimValues: true,
-          isArray: (_name: string) => false,
+          // Force arrays for elements that can repeat
+          isArray: (name: string) => ["Country", "VehMatchedLoc", "Code"].includes(name),
+          stopNodes: [], // don't stop on any node
+          processEntities: true,
         });
-        const parsed = xmlParser.parse(responseText);
+
+        let parsed: any;
+        try {
+          parsed = xmlParser.parse(responseText);
+        } catch (xmlSyntaxErr: any) {
+          // If the XML is malformed, try a regex-based extraction as fallback
+          console.warn("[import-location-list] fast-xml-parser failed, falling back to regex extraction:", xmlSyntaxErr.message);
+          parsed = null;
+        }
+
+        // ── Regex fallback: extract LocationDetail blocks from raw XML ──
+        if (!parsed || (!parsed[responseRoot] && !parsed["GLORIA_locationlistrs"])) {
+          console.log("[import-location-list] Using regex fallback to extract LocationDetail blocks from raw XML");
+          const locationDetailRegex = /<LocationDetail\b([^>]*)>([\s\S]*?)<\/LocationDetail>/gi;
+          const attrRegex = /(\w+)\s*=\s*"([^"]*)"/g;
+          const tagValueRegex = /<(\w+)(?:\s+[^>]*)?>([^<]*)<\/\1>/g;
+          const tagAttrRegex = /<(\w+)\s+([^/>]*)\/?\s*>/g;
+
+          // Extract country codes from <Country>NAME<CountryCode>CC</CountryCode> patterns
+          const countryBlockRegex = /<Country>([^<]*)<CountryCode>([^<]+)<\/CountryCode>/gi;
+          const countryBlocks: { name: string; code: string; startIdx: number }[] = [];
+          let cbMatch: RegExpExecArray | null;
+          while ((cbMatch = countryBlockRegex.exec(responseText)) !== null) {
+            countryBlocks.push({ name: cbMatch[1].trim(), code: cbMatch[2].trim().toUpperCase(), startIdx: cbMatch.index });
+          }
+
+          let ldMatch: RegExpExecArray | null;
+          const regexLocs: any[] = [];
+          while ((ldMatch = locationDetailRegex.exec(responseText)) !== null) {
+            const attrStr = ldMatch[1];
+            const innerXml = ldMatch[2];
+            const matchIdx = ldMatch.index;
+
+            // Parse LocationDetail attributes
+            const attrs: any = {};
+            let am: RegExpExecArray | null;
+            const attrRe = new RegExp(attrRegex.source, "g");
+            while ((am = attrRe.exec(attrStr)) !== null) {
+              attrs[am[1]] = am[2];
+            }
+
+            // Determine country code from nearest preceding <Country> block
+            let cc = "";
+            for (const cb of countryBlocks) {
+              if (cb.startIdx < matchIdx) cc = cb.code;
+              else break;
+            }
+
+            // Parse child elements
+            const address: any = {};
+            const addressMatch = innerXml.match(/<Address>([\s\S]*?)<\/Address>/i);
+            if (addressMatch) {
+              const addrXml = addressMatch[1];
+              const alMatch = addrXml.match(/<AddressLine[^>]*>([\s\S]*?)<\/AddressLine>/i);
+              if (alMatch) address.AddressLine = { value: alMatch[1].trim() };
+              const cnMatch = addrXml.match(/<CityName[^>]*>([\s\S]*?)<\/CityName>/i);
+              if (cnMatch) address.CityName = { value: cnMatch[1].trim() };
+              const pcMatch = addrXml.match(/<PostalCode[^>]*>([\s\S]*?)<\/PostalCode>/i);
+              if (pcMatch) address.PostalCode = { value: pcMatch[1].trim() };
+              else if (addrXml.match(/<PostalCode\s*\/>/i)) address.PostalCode = { value: "" };
+              const countryNameMatch = addrXml.match(/<CountryName\s+([^>]*)>([\s\S]*?)<\/CountryName>/i);
+              if (countryNameMatch) {
+                const cnAttrs: any = {};
+                const cnAttrRe = new RegExp(attrRegex.source, "g");
+                let cnA: RegExpExecArray | null;
+                while ((cnA = cnAttrRe.exec(countryNameMatch[1])) !== null) cnAttrs[cnA[1]] = cnA[2];
+                address.CountryName = { value: countryNameMatch[2].trim(), attr: { Code: cnAttrs.Code || cc } };
+                if (cnAttrs.Code) cc = cnAttrs.Code.toUpperCase();
+              } else {
+                address.CountryName = { value: "", attr: { Code: cc } };
+              }
+            }
+
+            // Phone
+            let phone = "";
+            const telMatch = innerXml.match(/<Telephone\s+([^/>]*)\/?\s*>/i);
+            if (telMatch) {
+              const phMatch = telMatch[1].match(/PhoneNumber\s*=\s*"([^"]*)"/i);
+              if (phMatch) phone = phMatch[1].trim();
+            }
+
+            // PickupInstructions
+            let pickup = "";
+            const piMatch = innerXml.match(/<PickupInstructions\s+([^/>]*)\/?\s*>/i);
+            if (piMatch) {
+              const pkMatch = piMatch[1].match(/Pickup\s*=\s*"([^"]*)"/i);
+              if (pkMatch) pickup = pkMatch[1].trim();
+            }
+
+            // Opening hours
+            const opening: any = {};
+            const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+            for (const day of days) {
+              const dayRe = new RegExp(`<${day}\\s+([^/>]*)\\/?\\s*>`, "i");
+              const dayMatch = innerXml.match(dayRe);
+              if (dayMatch) {
+                const openMatch = dayMatch[1].match(/Open\s*=\s*"([^"]*)"/i);
+                if (openMatch) opening[day] = { attr: { Open: openMatch[1].replace(/\n/g, "").trim() } };
+              }
+            }
+
+            const normalized: any = {
+              attr: attrs,
+              Address: Object.keys(address).length > 0 ? address : { CountryName: { value: "", attr: { Code: cc } } },
+              Telephone: phone ? { attr: { PhoneNumber: phone } } : undefined,
+              Opening: Object.keys(opening).length > 0 ? opening : undefined,
+              PickupInstructions: pickup ? { attr: { Pickup: pickup } } : undefined,
+            };
+
+            extractFromLocationDetail({ ...normalized, ...attrs }, cc);
+            regexLocs.push({ VehMatchedLoc: { LocationDetail: normalized } });
+          }
+
+          if (regexLocs.length > 0) {
+            console.log(`[import-location-list] Regex fallback extracted ${regexLocs.length} LocationDetail blocks`);
+            const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
+            branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: regexLocs }, gloria: { VehMatchedLocs: regexLocs } });
+          } else {
+            return res.status(400).json({
+              error: "INVALID_RESPONSE_FORMAT",
+              message: `XML response contained <${responseRoot}> but no <LocationDetail> elements could be extracted`,
+              details: responseText.substring(0, 800),
+            });
+          }
+        } else {
+        // ── Standard XML parsed successfully ──
         const root = parsed[responseRoot] || parsed["GLORIA_locationlistrs"];
         if (!root) {
           return res.status(400).json({
             error: "INVALID_RESPONSE_FORMAT",
             message: `Could not find <${responseRoot}> in XML response`,
+            details: `Parsed keys: ${Object.keys(parsed || {}).join(", ")}. Response excerpt: ${responseText.substring(0, 300)}`,
           });
         }
 
@@ -3153,7 +3319,7 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
           collectCountries(countryList.Country || countryList);
 
           for (const country of countries) {
-            const cc = (country.CountryCode || "").toString().toUpperCase().trim();
+            const cc = (country.CountryCode || country["#text"] || "").toString().toUpperCase().trim();
             const matchedLocs = country.VehMatchedLocs;
             if (!matchedLocs) continue;
             let locs = matchedLocs.VehMatchedLoc;
@@ -3226,6 +3392,7 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
         const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
         branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: normalizedLocs }, gloria: { VehMatchedLocs: normalizedLocs } });
 
+        } // close else block (standard XML parsed successfully)
       } catch (parseErr: any) {
         console.error("[import-location-list] XML parse error:", parseErr);
         return res.status(400).json({
@@ -3275,11 +3442,16 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
             extractFromLocationDetail(locationDetail);
           }
         }
-      } catch {
+      } catch (jsonErr: any) {
+        const preview = (responseText || "").substring(0, 600);
+        const detected = preview.startsWith("<") ? "XML-like" : preview.startsWith("{") || preview.startsWith("[") ? "JSON-like" : preview.includes("array(") ? "PHP var_dump" : "unknown";
         return res.status(400).json({
           error: "INVALID_RESPONSE_FORMAT",
-          message: `Response must be XML with <${responseRoot}>, PHP var_dump, or JSON. Could not parse the response.`,
-          details: responseText.substring(0, 500),
+          message: `Could not parse supplier response as JSON. Expected XML with <${responseRoot}>, PHP var_dump, or JSON.`,
+          detected,
+          parseError: jsonErr?.message || String(jsonErr),
+          responseLength: (responseText || "").length,
+          responseExcerpt: preview || "(empty response)",
         });
       }
     }
