@@ -2776,15 +2776,35 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
             finalUrl = `http://${finalUrl}`;
         }
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
         let responseText;
         try {
-            const fetchResponse = await fetch(finalUrl, {
+            // Use redirect:'manual' to prevent node-fetch from converting POST→GET on 301/302
+            let fetchResponse = await fetch(finalUrl, {
                 method: "POST",
                 headers: { "Content-Type": "application/xml" },
                 body: xmlBody,
                 signal: controller.signal,
+                redirect: "manual",
             });
+            // Follow redirects manually, preserving POST method and body
+            let redirectCount = 0;
+            while ([301, 302, 303, 307, 308].includes(fetchResponse.status) && redirectCount < 5) {
+                const location = fetchResponse.headers.get("location");
+                if (!location)
+                    break;
+                const redirectUrl = new URL(location, finalUrl).toString();
+                console.log(`[import-location-list] Following redirect ${fetchResponse.status} from ${finalUrl} to ${redirectUrl}`);
+                finalUrl = redirectUrl;
+                redirectCount++;
+                fetchResponse = await fetch(finalUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/xml" },
+                    body: xmlBody,
+                    signal: controller.signal,
+                    redirect: "manual",
+                });
+            }
             clearTimeout(timeoutId);
             if (!fetchResponse.ok) {
                 return res.status(fetchResponse.status).json({
@@ -2793,6 +2813,38 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
                 });
             }
             responseText = await fetchResponse.text();
+            console.log(`[import-location-list] Response received: ${responseText.length} bytes from ${finalUrl}`);
+            // If response is empty, it might be the endpoint requires a trailing slash
+            if (!responseText.trim() && !finalUrl.endsWith("/")) {
+                console.log(`[import-location-list] Empty response, retrying with trailing slash`);
+                const retryUrl = finalUrl + "/";
+                const retryResponse = await fetch(retryUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/xml" },
+                    body: xmlBody,
+                    redirect: "manual",
+                });
+                // Follow any redirects on retry too
+                let retryFinal = retryResponse;
+                if ([301, 302, 303, 307, 308].includes(retryFinal.status)) {
+                    const loc = retryFinal.headers.get("location");
+                    if (loc) {
+                        retryFinal = await fetch(new URL(loc, retryUrl).toString(), {
+                            method: "POST",
+                            headers: { "Content-Type": "application/xml" },
+                            body: xmlBody,
+                            redirect: "manual",
+                        });
+                    }
+                }
+                if (retryFinal.ok) {
+                    const retryText = await retryFinal.text();
+                    if (retryText.trim()) {
+                        responseText = retryText;
+                        console.log(`[import-location-list] Trailing slash retry succeeded: ${responseText.length} bytes`);
+                    }
+                }
+            }
         }
         catch (fetchErr) {
             clearTimeout(timeoutId);
@@ -2810,6 +2862,14 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
                 });
             }
             throw fetchErr;
+        }
+        // If still empty after all attempts, return a clear error
+        if (!responseText.trim()) {
+            return res.status(400).json({
+                error: "EMPTY_RESPONSE",
+                message: "Supplier returned an empty response. This may happen if the URL is incorrect or the endpoint requires a trailing slash. Check your endpoint URL.",
+                url: finalUrl,
+            });
         }
         // If supplier wraps XML in an HTML page, try to extract the real payload
         if (responseText.includes("<html") || responseText.includes("<!DOCTYPE")) {
