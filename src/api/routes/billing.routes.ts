@@ -129,6 +129,7 @@ const setSourceSubscriptionSchema = z.object({
   planId: z.string(),
   currentPeriodEnd: z.string().datetime().optional(),
   subscribedBranchCount: z.number().int().min(0).optional(),
+  status: z.enum(["active", "canceled", "past_due", "trialing"]).optional(),
 });
 
 billingRouter.patch(
@@ -145,27 +146,32 @@ billingRouter.patch(
       if (!source) return res.status(404).json({ error: "NOT_FOUND", message: "Source company not found" });
       const plan = await prisma.plan.findFirst({ where: { id: body.planId, active: true } });
       if (!plan) return res.status(400).json({ error: "INVALID_PLAN", message: "Plan not found or inactive" });
-      const periodEnd = body.currentPeriodEnd ? new Date(body.currentPeriodEnd) : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      const periodEnd = body.currentPeriodEnd ? new Date(body.currentPeriodEnd) : undefined;
       const subscribedBranchCount = body.subscribedBranchCount ?? 1;
+      const status = body.status ?? "active";
       const sub = await prisma.sourceSubscription.upsert({
         where: { sourceId },
         create: {
           sourceId,
           planId: plan.id,
           subscribedBranchCount,
-          status: "active",
+          status,
           currentPeriodStart: new Date(),
-          currentPeriodEnd: periodEnd,
+          currentPeriodEnd: periodEnd ?? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
         },
         update: {
           planId: plan.id,
-          status: "active",
-          currentPeriodEnd: periodEnd,
+          status,
+          ...(periodEnd != null && { currentPeriodEnd: periodEnd }),
           ...(body.subscribedBranchCount != null && { subscribedBranchCount: body.subscribedBranchCount }),
         },
-        include: { plan: true },
+        include: { plan: true, source: { select: { id: true, companyName: true, email: true, type: true } } },
       });
-      res.json(sub);
+      const [branchCount, locationCount] = await Promise.all([
+        prisma.branch.count({ where: { sourceId } }),
+        prisma.sourceLocation.count({ where: { sourceId } }),
+      ]);
+      res.json({ ...sub, branchCount, locationCount });
     } catch (e) {
       next(e);
     }

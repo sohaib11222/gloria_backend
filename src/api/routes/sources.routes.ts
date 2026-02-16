@@ -25,30 +25,26 @@ async function requireActiveSubscription(sourceId: string): Promise<{ status: nu
   return null;
 }
 
-/** Check branch/location quota (subscribed quantity); return null if ok, or { status, body } for 402 */
+/** Check branch quota (subscribed quantity); locations are unlimited and not counted.
+ *  Return null if ok, or { status, body } for 402. */
 async function checkBranchQuota(
   sourceId: string,
   subscribedBranchCount: number,
   addingBranches: number,
-  addingLocations: number
+  _addingLocations: number = 0
 ): Promise<{ status: number; body: object } | null> {
-  const [branchCount, locationCount] = await Promise.all([
-    prisma.branch.count({ where: { sourceId } }),
-    prisma.sourceLocation.count({ where: { sourceId } }),
-  ]);
-  const currentCount = branchCount + locationCount;
-  const adding = addingBranches + addingLocations;
-  const after = currentCount + adding;
-  if (after > subscribedBranchCount) {
+  const branchCount = await prisma.branch.count({ where: { sourceId } });
+  const after = branchCount + addingBranches;
+  if (subscribedBranchCount > 0 && after > subscribedBranchCount) {
     const needToAdd = after - subscribedBranchCount;
     return {
       status: 402,
       body: {
         error: "BRANCH_QUOTA_EXCEEDED",
-        message: `Your plan covers ${subscribedBranchCount} branches/locations. You have ${currentCount} and are adding ${adding}; add ${needToAdd} more to continue.`,
-        currentCount,
-        subscribedCount: subscribedBranchCount,
-        adding,
+        message: `Your plan covers ${subscribedBranchCount} branches. You have ${branchCount} and are adding ${addingBranches}; upgrade to add ${needToAdd} more.`,
+        currentBranchCount: branchCount,
+        subscribedBranchCount,
+        addingBranches,
         needToAdd,
       },
     };
