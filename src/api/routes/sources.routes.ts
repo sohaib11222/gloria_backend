@@ -25,6 +25,49 @@ async function requireActiveSubscription(sourceId: string): Promise<{ status: nu
   return null;
 }
 
+/**
+ * Auto-assign a UN/LOCODE for a branch based on countryCode + city.
+ * Tries exact match first, then case-insensitive match, then prefix/contains.
+ * Returns the unlocode string if found, otherwise null.
+ */
+async function autoAssignLocode(countryCode: string | null, city: string | null): Promise<string | null> {
+  if (!countryCode || !city) return null;
+  const cc = countryCode.toUpperCase().trim();
+  const cityName = city.trim();
+  if (!cc || !cityName) return null;
+
+  // MySQL string comparisons are case-insensitive by default (utf8_general_ci collation)
+
+  // 1. Exact match on country + place
+  const exact = await prisma.uNLocode.findFirst({
+    where: { country: cc, place: cityName },
+  });
+  if (exact) return exact.unlocode;
+
+  // 2. Place starts with city name (handles "Tivat" matching "Tivat Airport" etc.)
+  const startsWith = await prisma.uNLocode.findFirst({
+    where: { country: cc, place: { startsWith: cityName } },
+  });
+  if (startsWith) return startsWith.unlocode;
+
+  // 3. Place contains the city name
+  const contains = await prisma.uNLocode.findFirst({
+    where: { country: cc, place: { contains: cityName } },
+  });
+  if (contains) return contains.unlocode;
+
+  // 4. Try first word of city if multi-word (e.g. "Orlando Florida" -> try "Orlando")
+  const firstWord = cityName.split(/[\s,]+/)[0];
+  if (firstWord && firstWord.length >= 3 && firstWord !== cityName) {
+    const partial = await prisma.uNLocode.findFirst({
+      where: { country: cc, place: { contains: firstWord } },
+    });
+    if (partial) return partial.unlocode;
+  }
+
+  return null;
+}
+
 /** Check branch quota (subscribed quantity); locations are unlimited and not counted.
  *  Return null if ok, or { status, body } for 402. */
 async function checkBranchQuota(
@@ -1353,25 +1396,31 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
           countryCode = defaultCountryCode;
         }
 
+        // Auto-assign UN/LOCODE from countryCode + city if not explicitly provided
+        let natoLocode = branch.NatoLocode || null;
+        if (!natoLocode && countryCode && city) {
+          natoLocode = await autoAssignLocode(countryCode, city);
+        }
+
         // Build branch data - store missing fields as null (user can fill later)
         const branchData = {
           sourceId: source.id,
-          branchCode: branchCode, // Required - skip if missing
-          name: name || null, // Store as null if missing
+          branchCode: branchCode,
+          name: name || null,
           status: branch.Status || 'ACTIVE',
-          locationType: locationType || null, // Store as null if missing
-          collectionType: collectionType || null, // Store as null if missing
-          email: email || null, // Store as null if missing
-          phone: phone || null, // Store as null if missing
-          latitude: latitude || null, // Store as null if missing
-          longitude: longitude || null, // Store as null if missing
-          addressLine: addressLine || null, // Store as null if missing
-          city: city || null, // Store as null if missing
-          postalCode: postalCode || null, // Store as null if missing
-          country: country || null, // Store as null if missing
-          countryCode: countryCode || null, // Store as null if missing (or default from config)
-          natoLocode: branch.NatoLocode || null,
-          rawJson: branch, // Store raw data for reference
+          locationType: locationType || null,
+          collectionType: collectionType || null,
+          email: email || null,
+          phone: phone || null,
+          latitude: latitude || null,
+          longitude: longitude || null,
+          addressLine: addressLine || null,
+          city: city || null,
+          postalCode: postalCode || null,
+          country: country || null,
+          countryCode: countryCode || null,
+          natoLocode,
+          rawJson: branch,
         };
 
         const existing = await prisma.branch.findUnique({
@@ -2054,6 +2103,12 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
         countryCode = uploadDefaultCountry;
       }
 
+      // Auto-assign UN/LOCODE from countryCode + city if not explicitly provided
+      let natoLocode = branch.NatoLocode || null;
+      if (!natoLocode && countryCode && city) {
+        natoLocode = await autoAssignLocode(countryCode, city);
+      }
+
       const branchData = {
         sourceId: source.id,
         branchCode: branchCode,
@@ -2070,7 +2125,7 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
         postalCode: postalCode || null,
         country: country || null,
         countryCode: countryCode || null,
-        natoLocode: branch.NatoLocode || null,
+        natoLocode,
         rawJson: branch,
       };
 
@@ -3647,6 +3702,13 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
         const lonVal = branch.Longitude ?? branch.attr?.Longitude ?? (branch as any).LocationDetail?.attr?.Longitude;
         const latitude = latVal != null ? (typeof latVal === "number" ? latVal : parseFloat(String(latVal))) : null;
         const longitude = lonVal != null ? (typeof lonVal === "number" ? lonVal : parseFloat(String(lonVal))) : null;
+
+        // Auto-assign UN/LOCODE from countryCode + city if not explicitly provided
+        let natoLocode = branch.NatoLocode || null;
+        if (!natoLocode && countryCode && city) {
+          natoLocode = await autoAssignLocode(countryCode, city);
+        }
+
         const branchData = {
           sourceId: source.id,
           branchCode,
@@ -3663,7 +3725,7 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
           postalCode: postalCode || null,
           country: country || null,
           countryCode: countryCode || null,
-          natoLocode: branch.NatoLocode || null,
+          natoLocode,
           rawJson: branch,
         };
         const existingBranch = await prisma.branch.findUnique({
