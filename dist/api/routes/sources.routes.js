@@ -3559,6 +3559,41 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
     }
 });
 /**
+ * GET /sources/availability-samples
+ * Returns all stored availability samples for the authenticated source (most-recent first).
+ */
+sourcesRouter.get("/sources/availability-samples", requireAuth(), requireCompanyType("SOURCE"), async (req, res, next) => {
+    try {
+        const sourceId = req.user.companyId;
+        const samples = await prisma.sourceAvailabilitySample.findMany({
+            where: { sourceId },
+            orderBy: { updatedAt: "desc" },
+        });
+        // Each sample's sampleJson may have the full offersSummary (new format)
+        // or just the legacy { count, firstOffer } format.
+        const result = samples.map((s) => {
+            const json = s.sampleJson ?? {};
+            return {
+                id: s.id,
+                criteriaHash: s.criteriaHash,
+                pickupLoc: s.pickupLoc ?? json.criteria?.pickupLoc ?? "",
+                returnLoc: s.returnLoc ?? json.criteria?.returnLoc ?? "",
+                pickupIso: s.pickupIso ?? json.criteria?.pickupIso ?? "",
+                returnIso: s.returnIso ?? json.criteria?.returnIso ?? "",
+                offersCount: s.offersCount,
+                offersSummary: json.offersSummary ?? null,
+                criteria: json.criteria ?? null,
+                fetchedAt: json.fetchedAt ?? s.updatedAt,
+                updatedAt: s.updatedAt,
+            };
+        });
+        return res.json({ samples: result });
+    }
+    catch (e) {
+        next(e);
+    }
+});
+/**
  * POST /sources/fetch-availability
  * Fetches availability from source's availability endpoint, parses OTA VehAvailRS, and stores with dedupe (no duplicate for same criteria).
  */
@@ -3764,10 +3799,6 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
             }
             const offers = parseOtaVehAvailResponse(raw, sourceId, criteria);
             const offersCount = offers.length;
-            // Use full first offer for sampleJson so duplicates are detected accurately
-            const sampleJson = offersCount > 0
-                ? { count: offersCount, firstOffer: { vehicle_class: offers[0].vehicle_class, vehicle_make_model: offers[0].vehicle_make_model, total_price: offers[0].total_price } }
-                : { count: 0 };
             // Rich offers summary including all display fields (image, transmission, terms, extras)
             const offersSummary = offers.map((o) => ({
                 vehicle_class: o.vehicle_class ?? "",
@@ -3787,13 +3818,30 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                 priced_equips: o.priced_equips ?? undefined,
             }));
             const criteriaDisplay = { pickupLoc, returnLoc, pickupIso, returnIso, requestorId, driverAge, citizenCountry };
+            // Lightweight fingerprint for dedup (just count + first vehicle identity)
+            const dedupFingerprint = offersCount > 0
+                ? { count: offersCount, v0: `${offers[0].vehicle_class}|${offers[0].vehicle_make_model}|${offers[0].total_price}` }
+                : { count: 0, v0: "" };
+            // Full sampleJson stored in DB — includes complete offersSummary for display on reload
+            const sampleJson = {
+                count: offersCount,
+                firstOffer: offersCount > 0
+                    ? { vehicle_class: offers[0].vehicle_class, vehicle_make_model: offers[0].vehicle_make_model, total_price: offers[0].total_price }
+                    : null,
+                offersSummary,
+                criteria: criteriaDisplay,
+                fetchedAt: new Date().toISOString(),
+            };
             const existing = await prisma.sourceAvailabilitySample.findUnique({
                 where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
             });
+            // Dedup: compare lightweight fingerprint against stored version
+            const existingJson = existing?.sampleJson ?? {};
+            const existingFingerprint = { count: existingJson.count ?? existing?.offersCount, v0: existingJson.firstOffer ? `${existingJson.firstOffer.vehicle_class}|${existingJson.firstOffer.vehicle_make_model}|${existingJson.firstOffer.total_price}` : "" };
             const isSameContent = !body.force &&
                 existing &&
                 existing.offersCount === offersCount &&
-                JSON.stringify(existing.sampleJson ?? null) === JSON.stringify(sampleJson ?? null);
+                JSON.stringify(existingFingerprint) === JSON.stringify(dedupFingerprint);
             if (isSameContent) {
                 return res.json({
                     message: "Data unchanged (same as existing); not stored.",
