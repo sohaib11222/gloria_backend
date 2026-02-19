@@ -3629,6 +3629,12 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
             const responseText = await fetchResponse.text();
             const contentType = fetchResponse.headers.get("content-type") || "";
             let raw = null;
+            let rawResponsePreview;
+            let parsedPreview;
+            // Always log raw response for server-side debugging
+            console.log(`[fetch-availability] contentType="${contentType}" length=${responseText.length}`);
+            console.log(`[fetch-availability] responseText (first 800):`, responseText.slice(0, 800));
+            rawResponsePreview = responseText.slice(0, 3000);
             // ── Try OTA XML parsing first (OTA_VehAvailRateRS) ──
             const trimmed = responseText.trim();
             if (trimmed.startsWith("<?xml") ||
@@ -3718,6 +3724,7 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                 return res.status(400).json({
                     error: "INVALID_FORMAT",
                     message: "Response must be OTA VehAvailRateRS XML (or JSON/PHP var_dump) with VehAvailRSCore and VehVendorAvails",
+                    rawResponsePreview: rawResponsePreview,
                     details: {
                         expectedFormats: [
                             "OTA XML: <?xml ...><OTA_VehAvailRateRS ...><VehAvailRSCore>...</VehAvailRSCore><VehVendorAvails>...</VehVendorAvails></OTA_VehAvailRateRS>",
@@ -3729,10 +3736,37 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                     },
                 });
             }
+            // Capture parsed structure preview for debugging
+            try {
+                const vva0 = raw?.VehAvailRSCore?.VehVendorAvails?.VehVendorAvail?.[0] ?? raw?.VehAvailRSCore?.VehVendorAvails;
+                const vaList = vva0?.VehAvails?.VehAvail ?? vva0?.VehAvail;
+                const va0 = Array.isArray(vaList) ? vaList[0] : vaList;
+                const vc0 = va0?.VehAvailCore ?? va0;
+                parsedPreview = {
+                    VehAvailRSCoreKeys: raw?.VehAvailRSCore ? Object.keys(raw.VehAvailRSCore) : [],
+                    firstVendorAvailKeys: vva0 ? Object.keys(vva0) : [],
+                    firstVehAvailKeys: va0 ? Object.keys(va0) : [],
+                    firstVehAvailCoreKeys: vc0 ? Object.keys(vc0) : [],
+                    firstVehAvailCoreAttrs: vc0?.["@attributes"] ?? null,
+                    firstVehicle: vc0?.Vehicle ? {
+                        attrs: vc0.Vehicle?.["@attributes"] ?? null,
+                        VehTypeAttrs: vc0.Vehicle?.VehType?.["@attributes"] ?? null,
+                        VehClassAttrs: vc0.Vehicle?.VehClass?.["@attributes"] ?? null,
+                        VehMakeModelAttrs: vc0.Vehicle?.VehMakeModel?.["@attributes"] ?? null,
+                    } : null,
+                    firstTotalCharge: vc0?.TotalCharge?.["@attributes"] ?? null,
+                    firstVehicleCharge: vc0?.VehicleCharges?.VehicleCharge?.[0]?.["@attributes"] ?? null,
+                };
+                console.log("[fetch-availability] parsedPreview:", JSON.stringify(parsedPreview, null, 2));
+            }
+            catch (e) {
+                console.warn("[fetch-availability] parsedPreview capture failed:", e?.message);
+            }
             const offers = parseOtaVehAvailResponse(raw, sourceId, criteria);
             const offersCount = offers.length;
+            // Use full first offer for sampleJson so duplicates are detected accurately
             const sampleJson = offersCount > 0
-                ? { count: offersCount, firstOffer: { vehicle_class: offers[0].vehicle_class, vehicle_make_model: offers[0].vehicle_make_model } }
+                ? { count: offersCount, firstOffer: { vehicle_class: offers[0].vehicle_class, vehicle_make_model: offers[0].vehicle_make_model, total_price: offers[0].total_price } }
                 : { count: 0 };
             // Rich offers summary including all display fields (image, transmission, terms, extras)
             const offersSummary = offers.map((o) => ({
@@ -3756,7 +3790,8 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
             const existing = await prisma.sourceAvailabilitySample.findUnique({
                 where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
             });
-            const isSameContent = existing &&
+            const isSameContent = !body.force &&
+                existing &&
                 existing.offersCount === offersCount &&
                 JSON.stringify(existing.sampleJson ?? null) === JSON.stringify(sampleJson ?? null);
             if (isSameContent) {
@@ -3768,6 +3803,8 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                     isNew: false,
                     offersSummary,
                     criteria: criteriaDisplay,
+                    rawResponsePreview: rawResponsePreview,
+                    parsedPreview: parsedPreview,
                 });
             }
             await prisma.sourceAvailabilitySample.upsert({
@@ -3800,6 +3837,8 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                 duplicate: false,
                 offersSummary,
                 criteria: criteriaDisplay,
+                rawResponsePreview: rawResponsePreview,
+                parsedPreview: parsedPreview,
             });
         }
         catch (fetchError) {
