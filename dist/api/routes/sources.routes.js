@@ -8,6 +8,7 @@ import { prisma } from "../../data/prisma.js";
 import { isOtaVehAvailResponse, parseOtaVehAvailResponse } from "../../adapters/grpc.adapter.js";
 import { convertPhpVarDumpToVehAvailRS } from "../../services/phpVarDumpVehAvail.js";
 import { buildOtaVehAvailRateRQ } from "../../services/otaXmlBuilder.js";
+import { makeGrpcSourceAdapter } from "../../adapters/grpcSourceAdapter.js";
 /** Require active subscription for source; return null if ok, or { status, body } to send as 402 */
 async function requireActiveSubscription(sourceId) {
     const sub = await prisma.sourceSubscription.findUnique({
@@ -3601,11 +3602,13 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
     try {
         const sourceId = req.user.companyId;
         const body = (req.body || {});
+        const adapterType = body.adapterType ?? "xml";
         const source = await prisma.company.findUnique({
             where: { id: sourceId },
             select: {
                 id: true,
                 httpEndpoint: true,
+                grpcEndpoint: true,
                 availabilityEndpointUrl: true,
                 locationListAccountId: true,
             },
@@ -3613,20 +3616,37 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
         if (!source) {
             return res.status(404).json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
         }
-        let endpointUrl = (body.url || source.availabilityEndpointUrl || "").trim();
-        if (!endpointUrl && source.httpEndpoint) {
-            endpointUrl = source.httpEndpoint.replace(/\/$/, "") + "/availability";
+        // Resolve endpoint based on adapter type
+        let endpointUrl = "";
+        if (adapterType === "grpc") {
+            // For gRPC, use the provided url or the source's grpcEndpoint
+            endpointUrl = (body.url || source.grpcEndpoint || "").trim();
+            if (!endpointUrl) {
+                return res.status(400).json({
+                    error: "ENDPOINT_NOT_CONFIGURED",
+                    message: "Configure a gRPC endpoint address for this source (e.g. host:port or grpc://host:port)",
+                });
+            }
+            // Normalise: strip grpc:// prefix if present — GrpcSourceAdapter handles host:port directly
+            endpointUrl = endpointUrl.replace(/^grpc:\/\//, "");
         }
-        if (!endpointUrl) {
-            return res.status(400).json({
-                error: "ENDPOINT_NOT_CONFIGURED",
-                message: "Configure an availability endpoint URL (Pricing tab) or set availabilityEndpointUrl / httpEndpoint",
-            });
+        else {
+            // XML or JSON — HTTP endpoint
+            endpointUrl = (body.url || source.availabilityEndpointUrl || "").trim();
+            if (!endpointUrl && source.httpEndpoint) {
+                endpointUrl = source.httpEndpoint.replace(/\/$/, "") + "/availability";
+            }
+            if (!endpointUrl) {
+                return res.status(400).json({
+                    error: "ENDPOINT_NOT_CONFIGURED",
+                    message: "Configure an availability endpoint URL (Pricing tab) or set availabilityEndpointUrl / httpEndpoint",
+                });
+            }
+            if (!endpointUrl.startsWith("http://") && !endpointUrl.startsWith("https://")) {
+                endpointUrl = `https://${endpointUrl}`;
+            }
         }
-        if (!endpointUrl.startsWith("http://") && !endpointUrl.startsWith("https://")) {
-            endpointUrl = `https://${endpointUrl}`;
-        }
-        // OTA request parameters
+        // Common request parameters
         const pickupIso = body.pickupDateTime || "2026-03-18T14:00:00";
         const returnIso = body.returnDateTime || "2026-03-22T14:00:00";
         const pickupLoc = body.pickupLoc || "TIAA01";
@@ -3642,164 +3662,256 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
             driver_age: driverAge,
             residency_country: citizenCountry,
         };
-        const criteriaHash = crypto.createHash("sha256").update(`${sourceId}|${pickupIso}|${returnIso}|${pickupLoc}|${returnLoc}`).digest("hex").slice(0, 32);
+        // Include endpoint + adapterType in hash so different endpoints/formats never overwrite each other
+        const criteriaHash = crypto
+            .createHash("sha256")
+            .update(`${sourceId}|${pickupIso}|${returnIso}|${pickupLoc}|${returnLoc}|${endpointUrl}|${adapterType}`)
+            .digest("hex")
+            .slice(0, 32);
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
+        // Normalized offer array — all three adapters populate this
+        let offers = [];
+        let rawResponsePreview;
+        let parsedPreview;
         try {
-            // Build OTA_VehAvailRateRQ XML and POST to endpoint (Content-Type: text/xml)
-            const xmlBody = buildOtaVehAvailRateRQ(criteria, requestorId);
-            const fetchResponse = await fetch(endpointUrl, {
-                method: "POST",
-                headers: { "Content-Type": "text/xml" },
-                body: xmlBody,
-                signal: controller.signal,
-            });
-            clearTimeout(timeoutId);
-            if (!fetchResponse.ok) {
-                return res.status(fetchResponse.status).json({
-                    error: "SUPPLIER_ERROR",
-                    message: `Availability endpoint returned ${fetchResponse.status}`,
-                });
-            }
-            const responseText = await fetchResponse.text();
-            const contentType = fetchResponse.headers.get("content-type") || "";
-            let raw = null;
-            let rawResponsePreview;
-            let parsedPreview;
-            // Always log raw response for server-side debugging
-            console.log(`[fetch-availability] contentType="${contentType}" length=${responseText.length}`);
-            console.log(`[fetch-availability] responseText (first 800):`, responseText.slice(0, 800));
-            rawResponsePreview = responseText.slice(0, 3000);
-            // ── Try OTA XML parsing first (OTA_VehAvailRateRS) ──
-            const trimmed = responseText.trim();
-            if (trimmed.startsWith("<?xml") ||
-                trimmed.startsWith("<OTA_VehAvailRateRS") ||
-                trimmed.startsWith("<OTA_") ||
-                (trimmed.startsWith("<") && trimmed.includes("VehAvailRSCore"))) {
+            // ══════════════════════════════════════════════════════════════════════
+            // GLORIA gRPC adapter
+            // ══════════════════════════════════════════════════════════════════════
+            if (adapterType === "grpc") {
+                clearTimeout(timeoutId); // gRPC manages its own channel timeout
                 try {
-                    const { XMLParser } = await import("fast-xml-parser");
-                    // Use attributesGroupName so attributes come out as { "@attributes": { key: val } }
-                    // which matches what parseOtaVehAvailResponse's attrs() helper expects
-                    const xmlParser = new XMLParser({
-                        ignoreAttributes: false,
-                        attributesGroupName: "@attributes",
-                        attributeNamePrefix: "",
-                        parseAttributeValue: false,
-                        trimValues: true,
-                        isArray: (name) => ["Included", "NotIncluded", "PricedEquips", "PricedEquip", "VehVendorAvail", "VehAvail", "VehicleCharge"].includes(name),
+                    const adapter = makeGrpcSourceAdapter(endpointUrl);
+                    const grpcResult = await adapter.availability({
+                        agreement_ref: requestorId,
+                        pickup_unlocode: pickupLoc,
+                        dropoff_unlocode: returnLoc,
+                        pickup_iso: pickupIso,
+                        dropoff_iso: returnIso,
+                        driver_age: driverAge,
+                        residency_country: citizenCountry,
+                        source_id: sourceId,
                     });
-                    const parsedXml = xmlParser.parse(responseText);
-                    // Root element is OTA_VehAvailRateRS (may have namespace prefix stripped)
-                    const rsKey = Object.keys(parsedXml).find((k) => k === "OTA_VehAvailRateRS" || k.endsWith(":OTA_VehAvailRateRS") || k.includes("VehAvailRateRS"));
-                    const rs = rsKey ? parsedXml[rsKey] : parsedXml;
-                    if (rs && rs.VehAvailRSCore) {
-                        // In OTA XML, VehVendorAvails is a SIBLING of VehAvailRSCore (not inside it).
-                        // parseOtaVehAvailResponse expects VehVendorAvails INSIDE VehAvailRSCore,
-                        // so we remap it here.
-                        raw = {
-                            VehAvailRSCore: {
-                                ...rs.VehAvailRSCore,
-                                VehVendorAvails: rs.VehVendorAvails ?? rs.VehAvailRSCore.VehVendorAvails,
-                            },
-                        };
-                        // In OTA XML, VehTerms is inside Vehicle (child of VehAvailCore > Vehicle).
-                        // parseOtaVehAvailResponse looks for VehTerms directly in VehAvailCore,
-                        // so we hoist VehTerms up to the VehAvailCore level.
-                        const vhVendorAvails = raw.VehAvailRSCore.VehVendorAvails;
-                        const vaList = Array.isArray(vhVendorAvails?.VehVendorAvail)
-                            ? vhVendorAvails.VehVendorAvail
-                            : vhVendorAvails?.VehVendorAvail
-                                ? [vhVendorAvails.VehVendorAvail]
-                                : [];
-                        for (const vva of vaList) {
-                            const vehAvailsNode = vva.VehAvails ?? vva;
-                            const vehAvailList = Array.isArray(vehAvailsNode?.VehAvail)
-                                ? vehAvailsNode.VehAvail
-                                : vehAvailsNode?.VehAvail
-                                    ? [vehAvailsNode.VehAvail]
+                    offers = Array.isArray(grpcResult) ? grpcResult : [];
+                    parsedPreview = { type: "grpc", offersCount: offers.length, firstOffer: offers[0] ?? null };
+                    console.log(`[fetch-availability] gRPC: ${offers.length} offers from ${endpointUrl}`);
+                }
+                catch (grpcErr) {
+                    return res.status(503).json({
+                        error: "GRPC_ERROR",
+                        message: `Gloria gRPC call failed: ${grpcErr.message || grpcErr.details || String(grpcErr)}`,
+                        details: { code: grpcErr.code, details: grpcErr.details },
+                    });
+                }
+                // ══════════════════════════════════════════════════════════════════════
+                // GLORIA JSON adapter
+                // ══════════════════════════════════════════════════════════════════════
+            }
+            else if (adapterType === "json") {
+                const gloriaJsonBody = {
+                    agreement_ref: requestorId,
+                    pickup_unlocode: pickupLoc,
+                    dropoff_unlocode: returnLoc,
+                    pickup_iso: pickupIso,
+                    dropoff_iso: returnIso,
+                    driver_age: driverAge,
+                    residency_country: citizenCountry,
+                };
+                const fetchResponse = await fetch(endpointUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                    body: JSON.stringify(gloriaJsonBody),
+                    signal: controller.signal,
+                });
+                clearTimeout(timeoutId);
+                if (!fetchResponse.ok) {
+                    return res.status(fetchResponse.status).json({
+                        error: "SUPPLIER_ERROR",
+                        message: `Gloria JSON endpoint returned HTTP ${fetchResponse.status}`,
+                    });
+                }
+                const responseText = await fetchResponse.text();
+                rawResponsePreview = responseText.slice(0, 3000);
+                console.log(`[fetch-availability] Gloria JSON response (first 500):`, responseText.slice(0, 500));
+                let parsed;
+                try {
+                    parsed = JSON.parse(responseText);
+                }
+                catch {
+                    return res.status(400).json({
+                        error: "INVALID_FORMAT",
+                        message: "Gloria JSON endpoint did not return valid JSON",
+                        rawResponsePreview,
+                    });
+                }
+                // Gloria JSON response: { vehicles: VehicleOffer[] }
+                // Field names match source_provider.proto VehicleOffer
+                const vehicles = parsed.vehicles || parsed.offers || [];
+                offers = vehicles.map((v) => ({
+                    source_id: sourceId,
+                    agreement_ref: requestorId,
+                    vehicle_class: v.vehicle_class || v.vehicleClass || "",
+                    vehicle_make_model: v.make_model || v.makeModel || v.vehicle_make_model || "",
+                    total_price: v.total_price ?? v.totalPrice ?? 0,
+                    currency: v.currency || "",
+                    availability_status: v.availability_status || v.availabilityStatus || "AVAILABLE",
+                    supplier_offer_ref: v.supplier_offer_ref || v.supplierOfferRef || "",
+                    picture_url: v.picture_url || v.pictureUrl || undefined,
+                    door_count: v.door_count || v.doorCount || undefined,
+                    baggage: v.baggage || undefined,
+                    vehicle_category: v.vehicle_category || v.vehicleCategory || undefined,
+                    veh_id: v.veh_id || v.vehId || undefined,
+                    veh_terms_included: v.veh_terms_included || v.vehTermsIncluded || undefined,
+                    veh_terms_not_included: v.veh_terms_not_included || v.vehTermsNotIncluded || undefined,
+                    priced_equips: v.priced_equips || v.pricedEquips || undefined,
+                }));
+                parsedPreview = { type: "json", offersCount: offers.length, firstVehicle: vehicles[0] ?? null };
+                console.log(`[fetch-availability] Gloria JSON: ${offers.length} offers from ${endpointUrl}`);
+                // ══════════════════════════════════════════════════════════════════════
+                // OTA XML adapter (default)
+                // ══════════════════════════════════════════════════════════════════════
+            }
+            else {
+                const xmlBody = buildOtaVehAvailRateRQ(criteria, requestorId);
+                const fetchResponse = await fetch(endpointUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "text/xml" },
+                    body: xmlBody,
+                    signal: controller.signal,
+                });
+                clearTimeout(timeoutId);
+                if (!fetchResponse.ok) {
+                    return res.status(fetchResponse.status).json({
+                        error: "SUPPLIER_ERROR",
+                        message: `Availability endpoint returned ${fetchResponse.status}`,
+                    });
+                }
+                const responseText = await fetchResponse.text();
+                const contentType = fetchResponse.headers.get("content-type") || "";
+                let raw = null;
+                console.log(`[fetch-availability] OTA XML contentType="${contentType}" length=${responseText.length}`);
+                console.log(`[fetch-availability] responseText (first 800):`, responseText.slice(0, 800));
+                rawResponsePreview = responseText.slice(0, 3000);
+                // ── Try OTA XML parsing (OTA_VehAvailRateRS) ──
+                const trimmed = responseText.trim();
+                if (trimmed.startsWith("<?xml") ||
+                    trimmed.startsWith("<OTA_VehAvailRateRS") ||
+                    trimmed.startsWith("<OTA_") ||
+                    (trimmed.startsWith("<") && trimmed.includes("VehAvailRSCore"))) {
+                    try {
+                        const { XMLParser } = await import("fast-xml-parser");
+                        const xmlParser = new XMLParser({
+                            ignoreAttributes: false,
+                            attributesGroupName: "@attributes",
+                            attributeNamePrefix: "",
+                            parseAttributeValue: false,
+                            trimValues: true,
+                            isArray: (name) => ["Included", "NotIncluded", "PricedEquips", "PricedEquip", "VehVendorAvail", "VehAvail", "VehicleCharge"].includes(name),
+                        });
+                        const parsedXml = xmlParser.parse(responseText);
+                        const rsKey = Object.keys(parsedXml).find((k) => k === "OTA_VehAvailRateRS" || k.endsWith(":OTA_VehAvailRateRS") || k.includes("VehAvailRateRS"));
+                        const rs = rsKey ? parsedXml[rsKey] : parsedXml;
+                        if (rs && rs.VehAvailRSCore) {
+                            raw = {
+                                VehAvailRSCore: {
+                                    ...rs.VehAvailRSCore,
+                                    VehVendorAvails: rs.VehVendorAvails ?? rs.VehAvailRSCore.VehVendorAvails,
+                                },
+                            };
+                            // Hoist VehTerms from Vehicle up to VehAvailCore level
+                            const vhVendorAvails = raw.VehAvailRSCore.VehVendorAvails;
+                            const vaList = Array.isArray(vhVendorAvails?.VehVendorAvail)
+                                ? vhVendorAvails.VehVendorAvail
+                                : vhVendorAvails?.VehVendorAvail
+                                    ? [vhVendorAvails.VehVendorAvail]
                                     : [];
-                            for (const item of vehAvailList) {
-                                const core = item.VehAvailCore ?? item;
-                                if (core && !core.VehTerms && core.Vehicle?.VehTerms) {
-                                    core.VehTerms = core.Vehicle.VehTerms;
+                            for (const vva of vaList) {
+                                const vehAvailsNode = vva.VehAvails ?? vva;
+                                const vehAvailList = Array.isArray(vehAvailsNode?.VehAvail)
+                                    ? vehAvailsNode.VehAvail
+                                    : vehAvailsNode?.VehAvail
+                                        ? [vehAvailsNode.VehAvail]
+                                        : [];
+                                for (const item of vehAvailList) {
+                                    const core = item.VehAvailCore ?? item;
+                                    if (core && !core.VehTerms && core.Vehicle?.VehTerms) {
+                                        core.VehTerms = core.Vehicle.VehTerms;
+                                    }
                                 }
                             }
                         }
                     }
+                    catch (xmlErr) {
+                        console.warn("[fetch-availability] OTA XML parse failed:", xmlErr?.message);
+                    }
                 }
-                catch (xmlErr) {
-                    console.warn("[fetch-availability] OTA XML parse failed:", xmlErr?.message);
+                // ── Fall back: try JSON ──
+                if (!raw) {
+                    if (contentType.includes("application/json") || trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                        try {
+                            const parsedJ = JSON.parse(responseText);
+                            if (parsedJ && typeof parsedJ === "object")
+                                raw = parsedJ;
+                        }
+                        catch { /* not JSON */ }
+                    }
                 }
-            }
-            // ── Fall back: try JSON ──
-            if (!raw) {
-                if (contentType.includes("application/json") || trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                // ── Fall back: try PHP var_dump ──
+                if (!raw && typeof responseText === "string" && responseText.includes("VehAvailRSCore") && responseText.includes("VehVendorAvails")) {
                     try {
-                        const parsed = JSON.parse(responseText);
-                        if (parsed && typeof parsed === "object")
-                            raw = parsed;
+                        const parsedD = convertPhpVarDumpToVehAvailRS(responseText);
+                        if (parsedD && isOtaVehAvailResponse(parsedD))
+                            raw = parsedD;
                     }
-                    catch {
-                        // not JSON
+                    catch (phpErr) {
+                        console.warn("[fetch-availability] PHP var_dump parse failed:", phpErr?.message);
                     }
                 }
-            }
-            // ── Fall back: try PHP var_dump ──
-            if (!raw && typeof responseText === "string" && responseText.includes("VehAvailRSCore") && responseText.includes("VehVendorAvails")) {
+                if (!raw || typeof raw !== "object" || !isOtaVehAvailResponse(raw)) {
+                    return res.status(400).json({
+                        error: "INVALID_FORMAT",
+                        message: "Response must be OTA VehAvailRateRS XML (or JSON/PHP var_dump) with VehAvailRSCore and VehVendorAvails",
+                        rawResponsePreview,
+                        details: {
+                            expectedFormats: [
+                                "OTA XML: <?xml ...><OTA_VehAvailRateRS ...><VehAvailRSCore>...</VehAvailRSCore><VehVendorAvails>...</VehVendorAvails></OTA_VehAvailRateRS>",
+                                "JSON object with root keys VehAvailRSCore and VehVendorAvails (Content-Type: application/json)",
+                                "PHP var_dump text containing VehAvailRSCore and VehVendorAvails (parsed automatically)",
+                            ],
+                            help: "The endpoint should accept OTA_VehAvailRateRQ XML (Content-Type: text/xml) and return OTA_VehAvailRateRS XML.",
+                            dataPreview: typeof responseText === "string" ? responseText.slice(0, 500) + (responseText.length > 500 ? "…" : "") : undefined,
+                        },
+                    });
+                }
+                // Debug preview
                 try {
-                    const parsed = convertPhpVarDumpToVehAvailRS(responseText);
-                    if (parsed && isOtaVehAvailResponse(parsed))
-                        raw = parsed;
+                    const vva0 = raw?.VehAvailRSCore?.VehVendorAvails?.VehVendorAvail?.[0] ?? raw?.VehAvailRSCore?.VehVendorAvails;
+                    const vaListP = vva0?.VehAvails?.VehAvail ?? vva0?.VehAvail;
+                    const va0 = Array.isArray(vaListP) ? vaListP[0] : vaListP;
+                    const vc0 = va0?.VehAvailCore ?? va0;
+                    parsedPreview = {
+                        type: "xml",
+                        VehAvailRSCoreKeys: raw?.VehAvailRSCore ? Object.keys(raw.VehAvailRSCore) : [],
+                        firstVehAvailCoreKeys: vc0 ? Object.keys(vc0) : [],
+                        firstVehAvailCoreAttrs: vc0?.["@attributes"] ?? null,
+                        firstVehicle: vc0?.Vehicle ? {
+                            attrs: vc0.Vehicle?.["@attributes"] ?? null,
+                            VehMakeModelAttrs: vc0.Vehicle?.VehMakeModel?.["@attributes"] ?? null,
+                        } : null,
+                        firstTotalCharge: vc0?.TotalCharge?.["@attributes"] ?? null,
+                    };
+                    console.log("[fetch-availability] parsedPreview:", JSON.stringify(parsedPreview, null, 2));
                 }
-                catch (phpErr) {
-                    console.warn("[fetch-availability] PHP var_dump parse failed:", phpErr?.message);
+                catch (e) {
+                    console.warn("[fetch-availability] parsedPreview capture failed:", e?.message);
                 }
-            }
-            if (!raw || typeof raw !== "object" || !isOtaVehAvailResponse(raw)) {
-                return res.status(400).json({
-                    error: "INVALID_FORMAT",
-                    message: "Response must be OTA VehAvailRateRS XML (or JSON/PHP var_dump) with VehAvailRSCore and VehVendorAvails",
-                    rawResponsePreview: rawResponsePreview,
-                    details: {
-                        expectedFormats: [
-                            "OTA XML: <?xml ...><OTA_VehAvailRateRS ...><VehAvailRSCore>...</VehAvailRSCore><VehVendorAvails>...</VehVendorAvails></OTA_VehAvailRateRS>",
-                            "JSON object with root keys VehAvailRSCore and VehVendorAvails (Content-Type: application/json)",
-                            "PHP var_dump text containing VehAvailRSCore and VehVendorAvails (parsed automatically)",
-                        ],
-                        help: "The endpoint should accept OTA_VehAvailRateRQ XML (Content-Type: text/xml) and return OTA_VehAvailRateRS XML.",
-                        dataPreview: typeof responseText === "string" ? responseText.slice(0, 500) + (responseText.length > 500 ? "…" : "") : undefined,
-                    },
-                });
-            }
-            // Capture parsed structure preview for debugging
-            try {
-                const vva0 = raw?.VehAvailRSCore?.VehVendorAvails?.VehVendorAvail?.[0] ?? raw?.VehAvailRSCore?.VehVendorAvails;
-                const vaList = vva0?.VehAvails?.VehAvail ?? vva0?.VehAvail;
-                const va0 = Array.isArray(vaList) ? vaList[0] : vaList;
-                const vc0 = va0?.VehAvailCore ?? va0;
-                parsedPreview = {
-                    VehAvailRSCoreKeys: raw?.VehAvailRSCore ? Object.keys(raw.VehAvailRSCore) : [],
-                    firstVendorAvailKeys: vva0 ? Object.keys(vva0) : [],
-                    firstVehAvailKeys: va0 ? Object.keys(va0) : [],
-                    firstVehAvailCoreKeys: vc0 ? Object.keys(vc0) : [],
-                    firstVehAvailCoreAttrs: vc0?.["@attributes"] ?? null,
-                    firstVehicle: vc0?.Vehicle ? {
-                        attrs: vc0.Vehicle?.["@attributes"] ?? null,
-                        VehTypeAttrs: vc0.Vehicle?.VehType?.["@attributes"] ?? null,
-                        VehClassAttrs: vc0.Vehicle?.VehClass?.["@attributes"] ?? null,
-                        VehMakeModelAttrs: vc0.Vehicle?.VehMakeModel?.["@attributes"] ?? null,
-                    } : null,
-                    firstTotalCharge: vc0?.TotalCharge?.["@attributes"] ?? null,
-                    firstVehicleCharge: vc0?.VehicleCharges?.VehicleCharge?.[0]?.["@attributes"] ?? null,
-                };
-                console.log("[fetch-availability] parsedPreview:", JSON.stringify(parsedPreview, null, 2));
-            }
-            catch (e) {
-                console.warn("[fetch-availability] parsedPreview capture failed:", e?.message);
-            }
-            const offers = parseOtaVehAvailResponse(raw, sourceId, criteria);
+                offers = parseOtaVehAvailResponse(raw, sourceId, criteria);
+            } // end else (OTA XML)
+            // ════════════════════════════════════════════════════════════════════
+            // COMMON: build offersSummary, dedup, upsert, respond
+            // (runs for all adapter types: grpc | json | xml)
+            // ════════════════════════════════════════════════════════════════════
             const offersCount = offers.length;
-            // Rich offers summary including all display fields (image, transmission, terms, extras)
             const offersSummary = offers.map((o) => ({
                 vehicle_class: o.vehicle_class ?? "",
                 vehicle_make_model: o.vehicle_make_model ?? "",
@@ -3817,14 +3929,13 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                 not_included: o.veh_terms_not_included ?? undefined,
                 priced_equips: o.priced_equips ?? undefined,
             }));
-            const criteriaDisplay = { pickupLoc, returnLoc, pickupIso, returnIso, requestorId, driverAge, citizenCountry };
-            // Lightweight fingerprint for dedup (just count + first vehicle identity)
+            const criteriaDisplay = { pickupLoc, returnLoc, pickupIso, returnIso, requestorId, driverAge, citizenCountry, adapterType };
             const dedupFingerprint = offersCount > 0
                 ? { count: offersCount, v0: `${offers[0].vehicle_class}|${offers[0].vehicle_make_model}|${offers[0].total_price}` }
                 : { count: 0, v0: "" };
-            // Full sampleJson stored in DB — includes complete offersSummary for display on reload
             const sampleJson = {
                 count: offersCount,
+                adapterType,
                 firstOffer: offersCount > 0
                     ? { vehicle_class: offers[0].vehicle_class, vehicle_make_model: offers[0].vehicle_make_model, total_price: offers[0].total_price }
                     : null,
@@ -3835,9 +3946,11 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
             const existing = await prisma.sourceAvailabilitySample.findUnique({
                 where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
             });
-            // Dedup: compare lightweight fingerprint against stored version
             const existingJson = existing?.sampleJson ?? {};
-            const existingFingerprint = { count: existingJson.count ?? existing?.offersCount, v0: existingJson.firstOffer ? `${existingJson.firstOffer.vehicle_class}|${existingJson.firstOffer.vehicle_make_model}|${existingJson.firstOffer.total_price}` : "" };
+            const existingFingerprint = {
+                count: existingJson.count ?? existing?.offersCount,
+                v0: existingJson.firstOffer ? `${existingJson.firstOffer.vehicle_class}|${existingJson.firstOffer.vehicle_make_model}|${existingJson.firstOffer.total_price}` : "",
+            };
             const isSameContent = !body.force &&
                 existing &&
                 existing.offersCount === offersCount &&
@@ -3849,33 +3962,17 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                     stored: false,
                     duplicate: true,
                     isNew: false,
+                    adapterType,
                     offersSummary,
                     criteria: criteriaDisplay,
-                    rawResponsePreview: rawResponsePreview,
-                    parsedPreview: parsedPreview,
+                    rawResponsePreview,
+                    parsedPreview,
                 });
             }
             await prisma.sourceAvailabilitySample.upsert({
                 where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
-                update: {
-                    pickupIso,
-                    returnIso,
-                    pickupLoc,
-                    returnLoc,
-                    offersCount,
-                    sampleJson: sampleJson,
-                    updatedAt: new Date(),
-                },
-                create: {
-                    sourceId,
-                    criteriaHash,
-                    pickupIso,
-                    returnIso,
-                    pickupLoc,
-                    returnLoc,
-                    offersCount,
-                    sampleJson: sampleJson,
-                },
+                update: { pickupIso, returnIso, pickupLoc, returnLoc, offersCount, sampleJson: sampleJson, updatedAt: new Date() },
+                create: { sourceId, criteriaHash, pickupIso, returnIso, pickupLoc, returnLoc, offersCount, sampleJson: sampleJson },
             });
             res.json({
                 message: existing ? "Availability data updated (new data stored)" : "Availability data stored",
@@ -3883,19 +3980,17 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                 stored: true,
                 isNew: !existing,
                 duplicate: false,
+                adapterType,
                 offersSummary,
                 criteria: criteriaDisplay,
-                rawResponsePreview: rawResponsePreview,
-                parsedPreview: parsedPreview,
+                rawResponsePreview,
+                parsedPreview,
             });
         }
         catch (fetchError) {
             clearTimeout(timeoutId);
             if (fetchError.name === "AbortError" || fetchError.code === "ETIMEDOUT") {
-                return res.status(504).json({
-                    error: "TIMEOUT",
-                    message: "Availability endpoint timeout after 15s",
-                });
+                return res.status(504).json({ error: "TIMEOUT", message: "Availability endpoint timeout after 15s" });
             }
             if (fetchError.message?.includes("fetch failed") || fetchError.code === "ECONNREFUSED" || fetchError.code === "ENOTFOUND") {
                 return res.status(503).json({
