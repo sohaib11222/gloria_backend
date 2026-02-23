@@ -446,6 +446,98 @@ bookingsRouter.post("/", requireAuth(), async (req, res, next) => {
 });
 // [AUTO-AUDIT] Require agreement_ref for modify/cancel/check to enforce agreements
 const idSchema = z.object({ supplier_booking_ref: z.string(), agreement_ref: z.string() });
+const cancelMetaSchema = z.object({
+    requestor_id: z.string().optional(),
+    requestor_type: z.string().optional(),
+    cancellation_reason: z.string().optional(),
+});
+function mapCancelUpstreamError(err) {
+    const msg = String(err?.message || err?.details || "Cancel request failed");
+    const upper = msg.toUpperCase();
+    if (upper.includes("AGREEMENT_INACTIVE")) {
+        return {
+            status: 409,
+            body: {
+                error: "AGREEMENT_INACTIVE",
+                message: "Agreement not active or not found for this agent/source",
+            },
+        };
+    }
+    if (upper.includes("BOOKING_NOT_FOUND") || upper.includes("RESERVATION NOT FOUND")) {
+        return {
+            status: 404,
+            body: {
+                error: "BOOKING_NOT_FOUND",
+                errorCode: "50",
+                message: "Reservation Not Found",
+            },
+        };
+    }
+    if (upper.includes("ALREADY BEEN CANCELLED") || upper.includes("ALREADY CANCELLED")) {
+        return {
+            status: 409,
+            body: {
+                error: "CANCELLATION_NOT_ALLOWED",
+                errorCode: "50",
+                message: "This booking has already been cancelled",
+            },
+        };
+    }
+    if (upper.includes("ALREADY BEEN COLLECTED") || upper.includes("ALREADY COLLECTED")) {
+        return {
+            status: 409,
+            body: {
+                error: "CANCELLATION_NOT_ALLOWED",
+                errorCode: "51",
+                message: "This booking has already been collected and cannot be cancelled",
+            },
+        };
+    }
+    if (upper.includes("DRIVING LICENCE")) {
+        return {
+            status: 409,
+            body: {
+                error: "CANCELLATION_NOT_ALLOWED",
+                errorCode: "52",
+                message: "Customer could not produce a valid driving licence",
+            },
+        };
+    }
+    if (upper.includes("UNABLE TO LEAVE A DEPOSIT") || upper.includes("NO DEPOSIT")) {
+        return {
+            status: 409,
+            body: {
+                error: "CANCELLATION_NOT_ALLOWED",
+                errorCode: "53",
+                message: "Customer could not leave a deposit",
+            },
+        };
+    }
+    if (upper.includes("REFUSED TO TAKE THE VEHICLE")) {
+        return {
+            status: 409,
+            body: {
+                error: "CANCELLATION_NOT_ALLOWED",
+                errorCode: "54",
+                message: "Customer refused to take the vehicle",
+            },
+        };
+    }
+    if (upper.includes("CREDIT CARD WAS DECLINED") || upper.includes("CARD DECLINED")) {
+        return {
+            status: 409,
+            body: {
+                error: "CANCELLATION_NOT_ALLOWED",
+                errorCode: "55",
+                message: "Customer credit card was declined",
+            },
+        };
+    }
+    if (err?.code === 5) {
+        return { status: 404, body: { error: "BOOKING_NOT_FOUND", message: msg } };
+    }
+    return { status: 502, body: { error: "UPSTREAM_ERROR", message: msg } };
+}
 /**
  * @openapi
  * /bookings/{ref}:
@@ -458,6 +550,8 @@ bookingsRouter.patch("/:ref", requireAuth(), requireCompanyStatus("ACTIVE"), asy
     const requestId = req.requestId;
     try {
         const qp = idSchema.parse({ supplier_booking_ref: String(req.params.ref), agreement_ref: String(req.query.agreement_ref || "") });
+        const cancelMeta = cancelMetaSchema.parse(req.body || {});
+        const requestPayload = { ...qp, ...cancelMeta };
         // resolve agreement -> source
         const activeAgreement = await prisma.agreement.findFirst({
             where: { agentId: req.user.companyId, agreementRef: qp.agreement_ref, status: 'ACTIVE' },
@@ -473,7 +567,7 @@ bookingsRouter.patch("/:ref", requireAuth(), requireCompanyStatus("ACTIVE"), asy
                 sourceId: undefined,
                 agreementRef: qp.agreement_ref,
                 httpStatus: 409,
-                request: qp,
+                request: requestPayload,
                 response: errorResponse,
                 durationMs: Date.now() - startTime,
             });
@@ -544,6 +638,8 @@ bookingsRouter.post("/:ref/cancel", requireAuth(), requireCompanyStatus("ACTIVE"
     const requestId = req.requestId;
     try {
         const qp = idSchema.parse({ supplier_booking_ref: String(req.params.ref), agreement_ref: String(req.query.agreement_ref || "") });
+        const cancelMeta = cancelMetaSchema.parse(req.body || {});
+        const requestPayload = { ...qp, ...cancelMeta };
         const activeAgreement = await prisma.agreement.findFirst({
             where: { agentId: req.user.companyId, agreementRef: qp.agreement_ref, status: 'ACTIVE' },
             select: { id: true, sourceId: true }
@@ -558,7 +654,7 @@ bookingsRouter.post("/:ref/cancel", requireAuth(), requireCompanyStatus("ACTIVE"
                 sourceId: undefined,
                 agreementRef: qp.agreement_ref,
                 httpStatus: 409,
-                request: qp,
+                request: requestPayload,
                 response: errorResponse,
                 durationMs: Date.now() - startTime,
             });
@@ -572,19 +668,20 @@ bookingsRouter.post("/:ref/cancel", requireAuth(), requireCompanyStatus("ACTIVE"
         client.Cancel({ ...qp, source_id: activeAgreement.sourceId, middleware_request_id: requestId, agent_company_id: req.user.companyId }, metaFromReq(req), async (err, resp) => {
             const duration = Date.now() - startTime;
             if (err) {
+                const mapped = mapCancelUpstreamError(err);
                 await logBooking({
                     requestId,
                     agentId: req.user.companyId,
                     sourceId: activeAgreement.sourceId,
                     agreementRef: qp.agreement_ref,
                     operation: "cancel",
-                    requestPayload: qp,
-                    responsePayload: { error: err.message },
-                    statusCode: 502,
+                    requestPayload,
+                    responsePayload: mapped.body,
+                    statusCode: mapped.status,
                     grpcStatus: err.code || 13,
                     durationMs: duration,
                 });
-                return res.status(502).json({ error: "UPSTREAM_ERROR", message: err.message });
+                return res.status(mapped.status).json(mapped.body);
             }
             else {
                 await logBooking({
@@ -593,7 +690,7 @@ bookingsRouter.post("/:ref/cancel", requireAuth(), requireCompanyStatus("ACTIVE"
                     sourceId: activeAgreement.sourceId,
                     agreementRef: qp.agreement_ref,
                     operation: "cancel",
-                    requestPayload: qp,
+                    requestPayload,
                     responsePayload: resp,
                     statusCode: 200,
                     durationMs: duration,
