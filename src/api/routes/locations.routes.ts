@@ -150,6 +150,98 @@ locationsRouter.get("/coverage/source/:sourceId", requireAuth(), requireCompanyT
 
 /**
  * @openapi
+ * /coverage/source/{sourceId}/branches:
+ *   get:
+ *     tags: [Locations]
+ *     summary: View a Source's imported branches
+ */
+locationsRouter.get("/coverage/source/:sourceId/branches", requireAuth(), requireCompanyType("ADMIN", "SOURCE", "AGENT"), async (req: any, res, next) => {
+  try {
+    const sourceId = String(req.params.sourceId || "").trim();
+    if (!sourceId) {
+      return res.status(400).json({ error: "BAD_REQUEST", message: "Source ID is required" });
+    }
+
+    const source = await prisma.company.findUnique({
+      where: { id: sourceId },
+      select: { id: true, type: true, companyName: true, status: true },
+    });
+    if (!source || source.type !== "SOURCE") {
+      return res.status(404).json({ error: "NOT_FOUND", message: "Source not found" });
+    }
+
+    // Access control
+    if (req.user.role !== "ADMIN") {
+      if (req.user.type === "SOURCE" && req.user.companyId !== sourceId) {
+        return res.status(403).json({ error: "FORBIDDEN", message: "Can only view your own source branches" });
+      }
+      if (req.user.type === "AGENT") {
+        const hasAgreement = await prisma.agreement.findFirst({
+          where: {
+            agentId: req.user.companyId,
+            sourceId,
+            status: { in: ["ACTIVE", "ACCEPTED", "OFFERED"] },
+          },
+          select: { id: true },
+        });
+        if (!hasAgreement) {
+          return res.status(403).json({ error: "FORBIDDEN", message: "No agreement with this source" });
+        }
+      }
+    }
+
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+    const offset = Math.max(0, Number(req.query.offset || 0));
+    const search = String(req.query.search || "").trim();
+    const status = String(req.query.status || "").trim();
+    const locationType = String(req.query.locationType || "").trim();
+
+    const where: any = {
+      sourceId,
+      ...(status ? { status } : {}),
+      ...(locationType ? { locationType } : {}),
+      ...(search
+        ? {
+            OR: [
+              { branchCode: { contains: search } },
+              { name: { contains: search } },
+              { city: { contains: search } },
+              { country: { contains: search } },
+              { natoLocode: { contains: search } },
+            ],
+          }
+        : {}),
+    };
+
+    const [items, total] = await Promise.all([
+      prisma.branch.findMany({
+        where,
+        orderBy: { updatedAt: "desc" },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.branch.count({ where }),
+    ]);
+
+    res.json({
+      source: {
+        id: source.id,
+        companyName: source.companyName,
+        status: source.status,
+      },
+      items,
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * @openapi
  * /coverage/source/{sourceId}/sync:
  *   post:
  *     tags: [Locations]

@@ -163,6 +163,7 @@ model Company {
   createdTickets   SupportTicket[]   @relation("CreatedTickets")
   sourceSubscriptions SourceSubscription[]
   availabilitySamples SourceAvailabilitySample[]
+  sourceGroups AgentSourceGroup[] @relation("AgentSourceGroups")
 }
 
 model SourceAvailabilitySample {
@@ -210,10 +211,38 @@ model Agreement {
   agent             Company                     @relation("AgentAgreements", fields: [agentId], references: [id], onDelete: Cascade)
   source            Company                     @relation("SourceAgreements", fields: [sourceId], references: [id], onDelete: Cascade)
   locationOverrides AgreementLocationOverride[]
+  groupMemberships  AgentSourceGroupAgreement[]
 
   @@unique([sourceId, agreementRef])
   @@index([agentId, status, createdAt])
   @@index([sourceId, status, createdAt])
+}
+
+model AgentSourceGroup {
+  id        String   @id @default(cuid())
+  agentId   String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agent      Company                    @relation("AgentSourceGroups", fields: [agentId], references: [id], onDelete: Cascade)
+  agreements AgentSourceGroupAgreement[]
+
+  @@unique([agentId, name])
+  @@index([agentId, createdAt])
+}
+
+model AgentSourceGroupAgreement {
+  id          String   @id @default(cuid())
+  groupId     String
+  agreementId String
+  createdAt   DateTime @default(now())
+
+  group     AgentSourceGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  agreement Agreement        @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, agreementId])
+  @@index([agreementId])
 }
 
 model UNLocode {
