@@ -9,6 +9,7 @@ import { notifyAgreementDrafted, notifyAgreementOffered, notifyAgreementAccepted
 import { auditLog } from "../../services/audit.js";
 import { sourceIdsWithActiveSubscription } from "../../services/subscriptionCheck.js";
 export const agreementsRouter = Router();
+const prismaAny = prisma;
 // Helper function to convert snake_case to camelCase for agreement responses
 function toAgreementCamelCase(ag) {
     return {
@@ -1105,6 +1106,269 @@ agreementsRouter.post("/agreements/notifications/:id/read", requireAuth(), requi
                 data: { readAt: new Date() },
             });
         }
+        res.json({ success: true });
+    }
+    catch (e) {
+        next(e);
+    }
+});
+// ============================================================================
+// Agent Companies + Source Groups
+// ============================================================================
+const createSourceGroupSchema = z.object({
+    name: z.string().min(1).max(100),
+});
+const updateSourceGroupSchema = z.object({
+    name: z.string().min(1).max(100),
+});
+const attachGroupAgreementSchema = z.object({
+    agreementId: z.string().min(1),
+});
+/**
+ * GET /agent/companies
+ * List source companies reachable by the current agent via agreements,
+ * including agreement refs and basic coverage/branch counts.
+ */
+agreementsRouter.get("/agent/companies", requireAuth(), requireCompanyType("AGENT"), async (req, res, next) => {
+    try {
+        const agentId = req.user.companyId;
+        const search = String(req.query.search || "").trim();
+        const agreements = await prisma.agreement.findMany({
+            where: {
+                agentId,
+                status: { in: ["ACTIVE", "ACCEPTED", "OFFERED"] },
+            },
+            select: {
+                id: true,
+                agreementRef: true,
+                status: true,
+                validFrom: true,
+                validTo: true,
+                sourceId: true,
+            },
+            orderBy: { createdAt: "desc" },
+        });
+        const sourceIds = [...new Set(agreements.map((a) => a.sourceId))];
+        if (sourceIds.length === 0) {
+            return res.json({ items: [], total: 0 });
+        }
+        const [sources, branchCounts, locationCounts] = await Promise.all([
+            prisma.company.findMany({
+                where: {
+                    id: { in: sourceIds },
+                    type: "SOURCE",
+                    ...(search
+                        ? {
+                            OR: [
+                                { companyName: { contains: search } },
+                                { companyCode: { contains: search } },
+                                { email: { contains: search } },
+                            ],
+                        }
+                        : {}),
+                },
+                select: {
+                    id: true,
+                    companyName: true,
+                    companyCode: true,
+                    email: true,
+                    status: true,
+                    adapterType: true,
+                    lastLocationSyncAt: true,
+                },
+            }),
+            prisma.branch.groupBy({
+                by: ["sourceId"],
+                where: { sourceId: { in: sourceIds } },
+                _count: true,
+            }),
+            prisma.sourceLocation.groupBy({
+                by: ["sourceId"],
+                where: { sourceId: { in: sourceIds } },
+                _count: true,
+            }),
+        ]);
+        const branchCountMap = new Map(branchCounts.map((b) => [b.sourceId, b._count]));
+        const locationCountMap = new Map(locationCounts.map((l) => [l.sourceId, l._count]));
+        const agreementsBySource = agreements.reduce((acc, ag) => {
+            if (!acc[ag.sourceId])
+                acc[ag.sourceId] = [];
+            acc[ag.sourceId].push({
+                id: ag.id,
+                agreementRef: ag.agreementRef,
+                status: ag.status,
+                validFrom: ag.validFrom,
+                validTo: ag.validTo,
+            });
+            return acc;
+        }, {});
+        const items = sources.map((src) => ({
+            id: src.id,
+            companyName: src.companyName,
+            companyCode: src.companyCode,
+            email: src.email,
+            status: src.status,
+            adapterType: src.adapterType,
+            lastLocationSyncAt: src.lastLocationSyncAt,
+            branchCount: Number(branchCountMap.get(src.id) ?? 0),
+            locationCount: Number(locationCountMap.get(src.id) ?? 0),
+            agreements: agreementsBySource[src.id] || [],
+        }));
+        res.json({ items, total: items.length });
+    }
+    catch (e) {
+        next(e);
+    }
+});
+/** GET /agent/source-groups */
+agreementsRouter.get("/agent/source-groups", requireAuth(), requireCompanyType("AGENT"), async (req, res, next) => {
+    try {
+        const agentId = req.user.companyId;
+        const groups = await prismaAny.agentSourceGroup.findMany({
+            where: { agentId },
+            include: {
+                agreements: {
+                    include: {
+                        agreement: {
+                            select: {
+                                id: true,
+                                agreementRef: true,
+                                status: true,
+                                sourceId: true,
+                                source: {
+                                    select: { id: true, companyName: true, companyCode: true },
+                                },
+                            },
+                        },
+                    },
+                    orderBy: { createdAt: "desc" },
+                },
+            },
+            orderBy: { createdAt: "desc" },
+        });
+        const items = groups.map((g) => ({
+            id: g.id,
+            name: g.name,
+            createdAt: g.createdAt,
+            updatedAt: g.updatedAt,
+            agreements: g.agreements.map((ga) => ({
+                id: ga.agreement.id,
+                agreementRef: ga.agreement.agreementRef,
+                status: ga.agreement.status,
+                sourceId: ga.agreement.sourceId,
+                source: ga.agreement.source,
+            })),
+        }));
+        res.json({ items, total: items.length });
+    }
+    catch (e) {
+        next(e);
+    }
+});
+/** POST /agent/source-groups */
+agreementsRouter.post("/agent/source-groups", requireAuth(), requireCompanyType("AGENT"), async (req, res, next) => {
+    try {
+        const agentId = req.user.companyId;
+        const body = createSourceGroupSchema.parse(req.body);
+        const group = await prismaAny.agentSourceGroup.create({
+            data: {
+                agentId,
+                name: body.name.trim(),
+            },
+        });
+        res.status(201).json(group);
+    }
+    catch (e) {
+        if (e?.code === "P2002") {
+            return res.status(409).json({ error: "GROUP_NAME_EXISTS", message: "A group with this name already exists" });
+        }
+        next(e);
+    }
+});
+/** PATCH /agent/source-groups/:id */
+agreementsRouter.patch("/agent/source-groups/:id", requireAuth(), requireCompanyType("AGENT"), async (req, res, next) => {
+    try {
+        const agentId = req.user.companyId;
+        const id = String(req.params.id || "");
+        const body = updateSourceGroupSchema.parse(req.body);
+        const group = await prismaAny.agentSourceGroup.findUnique({ where: { id } });
+        if (!group || group.agentId !== agentId) {
+            return res.status(404).json({ error: "GROUP_NOT_FOUND", message: "Group not found" });
+        }
+        const updated = await prismaAny.agentSourceGroup.update({
+            where: { id },
+            data: { name: body.name.trim() },
+        });
+        res.json(updated);
+    }
+    catch (e) {
+        if (e?.code === "P2002") {
+            return res.status(409).json({ error: "GROUP_NAME_EXISTS", message: "A group with this name already exists" });
+        }
+        next(e);
+    }
+});
+/** DELETE /agent/source-groups/:id */
+agreementsRouter.delete("/agent/source-groups/:id", requireAuth(), requireCompanyType("AGENT"), async (req, res, next) => {
+    try {
+        const agentId = req.user.companyId;
+        const id = String(req.params.id || "");
+        const group = await prismaAny.agentSourceGroup.findUnique({ where: { id } });
+        if (!group || group.agentId !== agentId) {
+            return res.status(404).json({ error: "GROUP_NOT_FOUND", message: "Group not found" });
+        }
+        await prismaAny.agentSourceGroup.delete({ where: { id } });
+        res.json({ success: true });
+    }
+    catch (e) {
+        next(e);
+    }
+});
+/** POST /agent/source-groups/:id/agreements */
+agreementsRouter.post("/agent/source-groups/:id/agreements", requireAuth(), requireCompanyType("AGENT"), async (req, res, next) => {
+    try {
+        const agentId = req.user.companyId;
+        const groupId = String(req.params.id || "");
+        const body = attachGroupAgreementSchema.parse(req.body);
+        const group = await prismaAny.agentSourceGroup.findUnique({ where: { id: groupId } });
+        if (!group || group.agentId !== agentId) {
+            return res.status(404).json({ error: "GROUP_NOT_FOUND", message: "Group not found" });
+        }
+        const agreement = await prisma.agreement.findUnique({
+            where: { id: body.agreementId },
+            select: { id: true, agentId: true },
+        });
+        if (!agreement || agreement.agentId !== agentId) {
+            return res.status(404).json({ error: "AGREEMENT_NOT_FOUND", message: "Agreement not found for this agent" });
+        }
+        const row = await prismaAny.agentSourceGroupAgreement.create({
+            data: {
+                groupId,
+                agreementId: body.agreementId,
+            },
+        });
+        res.status(201).json(row);
+    }
+    catch (e) {
+        if (e?.code === "P2002") {
+            return res.status(409).json({ error: "AGREEMENT_ALREADY_ATTACHED", message: "Agreement already attached to group" });
+        }
+        next(e);
+    }
+});
+/** DELETE /agent/source-groups/:id/agreements/:agreementId */
+agreementsRouter.delete("/agent/source-groups/:id/agreements/:agreementId", requireAuth(), requireCompanyType("AGENT"), async (req, res, next) => {
+    try {
+        const agentId = req.user.companyId;
+        const groupId = String(req.params.id || "");
+        const agreementId = String(req.params.agreementId || "");
+        const group = await prismaAny.agentSourceGroup.findUnique({ where: { id: groupId } });
+        if (!group || group.agentId !== agentId) {
+            return res.status(404).json({ error: "GROUP_NOT_FOUND", message: "Group not found" });
+        }
+        await prismaAny.agentSourceGroupAgreement.deleteMany({
+            where: { groupId, agreementId },
+        });
         res.json({ success: true });
     }
     catch (e) {

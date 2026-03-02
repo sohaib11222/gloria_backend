@@ -9,6 +9,7 @@ import { prisma } from "../../data/prisma.js";
 import { LocationsService } from "../../services/locations.js";
 import { unlocodeSchema, isoDateSchema } from "../../services/validation.js";
 export const availabilityRouter = Router();
+const prismaAny = prisma;
 // [AUTO-AUDIT] agreement_refs required; downstream will validate ACTIVE set per agent
 // For admins, agent_id and agreement_refs are optional (for testing purposes)
 const submitSchema = z.object({
@@ -20,6 +21,7 @@ const submitSchema = z.object({
     residency_country: z.string().length(2).regex(/^[A-Z]{2}$/).optional().default("US"),
     vehicle_classes: z.array(z.string()).optional().default([]),
     agreement_refs: z.array(z.string()).optional(), // Optional for admins, required for agents
+    group_id: z.string().optional(), // Optional: resolve to agreement_refs for agent-defined group
     agent_id: z.string().optional(), // For admin testing - allows specifying which agent to test as
 });
 /**
@@ -101,8 +103,39 @@ availabilityRouter.post("/submit", requireAuth(), requireCompanyStatus("ACTIVE")
             // Regular agent user - use their companyId
             agent_id = req.user.companyId;
         }
-        // For admins, if agreement_refs not provided, find any agreement for the test agent
+        // Resolve agreement_refs from group (if provided), then merge with explicit agreement_refs
         let agreementRefs = body.agreement_refs;
+        if (body.group_id) {
+            const group = await prismaAny.agentSourceGroup.findFirst({
+                where: { id: body.group_id, agentId: agent_id },
+                include: {
+                    agreements: {
+                        include: {
+                            agreement: {
+                                select: { agreementRef: true },
+                            },
+                        },
+                    },
+                },
+            });
+            if (!group) {
+                return res.status(404).json({
+                    error: "GROUP_NOT_FOUND",
+                    message: "Group not found for this agent",
+                });
+            }
+            const groupAgreementRefs = group.agreements
+                .map((ga) => ga.agreement?.agreementRef)
+                .filter((r) => !!r);
+            if (groupAgreementRefs.length === 0) {
+                return res.status(400).json({
+                    error: "GROUP_HAS_NO_AGREEMENTS",
+                    message: "Selected group has no agreements",
+                });
+            }
+            agreementRefs = [...new Set([...(agreementRefs || []), ...groupAgreementRefs])];
+        }
+        // For admins, if agreement_refs still not provided, find any agreement for the test agent
         if (userRole === "ADMIN" && (!agreementRefs || agreementRefs.length === 0)) {
             const testAgreement = await prisma.agreement.findFirst({
                 where: { agentId: agent_id, status: "ACCEPTED" },
@@ -118,7 +151,7 @@ availabilityRouter.post("/submit", requireAuth(), requireCompanyStatus("ACTIVE")
                 agreementRefs = ["TEST-ADMIN"];
             }
         }
-        // For non-admins, agreement_refs is required
+        // For non-admins, agreement_refs is required (either explicit or resolved from group_id)
         if (userRole !== "ADMIN" && (!agreementRefs || agreementRefs.length === 0)) {
             return res.status(400).json({
                 error: "AGREEMENT_REFS_REQUIRED",
