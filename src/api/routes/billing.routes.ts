@@ -178,6 +178,259 @@ billingRouter.patch(
   }
 );
 
+// --- Helper: effective branch count for an agent (sum of branches from sources they have agreements with) ---
+async function getAgentEffectiveBranchCount(agentId: string): Promise<number> {
+  const agreements = await prisma.agreement.findMany({
+    where: { agentId, status: { in: ["ACCEPTED", "ACTIVE"] } },
+    select: { sourceId: true },
+  });
+  const sourceIds = [...new Set(agreements.map((a) => a.sourceId))];
+  if (sourceIds.length === 0) return 0;
+  const result = await prisma.branch.groupBy({
+    by: ["sourceId"],
+    where: { sourceId: { in: sourceIds } },
+    _count: true,
+  });
+  return result.reduce((sum, r) => sum + r._count, 0);
+}
+
+// --- Admin: Agent plans CRUD ---
+const createAgentPlanSchema = z.object({
+  name: z.string().min(1),
+  interval: z.enum(["WEEKLY", "MONTHLY", "YEARLY"]),
+  branchLimit: z.number().int().min(0),
+  defaultPriceCents: z.number().int().min(0),
+  active: z.boolean().optional(),
+});
+
+const updateAgentPlanSchema = z.object({
+  name: z.string().min(1).optional(),
+  interval: z.enum(["WEEKLY", "MONTHLY", "YEARLY"]).optional(),
+  branchLimit: z.number().int().min(0).optional(),
+  defaultPriceCents: z.number().int().min(0).optional(),
+  active: z.boolean().optional(),
+});
+
+billingRouter.get(
+  "/admin/agent-plans",
+  requireAuth(),
+  requireRole("ADMIN"),
+  async (_req, res, next) => {
+    try {
+      const plans = await prisma.agentPlan.findMany({
+        orderBy: { createdAt: "asc" },
+        include: { countryPrices: true },
+      });
+      res.json({ items: plans });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+billingRouter.post(
+  "/admin/agent-plans",
+  requireAuth(),
+  requireRole("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const body = createAgentPlanSchema.parse(req.body);
+      const plan = await prisma.agentPlan.create({
+        data: {
+          name: body.name,
+          interval: body.interval,
+          branchLimit: body.branchLimit,
+          defaultPriceCents: body.defaultPriceCents,
+          active: body.active ?? true,
+        },
+      });
+      res.status(201).json(plan);
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+billingRouter.patch(
+  "/admin/agent-plans/:id",
+  requireAuth(),
+  requireRole("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const body = updateAgentPlanSchema.parse(req.body);
+      const plan = await prisma.agentPlan.update({
+        where: { id },
+        data: {
+          ...(body.name != null && { name: body.name }),
+          ...(body.interval != null && { interval: body.interval }),
+          ...(body.branchLimit != null && { branchLimit: body.branchLimit }),
+          ...(body.defaultPriceCents != null && { defaultPriceCents: body.defaultPriceCents }),
+          ...(body.active != null && { active: body.active }),
+        },
+      });
+      res.json(plan);
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+// --- Admin: Agent plan country prices ---
+billingRouter.get(
+  "/admin/agent-plans/:planId/country-prices",
+  requireAuth(),
+  requireRole("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const { planId } = req.params;
+      const prices = await prisma.agentPlanCountryPrice.findMany({
+        where: { agentPlanId: planId },
+        orderBy: { countryCode: "asc" },
+      });
+      res.json({ items: prices });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+const setAgentPlanCountryPricesSchema = z.object({
+  prices: z.array(
+    z.object({
+      countryCode: z.string().length(2),
+      pricePerBranchCents: z.number().int().min(0),
+      stripePriceId: z.string().nullable().optional(),
+    })
+  ),
+});
+
+billingRouter.put(
+  "/admin/agent-plans/:planId/country-prices",
+  requireAuth(),
+  requireRole("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const { planId } = req.params;
+      const body = setAgentPlanCountryPricesSchema.parse(req.body);
+      const plan = await prisma.agentPlan.findUnique({ where: { id: planId } });
+      if (!plan) return res.status(404).json({ error: "NOT_FOUND", message: "Agent plan not found" });
+      await prisma.$transaction(
+        body.prices.map((p) =>
+          prisma.agentPlanCountryPrice.upsert({
+            where: {
+              agentPlanId_countryCode: { agentPlanId: planId, countryCode: p.countryCode.toUpperCase() },
+            },
+            create: {
+              agentPlanId: planId,
+              countryCode: p.countryCode.toUpperCase(),
+              pricePerBranchCents: p.pricePerBranchCents,
+              stripePriceId: p.stripePriceId ?? null,
+            },
+            update: {
+              pricePerBranchCents: p.pricePerBranchCents,
+              ...(p.stripePriceId !== undefined && { stripePriceId: p.stripePriceId }),
+            },
+          })
+        )
+      );
+      const prices = await prisma.agentPlanCountryPrice.findMany({
+        where: { agentPlanId: planId },
+        orderBy: { countryCode: "asc" },
+      });
+      res.json({ items: prices });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+// --- Admin: Agent subscription ---
+billingRouter.get(
+  "/admin/agents/:agentId/subscription",
+  requireAuth(),
+  requireRole("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const { agentId } = req.params;
+      const agent = await prisma.company.findUnique({
+        where: { id: agentId, type: "AGENT" },
+        select: { id: true, companyName: true, email: true, type: true, billingCountryCode: true },
+      });
+      if (!agent) return res.status(404).json({ error: "NOT_FOUND", message: "Agent company not found" });
+      const sub = await prisma.agentSubscription.findUnique({
+        where: { agentId },
+        include: { agentPlan: { include: { countryPrices: true } } },
+      });
+      const effectiveBranchCount = await getAgentEffectiveBranchCount(agentId);
+      if (!sub) {
+        return res.json({
+          subscription: null,
+          agent: { id: agent.id, companyName: agent.companyName, email: agent.email, billingCountryCode: agent.billingCountryCode },
+          effectiveBranchCount,
+        });
+      }
+      res.json({
+        ...sub,
+        agent: { id: agent.id, companyName: agent.companyName, email: agent.email, billingCountryCode: agent.billingCountryCode },
+        effectiveBranchCount,
+      });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+const setAgentSubscriptionSchema = z.object({
+  planId: z.string(),
+  currentPeriodEnd: z.string().datetime().optional(),
+  subscribedBranchCount: z.number().int().min(0).optional(),
+  status: z.enum(["active", "canceled", "past_due", "trialing"]).optional(),
+});
+
+billingRouter.patch(
+  "/admin/agents/:agentId/subscription",
+  requireAuth(),
+  requireRole("ADMIN"),
+  async (req, res, next) => {
+    try {
+      const { agentId } = req.params;
+      const body = setAgentSubscriptionSchema.parse(req.body);
+      const agent = await prisma.company.findUnique({
+        where: { id: agentId, type: "AGENT" },
+      });
+      if (!agent) return res.status(404).json({ error: "NOT_FOUND", message: "Agent company not found" });
+      const plan = await prisma.agentPlan.findFirst({ where: { id: body.planId, active: true } });
+      if (!plan) return res.status(400).json({ error: "INVALID_PLAN", message: "Agent plan not found or inactive" });
+      const periodEnd = body.currentPeriodEnd ? new Date(body.currentPeriodEnd) : undefined;
+      const subscribedBranchCount = body.subscribedBranchCount ?? 1;
+      const status = body.status ?? "active";
+      const sub = await prisma.agentSubscription.upsert({
+        where: { agentId },
+        create: {
+          agentId,
+          agentPlanId: plan.id,
+          subscribedBranchCount,
+          status,
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: periodEnd ?? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        },
+        update: {
+          agentPlanId: plan.id,
+          status,
+          ...(periodEnd != null && { currentPeriodEnd: periodEnd }),
+          ...(body.subscribedBranchCount != null && { subscribedBranchCount: body.subscribedBranchCount }),
+        },
+        include: { agentPlan: true, agent: { select: { id: true, companyName: true, email: true, billingCountryCode: true } } },
+      });
+      const effectiveBranchCount = await getAgentEffectiveBranchCount(agentId);
+      res.json({ ...sub, effectiveBranchCount });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
 // --- Source: list plans (for plan picker) ---
 
 billingRouter.get(
@@ -356,6 +609,254 @@ billingRouter.post(
   }
 );
 
+// --- Agents: list plans (for plan picker) ---
+billingRouter.get(
+  "/agents/plans",
+  requireAuth(),
+  requireCompanyType("AGENT"),
+  async (_req, res, next) => {
+    try {
+      const plans = await prisma.agentPlan.findMany({
+        where: { active: true },
+        orderBy: { createdAt: "asc" },
+        include: { countryPrices: true },
+      });
+      res.json({ items: plans });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+// --- Agents: my subscription ---
+billingRouter.get(
+  "/agents/me/subscription",
+  requireAuth(),
+  requireCompanyType("AGENT"),
+  async (req: any, res, next) => {
+    try {
+      const companyId = req.user?.companyId;
+      if (!companyId) return res.status(401).json({ error: "AUTH_ERROR", message: "Company not found" });
+      const sub = await prisma.agentSubscription.findUnique({
+        where: { agentId: companyId },
+        include: { agentPlan: { include: { countryPrices: true } } },
+      });
+      if (!sub) {
+        const effectiveBranchCount = await getAgentEffectiveBranchCount(companyId);
+        return res.json({
+          subscription: null,
+          effectiveBranchCount,
+          active: false,
+        });
+      }
+      const now = new Date();
+      const active = sub.status === "active" && sub.currentPeriodEnd && sub.currentPeriodEnd > now;
+      const effectiveBranchCount = await getAgentEffectiveBranchCount(companyId);
+      res.json({
+        ...sub,
+        active,
+        plan: sub.agentPlan,
+        effectiveBranchCount,
+      });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+// --- Agents: update subscription quantity ---
+billingRouter.patch(
+  "/agents/me/subscription/quantity",
+  requireAuth(),
+  requireCompanyType("AGENT"),
+  async (req: any, res, next) => {
+    try {
+      const companyId = req.user?.companyId;
+      if (!companyId) return res.status(401).json({ error: "AUTH_ERROR", message: "Company not found" });
+      const body = updateSubscriptionQuantitySchema.parse(req.body);
+      const sub = await prisma.agentSubscription.findUnique({
+        where: { agentId: companyId },
+        include: { agentPlan: true },
+      });
+      if (!sub) {
+        return res.status(404).json({ error: "NOT_FOUND", message: "No subscription. Subscribe to a plan first." });
+      }
+      if (sub.stripeSubscriptionId && stripe) {
+        const subscription = await stripe.subscriptions.retrieve(sub.stripeSubscriptionId, { expand: ["items.data"] });
+        const item = subscription.items?.data?.[0];
+        if (item?.id) {
+          await stripe.subscriptions.update(sub.stripeSubscriptionId, {
+            items: [{ id: item.id, quantity: body.quantity }],
+            proration_behavior: "create_prorations",
+          });
+        }
+      }
+      await prisma.agentSubscription.update({
+        where: { agentId: companyId },
+        data: { subscribedBranchCount: body.quantity },
+      });
+      const updated = await prisma.agentSubscription.findUnique({
+        where: { agentId: companyId },
+        include: { agentPlan: true },
+      });
+      res.json({ subscribedBranchCount: body.quantity, subscription: updated });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+// --- Agents: checkout session (country-based price) ---
+async function ensureAgentPlanCountryStripePrice(
+  agentPlanId: string,
+  countryCode: string,
+  pricePerBranchCents: number,
+  interval: string
+): Promise<string> {
+  const existing = await prisma.agentPlanCountryPrice.findUnique({
+    where: { agentPlanId_countryCode: { agentPlanId, countryCode } },
+  });
+  if (existing?.stripePriceId) return existing.stripePriceId;
+  if (!stripe) throw new Error("Stripe not configured");
+  const plan = await prisma.agentPlan.findUnique({ where: { id: agentPlanId } });
+  if (!plan) throw new Error("Plan not found");
+  const intervalStripe = STRIPE_INTERVAL[interval] ?? "month";
+  const product = await stripe.products.create({
+    name: `Gloria Agent – ${plan.name} (${countryCode}) (per branch)`,
+    metadata: { agentPlanId, countryCode },
+  });
+  const price = await stripe.prices.create({
+    product: product.id,
+    unit_amount: pricePerBranchCents,
+    currency: "eur",
+    recurring: { interval: intervalStripe },
+    metadata: { agentPlanId, countryCode },
+  });
+  await prisma.agentPlanCountryPrice.upsert({
+    where: { agentPlanId_countryCode: { agentPlanId, countryCode } },
+    create: {
+      agentPlanId,
+      countryCode,
+      pricePerBranchCents,
+      stripePriceId: price.id,
+    },
+    update: { stripePriceId: price.id },
+  });
+  return price.id;
+}
+
+const agentCheckoutSessionSchema = z.object({
+  planId: z.string(),
+  successUrl: z.string().url().optional(),
+  cancelUrl: z.string().url().optional(),
+});
+
+billingRouter.post(
+  "/agents/checkout-session",
+  requireAuth(),
+  requireCompanyType("AGENT"),
+  async (req: any, res, next) => {
+    try {
+      if (!stripe) return res.status(503).json({ error: "STRIPE_DISABLED", message: "Stripe is not configured" });
+      const companyId = req.user?.companyId;
+      const email = req.user?.email as string | undefined;
+      if (!companyId) return res.status(401).json({ error: "AUTH_ERROR", message: "Company not found" });
+      const body = agentCheckoutSessionSchema.parse(req.body);
+      const plan = await prisma.agentPlan.findFirst({
+        where: { id: body.planId, active: true },
+        include: { countryPrices: true },
+      });
+      if (!plan) return res.status(400).json({ error: "INVALID_PLAN", message: "Plan not found or inactive" });
+      const company = await prisma.company.findUnique({
+        where: { id: companyId },
+        select: { billingCountryCode: true },
+      });
+      const countryCode = (company?.billingCountryCode || "US").toUpperCase();
+      let priceId: string;
+      const countryPrice = plan.countryPrices.find((p) => p.countryCode === countryCode);
+      if (countryPrice) {
+        priceId = await ensureAgentPlanCountryStripePrice(
+          plan.id,
+          countryCode,
+          countryPrice.pricePerBranchCents,
+          plan.interval
+        );
+      } else {
+        priceId = await ensureAgentPlanCountryStripePrice(
+          plan.id,
+          countryCode,
+          plan.defaultPriceCents,
+          plan.interval
+        );
+      }
+      const existing = await prisma.agentSubscription.findUnique({
+        where: { agentId: companyId },
+      });
+      const baseUrl = (req.headers.origin || req.headers.referer || "").replace(/\/$/, "");
+      const successUrl = body.successUrl || `${baseUrl}/billing?checkout=success`;
+      const cancelUrl = body.cancelUrl || `${baseUrl}/billing?checkout=cancel`;
+      const sessionParams: Stripe.Checkout.SessionCreateParams = {
+        mode: "subscription",
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        metadata: { agentId: companyId, agentPlanId: plan.id },
+        subscription_data: { metadata: { agentId: companyId, agentPlanId: plan.id } },
+      };
+      if (existing?.stripeCustomerId) {
+        sessionParams.customer = existing.stripeCustomerId;
+      } else if (email) {
+        sessionParams.customer_email = email;
+      }
+      const checkoutSession = await stripe.checkout.sessions.create(sessionParams);
+      res.json({ url: checkoutSession.url });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+// --- Agents: my transactions ---
+billingRouter.get(
+  "/agents/me/transactions",
+  requireAuth(),
+  requireCompanyType("AGENT"),
+  async (req: any, res, next) => {
+    try {
+      const companyId = req.user?.companyId;
+      if (!companyId) return res.status(401).json({ error: "AUTH_ERROR", message: "Company not found" });
+      const sub = await prisma.agentSubscription.findUnique({
+        where: { agentId: companyId },
+        include: { agentPlan: true },
+      });
+      if (!sub?.stripeCustomerId) return res.json({ items: [] });
+      if (!stripe) return res.json({ items: [] });
+      const invoices = await stripe.invoices.list({
+        customer: sub.stripeCustomerId,
+        limit: 50,
+        expand: ["data.subscription"],
+      });
+      const items = invoices.data.map((inv) => ({
+        id: inv.id,
+        stripeInvoiceId: inv.id,
+        planName: sub.agentPlan?.name ?? null,
+        status: inv.status ?? "draft",
+        amountPaid: inv.amount_paid ?? 0,
+        amountDue: inv.amount_due ?? 0,
+        currency: (inv.currency ?? "usd").toUpperCase(),
+        createdAt: inv.created ? new Date(inv.created * 1000).toISOString() : null,
+        periodStart: inv.period_start ? new Date(inv.period_start * 1000).toISOString() : null,
+        periodEnd: inv.period_end ? new Date(inv.period_end * 1000).toISOString() : null,
+        invoicePdf: inv.invoice_pdf ?? null,
+        hostedInvoiceUrl: inv.hosted_invoice_url ?? null,
+      }));
+      res.json({ items });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
 // --- Admin: list all transactions (Stripe invoices) ---
 
 billingRouter.get(
@@ -479,6 +980,8 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
       const subscription = event.data.object as Stripe.Subscription;
       const sourceId = subscription.metadata?.sourceId;
       const planId = subscription.metadata?.planId;
+      const agentId = subscription.metadata?.agentId;
+      const agentPlanId = subscription.metadata?.agentPlanId;
       if (sourceId && planId) {
         const status =
           subscription.status === "active"
@@ -517,11 +1020,51 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
           },
         });
       }
+      if (agentId && agentPlanId) {
+        const status =
+          subscription.status === "active"
+            ? "active"
+            : subscription.status === "past_due"
+            ? "past_due"
+            : subscription.status === "trialing"
+            ? "trialing"
+            : "canceled";
+        const periodEnd = subscription.current_period_end
+          ? new Date(subscription.current_period_end * 1000)
+          : null;
+        const periodStart = subscription.current_period_start
+          ? new Date(subscription.current_period_start * 1000)
+          : null;
+        const quantity = subscription.items?.data?.[0]?.quantity ?? 1;
+        await prisma.agentSubscription.upsert({
+          where: { agentId },
+          create: {
+            agentId,
+            agentPlanId,
+            stripeCustomerId: subscription.customer as string,
+            stripeSubscriptionId: subscription.id,
+            subscribedBranchCount: quantity,
+            status,
+            currentPeriodStart: periodStart,
+            currentPeriodEnd: periodEnd,
+          },
+          update: {
+            stripeCustomerId: subscription.customer as string,
+            stripeSubscriptionId: subscription.id,
+            subscribedBranchCount: quantity,
+            status,
+            currentPeriodStart: periodStart,
+            currentPeriodEnd: periodEnd,
+          },
+        });
+      }
     }
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
       const sourceId = session.metadata?.sourceId;
       const planId = session.metadata?.planId;
+      const agentId = session.metadata?.agentId;
+      const agentPlanId = session.metadata?.agentPlanId;
       const subId = session.subscription as string | null;
       if (sourceId && planId && subId && stripe) {
         const subscription = await stripe.subscriptions.retrieve(subId, { expand: ["items.data"] });
@@ -547,6 +1090,39 @@ export async function handleStripeWebhook(req: Request, res: Response): Promise<
           },
           update: {
             planId,
+            stripeCustomerId: customerId,
+            stripeSubscriptionId: subscription.id,
+            subscribedBranchCount: quantity,
+            status: "active",
+            currentPeriodStart: periodStart,
+            currentPeriodEnd: periodEnd,
+          },
+        });
+      }
+      if (agentId && agentPlanId && subId && stripe) {
+        const subscription = await stripe.subscriptions.retrieve(subId, { expand: ["items.data"] });
+        const periodEnd = subscription.current_period_end
+          ? new Date(subscription.current_period_end * 1000)
+          : null;
+        const periodStart = subscription.current_period_start
+          ? new Date(subscription.current_period_start * 1000)
+          : null;
+        const customerId = (session.customer as string) || (subscription.customer as string);
+        const quantity = subscription.items?.data?.[0]?.quantity ?? 1;
+        await prisma.agentSubscription.upsert({
+          where: { agentId },
+          create: {
+            agentId,
+            agentPlanId,
+            stripeCustomerId: customerId,
+            stripeSubscriptionId: subscription.id,
+            subscribedBranchCount: quantity,
+            status: "active",
+            currentPeriodStart: periodStart,
+            currentPeriodEnd: periodEnd,
+          },
+          update: {
+            agentPlanId,
             stripeCustomerId: customerId,
             stripeSubscriptionId: subscription.id,
             subscribedBranchCount: quantity,

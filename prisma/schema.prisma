@@ -153,6 +153,9 @@ model Company {
   // Location sync tracking
   lastLocationSyncAt DateTime? // When locations were last synced
 
+  // Billing country for agents (ISO 3166-1 alpha-2) - used for country-based plan pricing
+  billingCountryCode String?
+
   users            User[]
   agentAgreements  Agreement[]       @relation("AgentAgreements")
   sourceAgreements Agreement[]       @relation("SourceAgreements")
@@ -164,6 +167,60 @@ model Company {
   sourceSubscriptions SourceSubscription[]
   availabilitySamples SourceAvailabilitySample[]
   sourceGroups AgentSourceGroup[] @relation("AgentSourceGroups")
+  agentSubscription AgentSubscription?
+}
+
+model AgentPlan {
+  id                   String   @id @default(cuid())
+  name                 String
+  interval             PlanInterval
+  branchLimit          Int      @default(0) // 0 = unlimited
+  defaultPriceCents    Int      @default(0) // fallback when no country override
+  active               Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  countryPrices   AgentPlanCountryPrice[]
+  agentSubscriptions AgentSubscription[]
+
+  @@index([active])
+}
+
+model AgentPlanCountryPrice {
+  id                  String   @id @default(cuid())
+  agentPlanId         String
+  countryCode         String   // e.g. IN, US
+  pricePerBranchCents Int
+  stripePriceId       String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  agentPlan AgentPlan @relation(fields: [agentPlanId], references: [id], onDelete: Cascade)
+
+  @@unique([agentPlanId, countryCode])
+  @@index([agentPlanId])
+}
+
+model AgentSubscription {
+  id                    String             @id @default(cuid())
+  agentId               String
+  agentPlanId           String
+  stripeCustomerId      String?
+  stripeSubscriptionId  String?
+  subscribedBranchCount Int                @default(1)
+  status                SubscriptionStatus @default(active)
+  currentPeriodStart    DateTime?
+  currentPeriodEnd      DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  agent    Company    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agentPlan AgentPlan @relation(fields: [agentPlanId], references: [id], onDelete: Restrict)
+
+  @@unique([agentId])
+  @@index([agentId])
+  @@index([currentPeriodEnd])
+  @@index([status])
 }
 
 model SourceAvailabilitySample {

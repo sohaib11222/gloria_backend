@@ -910,7 +910,7 @@ adminRouter.post("/admin/companies", requireAuth(), requireRole("ADMIN"), async 
 adminRouter.put("/admin/companies/:id", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { companyName, email, type, password, adapterType, grpcEndpoint, status } = req.body;
+    const { companyName, email, type, password, adapterType, grpcEndpoint, status, billingCountryCode } = req.body;
     
     // Check if company exists
     const existingCompany = await prisma.company.findUnique({
@@ -983,6 +983,7 @@ adminRouter.put("/admin/companies/:id", requireAuth(), requireRole("ADMIN"), asy
     if (adapterType) updateData.adapterType = adapterType;
     if (grpcEndpoint !== undefined) updateData.grpcEndpoint = grpcEndpoint;
     if (status) updateData.status = status;
+    if (billingCountryCode !== undefined) updateData.billingCountryCode = billingCountryCode ? String(billingCountryCode).toUpperCase().slice(0, 2) : null;
     
     // Hash password if provided
     if (password) {
