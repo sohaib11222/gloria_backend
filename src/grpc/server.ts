@@ -344,9 +344,10 @@ export async function startGrpcServers() {
               latency / 1000
             );
 
-            await AvailabilityStore.appendPartial(jobId, ag.sourceId, [], timedOut);
-            if (!timedOut) {
-              // Only log non-timeout errors as explicit error entries
+            if (timedOut) {
+              await AvailabilityStore.appendPartial(jobId, ag.sourceId, [], true);
+            } else {
+              // For non-timeout failures, store a single explicit error row (avoid duplicate NO_RESULT + SOURCE_ERROR).
               await AvailabilityStore.appendPartial(jobId, ag.sourceId, [
                 {
                   error: "SOURCE_ERROR",

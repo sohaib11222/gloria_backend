@@ -394,6 +394,10 @@ agreementsRouter.get(
   async (req: any, res, next) => {
     try {
       const id = String(req.params.id || "").trim();
+      // Allow static notifications routes declared later to handle this path.
+      if (id === "notifications") {
+        return next();
+      }
       if (!id) {
         return res.status(400).json({ error: "BAD_REQUEST", message: "Agreement ID is required" });
       }
@@ -1406,44 +1410,88 @@ agreementsRouter.get("/agent/companies", requireAuth(), requireCompanyType("AGEN
 agreementsRouter.get("/agent/source-groups", requireAuth(), requireCompanyType("AGENT"), async (req: any, res, next) => {
   try {
     const agentId = req.user.companyId as string;
-    const groups = await prismaAny.agentSourceGroup.findMany({
-      where: { agentId },
-      include: {
-        agreements: {
-          include: {
-            agreement: {
-              select: {
-                id: true,
-                agreementRef: true,
-                status: true,
-                sourceId: true,
-                source: {
-                  select: { id: true, companyName: true, companyCode: true },
+    const sourceGroupDelegate = prismaAny.agentSourceGroup;
+    if (sourceGroupDelegate?.findMany) {
+      const groups = await sourceGroupDelegate.findMany({
+        where: { agentId },
+        include: {
+          agreements: {
+            include: {
+              agreement: {
+                select: {
+                  id: true,
+                  agreementRef: true,
+                  status: true,
+                  sourceId: true,
+                  source: {
+                    select: { id: true, companyName: true, companyCode: true },
+                  },
                 },
               },
             },
+            orderBy: { createdAt: "desc" },
           },
-          orderBy: { createdAt: "desc" },
         },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+        orderBy: { createdAt: "desc" },
+      });
 
-    const items = groups.map((g: any) => ({
-      id: g.id,
-      name: g.name,
-      createdAt: g.createdAt,
-      updatedAt: g.updatedAt,
-      agreements: g.agreements.map((ga: any) => ({
-        id: ga.agreement.id,
-        agreementRef: ga.agreement.agreementRef,
-        status: ga.agreement.status,
-        sourceId: ga.agreement.sourceId,
-        source: ga.agreement.source,
-      })),
-    }));
+      const items = groups.map((g: any) => ({
+        id: g.id,
+        name: g.name,
+        createdAt: g.createdAt,
+        updatedAt: g.updatedAt,
+        agreements: g.agreements.map((ga: any) => ({
+          id: ga.agreement.id,
+          agreementRef: ga.agreement.agreementRef,
+          status: ga.agreement.status,
+          sourceId: ga.agreement.sourceId,
+          source: ga.agreement.source,
+        })),
+      }));
+      return res.json({ items, total: items.length });
+    }
 
-    res.json({ items, total: items.length });
+    // Fallback when Prisma delegate is unavailable (stale generated client in runtime).
+    const groups = await prisma.$queryRaw<any[]>`
+      SELECT id, name, createdAt, updatedAt
+      FROM \`AgentSourceGroup\`
+      WHERE BINARY agentId = BINARY ${agentId}
+      ORDER BY createdAt DESC
+    `;
+    const items: any[] = [];
+    for (const g of groups) {
+      const rows = await prisma.$queryRaw<any[]>`
+        SELECT
+          a.id AS agreementId,
+          a.agreementRef AS agreementRef,
+          a.status AS status,
+          a.sourceId AS sourceId,
+          s.id AS source_id,
+          s.companyName AS source_companyName,
+          s.companyCode AS source_companyCode
+        FROM \`AgentSourceGroupAgreement\` ga
+        INNER JOIN \`Agreement\` a ON BINARY a.id = BINARY ga.agreementId
+        LEFT JOIN \`Company\` s ON BINARY s.id = BINARY a.sourceId
+        WHERE BINARY ga.groupId = BINARY ${g.id}
+        ORDER BY ga.createdAt DESC
+      `;
+      items.push({
+        id: g.id,
+        name: g.name,
+        createdAt: g.createdAt,
+        updatedAt: g.updatedAt,
+        agreements: rows.map((r: any) => ({
+          id: r.agreementId,
+          agreementRef: r.agreementRef,
+          status: r.status,
+          sourceId: r.sourceId,
+          source: r.source_id
+            ? { id: r.source_id, companyName: r.source_companyName, companyCode: r.source_companyCode }
+            : null,
+        })),
+      });
+    }
+    return res.json({ items, total: items.length });
   } catch (e) {
     next(e);
   }
@@ -1454,15 +1502,37 @@ agreementsRouter.post("/agent/source-groups", requireAuth(), requireCompanyType(
   try {
     const agentId = req.user.companyId as string;
     const body = createSourceGroupSchema.parse(req.body);
-
-    const group = await prismaAny.agentSourceGroup.create({
-      data: {
-        agentId,
-        name: body.name.trim(),
-      },
-    });
-
-    res.status(201).json(group);
+    const name = body.name.trim();
+    const sourceGroupDelegate = prismaAny.agentSourceGroup;
+    if (sourceGroupDelegate?.create) {
+      const group = await sourceGroupDelegate.create({
+        data: {
+          agentId,
+          name,
+        },
+      });
+      return res.status(201).json(group);
+    }
+    const exists = await prisma.$queryRaw<any[]>`
+      SELECT id FROM \`AgentSourceGroup\`
+      WHERE BINARY agentId = BINARY ${agentId} AND BINARY name = BINARY ${name}
+      LIMIT 1
+    `;
+    if (exists.length > 0) {
+      return res.status(409).json({ error: "GROUP_NAME_EXISTS", message: "A group with this name already exists" });
+    }
+    const id = `asg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    await prisma.$executeRaw`
+      INSERT INTO \`AgentSourceGroup\` (id, agentId, name, createdAt, updatedAt)
+      VALUES (${id}, ${agentId}, ${name}, NOW(3), NOW(3))
+    `;
+    const created = await prisma.$queryRaw<any[]>`
+      SELECT id, agentId, name, createdAt, updatedAt
+      FROM \`AgentSourceGroup\`
+      WHERE BINARY id = BINARY ${id}
+      LIMIT 1
+    `;
+    return res.status(201).json(created[0]);
   } catch (e: any) {
     if (e?.code === "P2002") {
       return res.status(409).json({ error: "GROUP_NAME_EXISTS", message: "A group with this name already exists" });
@@ -1477,18 +1547,48 @@ agreementsRouter.patch("/agent/source-groups/:id", requireAuth(), requireCompany
     const agentId = req.user.companyId as string;
     const id = String(req.params.id || "");
     const body = updateSourceGroupSchema.parse(req.body);
-
-    const group = await prismaAny.agentSourceGroup.findUnique({ where: { id } });
+    const name = body.name.trim();
+    const sourceGroupDelegate = prismaAny.agentSourceGroup;
+    if (sourceGroupDelegate?.findUnique && sourceGroupDelegate?.update) {
+      const group = await sourceGroupDelegate.findUnique({ where: { id } });
+      if (!group || group.agentId !== agentId) {
+        return res.status(404).json({ error: "GROUP_NOT_FOUND", message: "Group not found" });
+      }
+      const updated = await sourceGroupDelegate.update({
+        where: { id },
+        data: { name },
+      });
+      return res.json(updated);
+    }
+    const rows = await prisma.$queryRaw<any[]>`
+      SELECT id, agentId FROM \`AgentSourceGroup\`
+      WHERE BINARY id = BINARY ${id}
+      LIMIT 1
+    `;
+    const group = rows[0];
     if (!group || group.agentId !== agentId) {
       return res.status(404).json({ error: "GROUP_NOT_FOUND", message: "Group not found" });
     }
-
-    const updated = await prismaAny.agentSourceGroup.update({
-      where: { id },
-      data: { name: body.name.trim() },
-    });
-
-    res.json(updated);
+    const dup = await prisma.$queryRaw<any[]>`
+      SELECT id FROM \`AgentSourceGroup\`
+      WHERE BINARY agentId = BINARY ${agentId} AND BINARY name = BINARY ${name} AND BINARY id <> BINARY ${id}
+      LIMIT 1
+    `;
+    if (dup.length > 0) {
+      return res.status(409).json({ error: "GROUP_NAME_EXISTS", message: "A group with this name already exists" });
+    }
+    await prisma.$executeRaw`
+      UPDATE \`AgentSourceGroup\`
+      SET name = ${name}, updatedAt = NOW(3)
+      WHERE BINARY id = BINARY ${id}
+    `;
+    const updated = await prisma.$queryRaw<any[]>`
+      SELECT id, agentId, name, createdAt, updatedAt
+      FROM \`AgentSourceGroup\`
+      WHERE BINARY id = BINARY ${id}
+      LIMIT 1
+    `;
+    return res.json(updated[0]);
   } catch (e: any) {
     if (e?.code === "P2002") {
       return res.status(409).json({ error: "GROUP_NAME_EXISTS", message: "A group with this name already exists" });
@@ -1502,14 +1602,27 @@ agreementsRouter.delete("/agent/source-groups/:id", requireAuth(), requireCompan
   try {
     const agentId = req.user.companyId as string;
     const id = String(req.params.id || "");
-
-    const group = await prismaAny.agentSourceGroup.findUnique({ where: { id } });
+    const sourceGroupDelegate = prismaAny.agentSourceGroup;
+    if (sourceGroupDelegate?.findUnique && sourceGroupDelegate?.delete) {
+      const group = await sourceGroupDelegate.findUnique({ where: { id } });
+      if (!group || group.agentId !== agentId) {
+        return res.status(404).json({ error: "GROUP_NOT_FOUND", message: "Group not found" });
+      }
+      await sourceGroupDelegate.delete({ where: { id } });
+      return res.json({ success: true });
+    }
+    const rows = await prisma.$queryRaw<any[]>`
+      SELECT id, agentId FROM \`AgentSourceGroup\`
+      WHERE BINARY id = BINARY ${id}
+      LIMIT 1
+    `;
+    const group = rows[0];
     if (!group || group.agentId !== agentId) {
       return res.status(404).json({ error: "GROUP_NOT_FOUND", message: "Group not found" });
     }
-
-    await prismaAny.agentSourceGroup.delete({ where: { id } });
-    res.json({ success: true });
+    await prisma.$executeRaw`DELETE FROM \`AgentSourceGroupAgreement\` WHERE BINARY groupId = BINARY ${id}`;
+    await prisma.$executeRaw`DELETE FROM \`AgentSourceGroup\` WHERE BINARY id = BINARY ${id}`;
+    return res.json({ success: true });
   } catch (e) {
     next(e);
   }
@@ -1521,8 +1634,19 @@ agreementsRouter.post("/agent/source-groups/:id/agreements", requireAuth(), requ
     const agentId = req.user.companyId as string;
     const groupId = String(req.params.id || "");
     const body = attachGroupAgreementSchema.parse(req.body);
-
-    const group = await prismaAny.agentSourceGroup.findUnique({ where: { id: groupId } });
+    const sourceGroupDelegate = prismaAny.agentSourceGroup;
+    const sourceGroupAgreementDelegate = prismaAny.agentSourceGroupAgreement;
+    let group: any;
+    if (sourceGroupDelegate?.findUnique) {
+      group = await sourceGroupDelegate.findUnique({ where: { id: groupId } });
+    } else {
+      const rows = await prisma.$queryRaw<any[]>`
+        SELECT id, agentId FROM \`AgentSourceGroup\`
+        WHERE BINARY id = BINARY ${groupId}
+        LIMIT 1
+      `;
+      group = rows[0];
+    }
     if (!group || group.agentId !== agentId) {
       return res.status(404).json({ error: "GROUP_NOT_FOUND", message: "Group not found" });
     }
@@ -1535,13 +1659,35 @@ agreementsRouter.post("/agent/source-groups/:id/agreements", requireAuth(), requ
       return res.status(404).json({ error: "AGREEMENT_NOT_FOUND", message: "Agreement not found for this agent" });
     }
 
-    const row = await prismaAny.agentSourceGroupAgreement.create({
-      data: {
-        groupId,
-        agreementId: body.agreementId,
-      },
-    });
-    res.status(201).json(row);
+    if (sourceGroupAgreementDelegate?.create) {
+      const row = await sourceGroupAgreementDelegate.create({
+        data: {
+          groupId,
+          agreementId: body.agreementId,
+        },
+      });
+      return res.status(201).json(row);
+    }
+    const existing = await prisma.$queryRaw<any[]>`
+      SELECT id FROM \`AgentSourceGroupAgreement\`
+      WHERE BINARY groupId = BINARY ${groupId} AND BINARY agreementId = BINARY ${body.agreementId}
+      LIMIT 1
+    `;
+    if (existing.length > 0) {
+      return res.status(409).json({ error: "AGREEMENT_ALREADY_ATTACHED", message: "Agreement already attached to group" });
+    }
+    const id = `asga_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    await prisma.$executeRaw`
+      INSERT INTO \`AgentSourceGroupAgreement\` (id, groupId, agreementId, createdAt)
+      VALUES (${id}, ${groupId}, ${body.agreementId}, NOW(3))
+    `;
+    const row = await prisma.$queryRaw<any[]>`
+      SELECT id, groupId, agreementId, createdAt
+      FROM \`AgentSourceGroupAgreement\`
+      WHERE BINARY id = BINARY ${id}
+      LIMIT 1
+    `;
+    return res.status(201).json(row[0]);
   } catch (e: any) {
     if (e?.code === "P2002") {
       return res.status(409).json({ error: "AGREEMENT_ALREADY_ATTACHED", message: "Agreement already attached to group" });
@@ -1556,17 +1702,29 @@ agreementsRouter.delete("/agent/source-groups/:id/agreements/:agreementId", requ
     const agentId = req.user.companyId as string;
     const groupId = String(req.params.id || "");
     const agreementId = String(req.params.agreementId || "");
-
-    const group = await prismaAny.agentSourceGroup.findUnique({ where: { id: groupId } });
+    const sourceGroupDelegate = prismaAny.agentSourceGroup;
+    const sourceGroupAgreementDelegate = prismaAny.agentSourceGroupAgreement;
+    const group = sourceGroupDelegate?.findUnique
+      ? await sourceGroupDelegate.findUnique({ where: { id: groupId } })
+      : (await prisma.$queryRaw<any[]>`
+          SELECT id, agentId FROM \`AgentSourceGroup\`
+          WHERE BINARY id = BINARY ${groupId}
+          LIMIT 1
+        `)[0];
     if (!group || group.agentId !== agentId) {
       return res.status(404).json({ error: "GROUP_NOT_FOUND", message: "Group not found" });
     }
-
-    await prismaAny.agentSourceGroupAgreement.deleteMany({
-      where: { groupId, agreementId },
-    });
-
-    res.json({ success: true });
+    if (sourceGroupAgreementDelegate?.deleteMany) {
+      await sourceGroupAgreementDelegate.deleteMany({
+        where: { groupId, agreementId },
+      });
+    } else {
+      await prisma.$executeRaw`
+        DELETE FROM \`AgentSourceGroupAgreement\`
+        WHERE BINARY groupId = BINARY ${groupId} AND BINARY agreementId = BINARY ${agreementId}
+      `;
+    }
+    return res.json({ success: true });
   } catch (e) {
     next(e);
   }

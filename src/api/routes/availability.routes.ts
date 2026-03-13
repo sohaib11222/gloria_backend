@@ -21,7 +21,8 @@ const submitSchema = z.object({
   dropoff_unlocode: unlocodeSchema,
   pickup_iso: isoDateSchema,
   dropoff_iso: isoDateSchema,
-  driver_age: z.number().int().min(18).max(100).optional().default(30),
+  // Some partner/frontends may send high driver ages; accept broader range to avoid hard failures.
+  driver_age: z.number().int().min(18).max(300).optional().default(30),
   residency_country: z.string().length(2).regex(/^[A-Z]{2}$/).optional().default("US"),
   vehicle_classes: z.array(z.string()).optional().default([]),
   agreement_refs: z.array(z.string()).optional(), // Optional for admins, required for agents
@@ -118,27 +119,50 @@ availabilityRouter.post(
       // Resolve agreement_refs from group (if provided), then merge with explicit agreement_refs
       let agreementRefs = body.agreement_refs;
       if (body.group_id) {
-        const group = await prismaAny.agentSourceGroup.findFirst({
-          where: { id: body.group_id, agentId: agent_id },
-          include: {
-            agreements: {
-              include: {
-                agreement: {
-                  select: { agreementRef: true },
+        let groupAgreementRefs: string[] = [];
+        if (prismaAny.agentSourceGroup?.findFirst) {
+          const group = await prismaAny.agentSourceGroup.findFirst({
+            where: { id: body.group_id, agentId: agent_id },
+            include: {
+              agreements: {
+                include: {
+                  agreement: {
+                    select: { agreementRef: true },
+                  },
                 },
               },
             },
-          },
-        });
-        if (!group) {
-          return res.status(404).json({
-            error: "GROUP_NOT_FOUND",
-            message: "Group not found for this agent",
           });
+          if (!group) {
+            return res.status(404).json({
+              error: "GROUP_NOT_FOUND",
+              message: "Group not found for this agent",
+            });
+          }
+          groupAgreementRefs = group.agreements
+            .map((ga: any) => ga.agreement?.agreementRef)
+            .filter((r: any): r is string => !!r);
+        } else {
+          // Fallback for stale Prisma runtime client: resolve group + agreements via SQL.
+          const rows = await prisma.$queryRaw<any[]>`
+            SELECT a.agreementRef AS agreementRef
+            FROM \`AgentSourceGroup\` g
+            INNER JOIN \`AgentSourceGroupAgreement\` ga ON BINARY ga.groupId = BINARY g.id
+            INNER JOIN \`Agreement\` a ON BINARY a.id = BINARY ga.agreementId
+            WHERE BINARY g.id = BINARY ${body.group_id}
+              AND BINARY g.agentId = BINARY ${agent_id}
+            ORDER BY ga.createdAt DESC
+          `;
+          if (!rows || rows.length === 0) {
+            return res.status(404).json({
+              error: "GROUP_NOT_FOUND",
+              message: "Group not found for this agent",
+            });
+          }
+          groupAgreementRefs = rows
+            .map((r: any) => r.agreementRef)
+            .filter((r: any): r is string => !!r);
         }
-        const groupAgreementRefs = group.agreements
-          .map((ga: any) => ga.agreement?.agreementRef)
-          .filter((r: any): r is string => !!r);
         if (groupAgreementRefs.length === 0) {
           return res.status(400).json({
             error: "GROUP_HAS_NO_AGREEMENTS",
@@ -383,7 +407,10 @@ availabilityRouter.get(
             
             return next(err);
           } else {
-            const offersCount = resp.offers?.length || 0;
+            const rawOffers = Array.isArray(resp.offers) ? resp.offers : [];
+            const errorEntries = rawOffers.filter((o: any) => !!o?.error);
+            const cleanOffers = rawOffers.filter((o: any) => !o?.error);
+            const offersCount = cleanOffers.length;
             const isComplete = resp.complete || false;
             
             console.log(`[Availability.Poll] ✅ gRPC Poll success (${duration}ms):`, {
@@ -393,7 +420,8 @@ availabilityRouter.get(
               lastSeq: resp.last_seq || 0,
               complete: isComplete,
               status: isComplete ? 'COMPLETE' : 'IN_PROGRESS',
-              timedOutSources: resp.timed_out_sources || 0
+              timedOutSources: resp.timed_out_sources || 0,
+              supplierErrors: errorEntries.length,
             });
             
             // Log success
@@ -412,7 +440,8 @@ availabilityRouter.get(
             // Frontend expects: { offers: [], last_seq: number, complete: boolean, status: string }
             const response = {
               request_id: resp.request_id || pollRequestId,
-              offers: resp.offers || [],
+              offers: cleanOffers,
+              source_errors: errorEntries,
               last_seq: resp.last_seq || 0,
               complete: isComplete,
               status: isComplete ? 'COMPLETE' : 'IN_PROGRESS',
