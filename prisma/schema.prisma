@@ -166,6 +166,7 @@ model Company {
   createdTickets   SupportTicket[]   @relation("CreatedTickets")
   sourceSubscriptions SourceSubscription[]
   availabilitySamples SourceAvailabilitySample[]
+  sourceDailyRates SourceDailyRate[]
   sourceGroups AgentSourceGroup[] @relation("AgentSourceGroups")
   agentSubscription AgentSubscription?
 }
@@ -240,6 +241,26 @@ model SourceAvailabilitySample {
 
   @@unique([sourceId, criteriaHash])
   @@index([sourceId])
+}
+
+model SourceDailyRate {
+  id         String   @id @default(cuid())
+  sourceId   String
+  pickupDate DateTime @db.Date
+  acrissCode String
+  pickupLoc  String
+  returnLoc  String
+  dayOffset  Int
+  price      Decimal  @db.Decimal(10, 2)
+  currency   String   @default("EUR")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  source Company @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, pickupDate, acrissCode, pickupLoc, returnLoc, dayOffset])
+  @@index([sourceId, pickupDate])
+  @@index([sourceId, acrissCode])
 }
 
 model User {

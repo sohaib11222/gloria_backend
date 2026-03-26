@@ -3196,4 +3196,206 @@ echo $res->getBody();`,
       },
     ],
   },
+  {
+    id: 'car-rental-integration-standard',
+    name: 'Car Rental Integration Standard (Glora)',
+    description:
+      'Canonical contract guide for standardizing List of Branches, Price Request, Booking Request, and Cancel/Reservation Status across mixed supplier XML implementations.',
+    endpoints: [
+      {
+        id: 'standard-list-branches',
+        name: '1) List of Branches (Standard Contract)',
+        method: 'GET',
+        path: '/source/source?tab=location-branches',
+        description:
+          'Suppliers can expose location/branch inventory in their own format, but Gloria normalizes branch identity and location fields. Use this contract as the reference shape for UI/SDK integrations.',
+        responses: [
+          {
+            status: 200,
+            description: 'Normalized branch list',
+            bodyExample: {
+              items: [
+                {
+                  branchCode: 'TIAA01',
+                  name: 'Downtown Office',
+                  country: 'IT',
+                  city: 'Rome',
+                  unlocode: 'ITROM',
+                  pickupSupported: true,
+                  returnSupported: true,
+                },
+              ],
+            },
+          },
+        ],
+        codeSamples: [
+          {
+            lang: 'curl',
+            label: 'cURL',
+            code: `curl -X GET "${BASE_URL}/source/source?tab=location-branches" \\
+  -H "Authorization: Bearer <token>"`,
+          },
+          {
+            lang: 'node',
+            label: 'Node.js',
+            code: `import axios from 'axios';
+const res = await axios.get('${BASE_URL}/source/source', {
+  params: { tab: 'location-branches' },
+  headers: { Authorization: 'Bearer <token>' }
+});
+console.log(res.data);`,
+          },
+        ],
+        roles: ['admin', 'agent', 'source'],
+      },
+      {
+        id: 'standard-price-request',
+        name: '2) Price Request (Availability Standard)',
+        method: 'POST',
+        path: '/availability/submit',
+        description:
+          'Price request is normalized into Gloria submit/poll semantics. Suppliers may send OTA XML or custom XML internally; Gloria maps into common JSON + gRPC fields.',
+        body: [
+          { name: 'agreement_ref', required: true, type: 'string', description: 'Agreement reference' },
+          { name: 'pickup_unlocode', required: true, type: 'string', description: 'Pickup location code' },
+          { name: 'dropoff_unlocode', required: true, type: 'string', description: 'Dropoff location code' },
+          { name: 'pickup_iso', required: true, type: 'string', description: 'Pickup datetime ISO' },
+          { name: 'dropoff_iso', required: true, type: 'string', description: 'Dropoff datetime ISO' },
+        ],
+        responses: [
+          {
+            status: 200,
+            description: 'Availability request accepted',
+            bodyExample: {
+              requestId: 'req_123',
+              status: 'PENDING',
+            },
+          },
+        ],
+        codeSamples: [
+          {
+            lang: 'curl',
+            label: 'cURL',
+            code: `curl -X POST "${BASE_URL}/availability/submit" \\
+  -H "Authorization: Bearer <token>" \\
+  -H "Content-Type: application/json" \\
+  -d '{"agreement_ref":"AG-2026-490","pickup_unlocode":"ITROM","dropoff_unlocode":"ITROM","pickup_iso":"2026-05-13T10:00:00Z","dropoff_iso":"2026-05-20T10:00:00Z"}'`,
+          },
+          {
+            lang: 'node',
+            label: 'Node.js',
+            code: `import axios from 'axios';
+const submit = await axios.post('${BASE_URL}/availability/submit', {
+  agreement_ref: 'AG-2026-490',
+  pickup_unlocode: 'ITROM',
+  dropoff_unlocode: 'ITROM',
+  pickup_iso: '2026-05-13T10:00:00Z',
+  dropoff_iso: '2026-05-20T10:00:00Z'
+}, { headers: { Authorization: 'Bearer <token>' } });
+console.log(submit.data);`,
+          },
+        ],
+        roles: ['admin', 'agent', 'source'],
+      },
+      {
+        id: 'standard-booking-request',
+        name: '3) Booking Request (Standard Contract)',
+        method: 'POST',
+        path: '/bookings',
+        description:
+          'Booking request is standardized using Gloria booking fields while preserving OTA aliases. gRPC variable naming remains consistent with booking.proto.',
+        body: [
+          { name: 'agreement_ref', required: true, type: 'string', description: 'Agreement reference' },
+          { name: 'supplier_offer_ref', required: false, type: 'string', description: 'Offer / vehicle pref reference' },
+          { name: 'pickup_iso', required: true, type: 'string', description: 'Pickup datetime ISO' },
+          { name: 'dropoff_iso', required: true, type: 'string', description: 'Dropoff datetime ISO' },
+          { name: 'customer_info', required: false, type: 'object', description: 'Customer payload' },
+          { name: 'payment_info', required: false, type: 'object', description: 'Voucher/payment payload' },
+        ],
+        responses: [
+          {
+            status: 200,
+            description: 'Booking created',
+            bodyExample: {
+              supplier_booking_ref: 'RC60653555IW',
+              status: 'CONFIRMED',
+            },
+          },
+        ],
+        codeSamples: [
+          {
+            lang: 'curl',
+            label: 'cURL',
+            code: `curl -X POST "${BASE_URL}/bookings" \\
+  -H "Authorization: Bearer <token>" \\
+  -H "Idempotency-Key: booking_req_001" \\
+  -H "Content-Type: application/json" \\
+  -d '{"agreement_ref":"AG-2026-490","supplier_offer_ref":"CDAR34423101240326","pickup_iso":"2026-05-13T10:00:00Z","dropoff_iso":"2026-05-20T10:00:00Z"}'`,
+          },
+          {
+            lang: 'node',
+            label: 'Node.js',
+            code: `import axios from 'axios';
+const booking = await axios.post('${BASE_URL}/bookings', {
+  agreement_ref: 'AG-2026-490',
+  supplier_offer_ref: 'CDAR34423101240326',
+  pickup_iso: '2026-05-13T10:00:00Z',
+  dropoff_iso: '2026-05-20T10:00:00Z'
+}, {
+  headers: { Authorization: 'Bearer <token>', 'Idempotency-Key': 'booking_req_001' }
+});
+console.log(booking.data);`,
+          },
+        ],
+        roles: ['admin', 'agent', 'source'],
+      },
+      {
+        id: 'standard-cancel-reservation-status',
+        name: '4) Cancel Request / Reservation Status (Standard Contract)',
+        method: 'POST',
+        path: '/bookings/:ref/cancel',
+        description:
+          'Cancel and reservation status are normalized for Gloria processing. Unknown or non-active agreement references are rejected with actionable messages.',
+        query: [{ name: 'agreement_ref', required: true, type: 'string', description: 'Agreement reference' }],
+        responses: [
+          {
+            status: 200,
+            description: 'Cancelled or status checked successfully',
+            bodyExample: {
+              supplier_booking_ref: 'RC60653555IW',
+              status: 'CANCELLED',
+            },
+          },
+          {
+            status: 409,
+            description: 'Agreement inactive/not found',
+            bodyExample: {
+              error: 'AGREEMENT_INACTIVE',
+              message: 'Agreement not active or not found for this agent/source',
+            },
+          },
+        ],
+        codeSamples: [
+          {
+            lang: 'curl',
+            label: 'cURL',
+            code: `curl -X POST "${BASE_URL}/bookings/RC60653555IW/cancel?agreement_ref=AG-2026-490" \\
+  -H "Authorization: Bearer <token>" \\
+  -H "Idempotency-Key: cancel_req_001"`,
+          },
+          {
+            lang: 'node',
+            label: 'Node.js',
+            code: `import axios from 'axios';
+const cancel = await axios.post('${BASE_URL}/bookings/RC60653555IW/cancel', {}, {
+  params: { agreement_ref: 'AG-2026-490' },
+  headers: { Authorization: 'Bearer <token>', 'Idempotency-Key': 'cancel_req_001' }
+});
+console.log(cancel.data);`,
+          },
+        ],
+        roles: ['admin', 'agent', 'source'],
+      },
+    ],
+  },
 ];
