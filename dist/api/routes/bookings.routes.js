@@ -120,6 +120,14 @@ const createSchema = z.object({
     // Customer and payment information (JSON objects)
     customer_info: z.record(z.any()).optional(), // Customer name, contact details, etc.
     payment_info: z.record(z.any()).optional(), // Payment details, card info, etc.
+    // OTA-style aliases accepted for compatibility
+    pickupDateTime: z.string().optional(),
+    returnDateTime: z.string().optional(),
+    pickup_location_code: z.string().optional(),
+    return_location_code: z.string().optional(),
+    veh_pref_code: z.string().optional(),
+    customer: z.record(z.any()).optional(),
+    rental_payment_pref: z.record(z.any()).optional(),
 });
 /**
  * @openapi
@@ -139,7 +147,23 @@ bookingsRouter.post("/", requireAuth(), async (req, res, next) => {
     const startTime = Date.now();
     const requestId = req.requestId;
     try {
-        const body = createSchema.parse(req.body);
+        const bodyRaw = createSchema.parse(req.body);
+        const body = { ...bodyRaw };
+        // Normalize OTA-style aliases into current snake_case schema keys
+        if (!body.pickup_iso && body.pickupDateTime)
+            body.pickup_iso = body.pickupDateTime;
+        if (!body.dropoff_iso && body.returnDateTime)
+            body.dropoff_iso = body.returnDateTime;
+        if (!body.pickup_unlocode && body.pickup_location_code)
+            body.pickup_unlocode = body.pickup_location_code;
+        if (!body.dropoff_unlocode && body.return_location_code)
+            body.dropoff_unlocode = body.return_location_code;
+        if (!body.supplier_offer_ref && body.veh_pref_code)
+            body.supplier_offer_ref = body.veh_pref_code;
+        if (!body.customer_info && body.customer)
+            body.customer_info = body.customer;
+        if (!body.payment_info && body.rental_payment_pref)
+            body.payment_info = body.rental_payment_pref;
         // Check for idempotency key in various header formats (case-insensitive)
         // Express lowercases headers, so check lowercase version first
         // Also check rawHeaders which preserves original case
