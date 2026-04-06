@@ -222,28 +222,56 @@ export function buildApp() {
   app.use("/docs", sdkRouter);
   app.use("/api/docs", sdkRouter); // Also mount SDK router at /api/docs
 
-  // Prometheus metrics endpoint
-  app.get('/metrics', async (req: any, res: any) => {
+  const metricsCors = (res: any) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  };
+
+  const servePrometheusText = async (_req: any, res: any) => {
     try {
-      // Set CORS headers explicitly
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      metricsCors(res);
       res.setHeader('Content-Type', register.contentType);
-      
       const metrics = await register.metrics();
       res.end(metrics);
     } catch (error: any) {
       logger.error({ error: error.message, stack: error.stack }, 'Error generating metrics');
       res.status(500).set('Content-Type', 'text/plain').end('Error generating metrics');
     }
+  };
+
+  const servePrometheusJson = async (_req: any, res: any) => {
+    try {
+      metricsCors(res);
+      res.setHeader('Content-Type', 'application/json');
+      const data = await register.getMetricsAsJSON();
+      res.json(data);
+    } catch (error: any) {
+      logger.error({ error: error.message, stack: error.stack }, 'Error generating metrics JSON');
+      res.status(500).json({ error: 'Error generating metrics' });
+    }
+  };
+
+  // Prometheus metrics (root path for scrapers; /api/* matches admin SPA baseURL)
+  app.get('/metrics', servePrometheusText);
+  app.options('/metrics', (_req: any, res: any) => {
+    metricsCors(res);
+    res.status(204).end();
+  });
+  app.get('/api/metrics', servePrometheusText);
+  app.options('/api/metrics', (_req: any, res: any) => {
+    metricsCors(res);
+    res.status(204).end();
   });
 
-  // Handle OPTIONS preflight for /metrics
-  app.options('/metrics', (req: any, res: any) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  app.get('/metrics/json', servePrometheusJson);
+  app.options('/metrics/json', (_req: any, res: any) => {
+    metricsCors(res);
+    res.status(204).end();
+  });
+  app.get('/api/metrics/json', servePrometheusJson);
+  app.options('/api/metrics/json', (_req: any, res: any) => {
+    metricsCors(res);
     res.status(204).end();
   });
 
