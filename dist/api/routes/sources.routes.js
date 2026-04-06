@@ -3559,6 +3559,237 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
         next(error);
     }
 });
+const getDailyPricingQuerySchema = z.object({
+    startDate: z.string(),
+    endDate: z.string(),
+    pickupLoc: z.string().trim().min(1),
+    returnLoc: z.string().trim().min(1),
+    acrissCode: z.string().trim().min(1),
+    maxDays: z.coerce.number().int().min(1).max(31).default(17),
+});
+const setDailyPricingDefaultSchema = z.object({
+    startDate: z.string(),
+    endDate: z.string(),
+    pickupLoc: z.string().trim().min(1),
+    returnLoc: z.string().trim().min(1),
+    acrissCode: z.string().trim().min(1),
+    currency: z.string().trim().min(3).max(3).default("EUR"),
+    defaultPrice: z.coerce.number().positive(),
+    dayStart: z.coerce.number().int().min(1).default(1),
+    dayEnd: z.coerce.number().int().min(1).max(31),
+});
+const patchDailyPricingCellSchema = z.object({
+    pickupDate: z.string(),
+    pickupLoc: z.string().trim().min(1),
+    returnLoc: z.string().trim().min(1),
+    acrissCode: z.string().trim().min(1),
+    dayOffset: z.coerce.number().int().min(1).max(31),
+    price: z.coerce.number().positive(),
+    currency: z.string().trim().min(3).max(3).default("EUR"),
+});
+const bulkDailyPricingSchema = z.object({
+    cells: z.array(patchDailyPricingCellSchema).min(1),
+});
+function enumerateDatesInclusive(start, end) {
+    const out = [];
+    const cur = new Date(start);
+    while (cur <= end) {
+        out.push(new Date(cur));
+        cur.setDate(cur.getDate() + 1);
+    }
+    return out;
+}
+/**
+ * GET /sources/daily-pricing
+ * Return matrix rows by pickup date with day columns Day1..DayN
+ */
+sourcesRouter.get("/sources/daily-pricing", requireAuth(), requireCompanyType("SOURCE"), async (req, res, next) => {
+    try {
+        const sourceId = req.user.companyId;
+        const q = getDailyPricingQuerySchema.parse(req.query);
+        const startDate = new Date(q.startDate);
+        const endDate = new Date(q.endDate);
+        if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate < startDate) {
+            return res.status(400).json({ error: "BAD_REQUEST", message: "Invalid startDate/endDate range" });
+        }
+        const records = await prisma.sourceDailyRate.findMany({
+            where: {
+                sourceId,
+                pickupDate: { gte: startDate, lte: endDate },
+                pickupLoc: q.pickupLoc,
+                returnLoc: q.returnLoc,
+                acrissCode: q.acrissCode,
+                dayOffset: { lte: q.maxDays },
+            },
+            orderBy: [{ pickupDate: "asc" }, { dayOffset: "asc" }],
+        });
+        const days = enumerateDatesInclusive(startDate, endDate);
+        const byDate = new Map();
+        for (const d of days) {
+            const key = d.toISOString().slice(0, 10);
+            const row = { pickupDate: key, acrissCode: q.acrissCode };
+            for (let i = 1; i <= q.maxDays; i++)
+                row[`day${i}`] = null;
+            byDate.set(key, row);
+        }
+        for (const r of records) {
+            const key = r.pickupDate.toISOString().slice(0, 10);
+            const row = byDate.get(key);
+            if (row)
+                row[`day${r.dayOffset}`] = Number(r.price);
+        }
+        return res.json({
+            items: Array.from(byDate.values()),
+            meta: {
+                startDate: q.startDate,
+                endDate: q.endDate,
+                pickupLoc: q.pickupLoc,
+                returnLoc: q.returnLoc,
+                acrissCode: q.acrissCode,
+                maxDays: q.maxDays,
+            },
+        });
+    }
+    catch (e) {
+        next(e);
+    }
+});
+/**
+ * PUT /sources/daily-pricing/default
+ * Bulk apply default price to date/day range
+ */
+sourcesRouter.put("/sources/daily-pricing/default", requireAuth(), requireCompanyType("SOURCE"), async (req, res, next) => {
+    try {
+        const sourceId = req.user.companyId;
+        const body = setDailyPricingDefaultSchema.parse(req.body);
+        if (body.dayEnd < body.dayStart) {
+            return res.status(400).json({ error: "BAD_REQUEST", message: "dayEnd must be >= dayStart" });
+        }
+        const startDate = new Date(body.startDate);
+        const endDate = new Date(body.endDate);
+        if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate < startDate) {
+            return res.status(400).json({ error: "BAD_REQUEST", message: "Invalid startDate/endDate range" });
+        }
+        const dates = enumerateDatesInclusive(startDate, endDate);
+        const data = dates.flatMap((d) => Array.from({ length: body.dayEnd - body.dayStart + 1 }, (_, idx) => ({
+            sourceId,
+            pickupDate: d,
+            acrissCode: body.acrissCode,
+            pickupLoc: body.pickupLoc,
+            returnLoc: body.returnLoc,
+            dayOffset: body.dayStart + idx,
+            price: body.defaultPrice,
+            currency: body.currency.toUpperCase(),
+        })));
+        let upserted = 0;
+        for (const row of data) {
+            await prisma.sourceDailyRate.upsert({
+                where: {
+                    sourceId_pickupDate_acrissCode_pickupLoc_returnLoc_dayOffset: {
+                        sourceId: row.sourceId,
+                        pickupDate: row.pickupDate,
+                        acrissCode: row.acrissCode,
+                        pickupLoc: row.pickupLoc,
+                        returnLoc: row.returnLoc,
+                        dayOffset: row.dayOffset,
+                    },
+                },
+                create: row,
+                update: { price: row.price, currency: row.currency },
+            });
+            upserted++;
+        }
+        return res.json({ message: "Default prices applied", upserted });
+    }
+    catch (e) {
+        next(e);
+    }
+});
+/**
+ * PATCH /sources/daily-pricing/cell
+ * Update one matrix cell
+ */
+sourcesRouter.patch("/sources/daily-pricing/cell", requireAuth(), requireCompanyType("SOURCE"), async (req, res, next) => {
+    try {
+        const sourceId = req.user.companyId;
+        const body = patchDailyPricingCellSchema.parse(req.body);
+        const pickupDate = new Date(body.pickupDate);
+        if (Number.isNaN(pickupDate.getTime())) {
+            return res.status(400).json({ error: "BAD_REQUEST", message: "Invalid pickupDate" });
+        }
+        const row = await prisma.sourceDailyRate.upsert({
+            where: {
+                sourceId_pickupDate_acrissCode_pickupLoc_returnLoc_dayOffset: {
+                    sourceId,
+                    pickupDate,
+                    acrissCode: body.acrissCode,
+                    pickupLoc: body.pickupLoc,
+                    returnLoc: body.returnLoc,
+                    dayOffset: body.dayOffset,
+                },
+            },
+            create: {
+                sourceId,
+                pickupDate,
+                acrissCode: body.acrissCode,
+                pickupLoc: body.pickupLoc,
+                returnLoc: body.returnLoc,
+                dayOffset: body.dayOffset,
+                price: body.price,
+                currency: body.currency.toUpperCase(),
+            },
+            update: { price: body.price, currency: body.currency.toUpperCase() },
+        });
+        return res.json({ message: "Cell updated", item: row });
+    }
+    catch (e) {
+        next(e);
+    }
+});
+/**
+ * PUT /sources/daily-pricing/bulk
+ * Bulk update many cells
+ */
+sourcesRouter.put("/sources/daily-pricing/bulk", requireAuth(), requireCompanyType("SOURCE"), async (req, res, next) => {
+    try {
+        const sourceId = req.user.companyId;
+        const body = bulkDailyPricingSchema.parse(req.body);
+        let upserted = 0;
+        for (const c of body.cells) {
+            const pickupDate = new Date(c.pickupDate);
+            if (Number.isNaN(pickupDate.getTime()))
+                continue;
+            await prisma.sourceDailyRate.upsert({
+                where: {
+                    sourceId_pickupDate_acrissCode_pickupLoc_returnLoc_dayOffset: {
+                        sourceId,
+                        pickupDate,
+                        acrissCode: c.acrissCode,
+                        pickupLoc: c.pickupLoc,
+                        returnLoc: c.returnLoc,
+                        dayOffset: c.dayOffset,
+                    },
+                },
+                create: {
+                    sourceId,
+                    pickupDate,
+                    acrissCode: c.acrissCode,
+                    pickupLoc: c.pickupLoc,
+                    returnLoc: c.returnLoc,
+                    dayOffset: c.dayOffset,
+                    price: c.price,
+                    currency: c.currency.toUpperCase(),
+                },
+                update: { price: c.price, currency: c.currency.toUpperCase() },
+            });
+            upserted++;
+        }
+        return res.json({ message: "Bulk pricing updated", upserted });
+    }
+    catch (e) {
+        next(e);
+    }
+});
 /**
  * GET /sources/availability-samples
  * Returns all stored availability samples for the authenticated source (most-recent first).

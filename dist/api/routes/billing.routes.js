@@ -32,7 +32,12 @@ billingRouter.get("/admin/plans", requireAuth(), requireRole("ADMIN"), async (_r
         const plans = await prisma.plan.findMany({
             orderBy: { createdAt: "asc" },
         });
-        res.json({ items: plans });
+        res.json({
+            items: plans.map((p) => ({
+                ...p,
+                pricePerBranchCents: p.pricePerBranchCents > 0 ? p.pricePerBranchCents : p.amountCents,
+            })),
+        });
     }
     catch (e) {
         next(e);
@@ -457,6 +462,7 @@ async function ensurePlanStripePrice(plan) {
         return plan.stripePriceId;
     if (!stripe)
         throw new Error("Stripe not configured");
+    const effectivePricePerBranchCents = plan.pricePerBranchCents > 0 ? plan.pricePerBranchCents : (plan.amountCents ?? 0);
     const interval = STRIPE_INTERVAL[plan.interval] ?? "month";
     const product = await stripe.products.create({
         name: `Gloria Source – ${plan.name} (per branch)`,
@@ -464,7 +470,7 @@ async function ensurePlanStripePrice(plan) {
     });
     const price = await stripe.prices.create({
         product: product.id,
-        unit_amount: plan.pricePerBranchCents,
+        unit_amount: effectivePricePerBranchCents,
         currency: "eur",
         recurring: { interval },
         metadata: { planId: plan.id },

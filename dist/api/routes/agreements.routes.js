@@ -10,6 +10,12 @@ import { auditLog } from "../../services/audit.js";
 import { sourceIdsWithActiveSubscription } from "../../services/subscriptionCheck.js";
 export const agreementsRouter = Router();
 const prismaAny = prisma;
+function externalManagedResponse(res) {
+    return res.status(403).json({
+        error: "EXTERNAL_MANAGED",
+        message: "Agreements are managed externally. Contact the listed company by email, sign the agreement outside the platform, then use the registered account/agreement reference for operational calls.",
+    });
+}
 // Helper function to convert snake_case to camelCase for agreement responses
 function toAgreementCamelCase(ag) {
     return {
@@ -84,6 +90,7 @@ const draftSchema = z.object({
  *     summary: Source creates draft agreement targeting an Agent
  */
 agreementsRouter.post("/agreements", requireAuth(), requireCompanyType("SOURCE"), async (req, res, next) => {
+    return externalManagedResponse(res);
     try {
         const body = draftSchema.parse(req.body);
         // Guard: source can only create for itself
@@ -109,10 +116,10 @@ agreementsRouter.post("/agreements", requireAuth(), requireCompanyType("SOURCE")
         ]);
         if (!agent ||
             !source ||
-            agent.type !== "AGENT" ||
-            source.type !== "SOURCE" ||
-            agent.status !== "ACTIVE" ||
-            source.status !== "ACTIVE") {
+            (agent?.type ?? "") !== "AGENT" ||
+            (source?.type ?? "") !== "SOURCE" ||
+            (agent?.status ?? "") !== "ACTIVE" ||
+            (source?.status ?? "") !== "ACTIVE") {
             return res.status(400).json({
                 error: "SCHEMA_ERROR",
                 message: "Invalid agent_id or source_id - companies must exist, have correct types, and be ACTIVE",
@@ -139,7 +146,7 @@ agreementsRouter.post("/agreements", requireAuth(), requireCompanyType("SOURCE")
         });
         const warnings = [];
         if (existing) {
-            warnings.push(`Duplicate agreement reference detected: "${body.agreement_ref}" already exists for this agent/source pair (existing agreement ID: ${existing.id}, status: ${existing.status}).`);
+            warnings.push(`Duplicate agreement reference detected: "${body.agreement_ref}" already exists for this agent/source pair (existing agreement ID: ${existing?.id}, status: ${existing?.status}).`);
         }
         const startTime = Date.now();
         const requestId = req.requestId;
@@ -339,6 +346,82 @@ agreementsRouter.get("/agreements/all", requireAuth(), async (req, res, next) =>
     }
 });
 /**
+ * Read-only helper for external-agreement mode:
+ * resolve contact details for an agreement id/reference and provide guidance.
+ */
+agreementsRouter.get("/agreements/external-contact", requireAuth(), async (req, res, next) => {
+    try {
+        const agreementId = String(req.query.agreement_id || "").trim();
+        const agreementRef = String(req.query.agreement_ref || "").trim();
+        if (!agreementId && !agreementRef) {
+            return res.status(400).json({
+                error: "BAD_REQUEST",
+                message: "agreement_id or agreement_ref is required",
+            });
+        }
+        const scopeWhere = req.user?.role === "ADMIN"
+            ? {}
+            : req.user?.type === "AGENT"
+                ? { agentId: req.user.companyId }
+                : req.user?.type === "SOURCE"
+                    ? { sourceId: req.user.companyId }
+                    : {};
+        const items = await prisma.agreement.findMany({
+            where: {
+                ...scopeWhere,
+                ...(agreementId ? { id: agreementId } : {}),
+                ...(agreementRef ? { agreementRef } : {}),
+            },
+            include: {
+                source: { select: { id: true, companyName: true, email: true, companyCode: true, status: true } },
+                agent: { select: { id: true, companyName: true, email: true, companyCode: true, status: true } },
+            },
+            orderBy: { createdAt: "desc" },
+            take: 5,
+        });
+        if (items.length > 0) {
+            return res.json({
+                found: true,
+                items: items.map((a) => ({
+                    id: a.id,
+                    agreementRef: a.agreementRef,
+                    status: a.status,
+                    source: a.source,
+                    agent: a.agent,
+                })),
+                guidance: "Agreement details found. Agreements are externally managed; ensure account/agreement details are signed and provisioned before operational calls.",
+            });
+        }
+        let suggestedContacts = [];
+        if (req.user?.type === "AGENT") {
+            const agreements = await prisma.agreement.findMany({
+                where: { agentId: req.user.companyId },
+                select: { sourceId: true },
+                distinct: ["sourceId"],
+                take: 10,
+            });
+            const sourceIds = agreements.map((a) => a.sourceId);
+            if (sourceIds.length > 0) {
+                const sources = await prisma.company.findMany({
+                    where: { id: { in: sourceIds }, type: "SOURCE" },
+                    select: { id: true, companyName: true, companyCode: true, email: true },
+                    orderBy: { companyName: "asc" },
+                    take: 10,
+                });
+                suggestedContacts = sources;
+            }
+        }
+        return res.json({
+            found: false,
+            message: "Agreement reference is not registered internally. Contact the source company externally, sign the agreement, and confirm the provisioned account/agreement reference before retrying.",
+            suggestedContacts,
+        });
+    }
+    catch (e) {
+        next(e);
+    }
+});
+/**
  * @openapi
  * /agreements/{id}:
  *   get:
@@ -418,6 +501,7 @@ agreementsRouter.get("/agreements/:id", requireAuth(), async (req, res, next) =>
  *     summary: Source offers a draft agreement
  */
 agreementsRouter.post("/agreements/:id/offer", requireAuth(), requireCompanyType("SOURCE"), async (req, res, next) => {
+    return externalManagedResponse(res);
     try {
         const startTime = Date.now();
         const requestId = req.requestId;
@@ -468,6 +552,7 @@ agreementsRouter.post("/agreements/:id/offer", requireAuth(), requireCompanyType
  *     summary: Agent accepts an offered agreement
  */
 agreementsRouter.post("/agreements/:id/accept", requireAuth(), requireCompanyType("AGENT"), async (req, res, next) => {
+    return externalManagedResponse(res);
     try {
         const startTime = Date.now();
         const requestId = req.requestId;
@@ -518,6 +603,7 @@ agreementsRouter.post("/agreements/:id/accept", requireAuth(), requireCompanyTyp
  *     summary: Activate an agreement (set status to ACTIVE)
  */
 agreementsRouter.post("/agreements/:id/activate", requireAuth(), async (req, res, next) => {
+    return externalManagedResponse(res);
     // Debug log removed
     try {
         const client = agreementClient();
@@ -547,6 +633,7 @@ agreementsRouter.post("/agreements/:id/activate", requireAuth(), async (req, res
  *     summary: Suspend an agreement (set status to SUSPENDED)
  */
 agreementsRouter.post("/agreements/:id/suspend", requireAuth(), requireRole("ADMIN", "SOURCE_USER"), async (req, res, next) => {
+    return externalManagedResponse(res);
     try {
         const client = agreementClient();
         client.SetStatus({ agreement_id: req.params.id, status: "SUSPENDED" }, metaFromReq(req), async (err, resp) => {
@@ -575,6 +662,7 @@ agreementsRouter.post("/agreements/:id/suspend", requireAuth(), requireRole("ADM
  *     summary: Expire an agreement (set status to EXPIRED)
  */
 agreementsRouter.post("/agreements/:id/expire", requireAuth(), requireRole("ADMIN", "SOURCE_USER"), async (req, res, next) => {
+    return externalManagedResponse(res);
     try {
         const client = agreementClient();
         client.SetStatus({ agreement_id: req.params.id, status: "EXPIRED" }, metaFromReq(req), async (err, resp) => {
@@ -603,6 +691,7 @@ agreementsRouter.post("/agreements/:id/expire", requireAuth(), requireRole("ADMI
  *     summary: Set status (ACTIVE|SUSPENDED|EXPIRED) - generic endpoint
  */
 agreementsRouter.post("/agreements/:id/:action", requireAuth(), requireRole("ADMIN", "SOURCE_USER"), async (req, res, next) => {
+    return externalManagedResponse(res);
     try {
         const status = String(req.params.action || "").toUpperCase();
         const allowedStatuses = ["ACTIVE", "SUSPENDED", "EXPIRED"];
@@ -925,6 +1014,7 @@ agreementsRouter.get("/agreements/agents", requireAuth(), requireCompanyType("SO
  *                 description: Agreement valid to date
  */
 agreementsRouter.post("/agreements/offers", requireAuth(), requireCompanyType("SOURCE"), async (req, res, next) => {
+    return externalManagedResponse(res);
     try {
         const offerSchema = z.object({
             agent_id: z.string(),
@@ -938,7 +1028,7 @@ agreementsRouter.post("/agreements/offers", requireAuth(), requireCompanyType("S
             where: { id: body.agent_id },
             select: { id: true, type: true, status: true },
         });
-        if (!agent || agent.type !== "AGENT" || agent.status !== "ACTIVE") {
+        if (!agent || (agent?.type ?? "") !== "AGENT" || (agent?.status ?? "") !== "ACTIVE") {
             return res.status(400).json({
                 error: "INVALID_AGENT",
                 message: "Invalid or inactive agent",

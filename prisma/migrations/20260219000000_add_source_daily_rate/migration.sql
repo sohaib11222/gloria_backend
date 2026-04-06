@@ -10,9 +10,9 @@ CREATE TABLE `SourceDailyRate` (
     `price` DECIMAL(10, 2) NOT NULL,
     `currency` VARCHAR(191) NOT NULL DEFAULT 'EUR',
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    `updatedAt` DATETIME(3) NOT NULL,
+    `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
 
-    UNIQUE INDEX `SourceDailyRate_sourceId_pickupDate_acrissCode_pickupLoc_returnLoc_dayOffset_key`(`sourceId`, `pickupDate`, `acrissCode`, `pickupLoc`, `returnLoc`, `dayOffset`),
+    UNIQUE INDEX `SourceDailyRate_dims_key`(`sourceId`, `pickupDate`, `acrissCode`, `pickupLoc`, `returnLoc`, `dayOffset`),
     INDEX `SourceDailyRate_sourceId_pickupDate_idx`(`sourceId`, `pickupDate`),
     INDEX `SourceDailyRate_sourceId_acrissCode_idx`(`sourceId`, `acrissCode`),
     PRIMARY KEY (`id`)
