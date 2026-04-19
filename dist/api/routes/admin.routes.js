@@ -1079,6 +1079,7 @@ adminRouter.get("/admin/logs", requireAuth(), requireRole("ADMIN"), async (req, 
                 { endpoint: { contains: p.q } }
             ];
         }
+        const totalMatching = await prisma.auditLog.count({ where });
         const take = p.limit + 1;
         const rows = await prisma.auditLog.findMany({
             where,
@@ -1259,7 +1260,7 @@ adminRouter.get("/admin/logs", requireAuth(), requireRole("ADMIN"), async (req, 
         });
         res.json({
             data: transformedItems,
-            total: transformedItems.length,
+            total: totalMatching,
             page: 1,
             limit: p.limit,
             // Keep backward compatibility

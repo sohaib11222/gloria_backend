@@ -18,4 +18,14 @@ yarn-error.log
 /.idea
 /.vscode
 /config/server_secrets.php
+
+# TypeScript build output (regenerate with npm run build)
 /dist
+dist/
+
+# Runtime / PM2 logs (entire logs dir + common PM2 filenames anywhere)
+logs/
+*.log
+**/pm2-error.log
+**/pm2-out.log
+**/pm2-*.log
