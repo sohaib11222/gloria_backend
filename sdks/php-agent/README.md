@@ -1,5 +1,7 @@
 # Car-Hire PHP Agent SDK
 
+> **Role: AGENT / BROKER** — This SDK is for **booking agents** integrating with Gloria (REST/gRPC, `CarHireClient`). If you are a **supplier** connecting OTA XML and the client-supplier contract, use the **Source** bundle (`php-source` download in the Source portal docs), not this package.
+
 - **Transports:** REST (working) + gRPC (stubs; run `composer proto:gen` after placing .proto in `../../protos`).
 - **Features:** Availability (submit→poll streaming), Booking (create/modify/cancel/check), Agreement enforcement, Deadlines/SLA, Correlation IDs.
 

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OTA_VehAvailRateRS xmlns="http://www.opentravel.org/OTA/2003/05" Version="1.002">
+  <VehAvailRSCore>
+    <VehVendorAvails>
+      <VehVendorAvail>
+        <VehAvails>
+          <VehAvail>
+            <VehAvailCore Status="Available" RStatus="Inc" VehID="CCAR123">
+              <Vehicle>
+                <VehMakeModel Name="NISSAN VERSA"/>
+              </Vehicle>
+              <TotalCharge RateTotalAmount="72.37" CurrencyCode="USD" taxInclusive="true"/>
+            </VehAvailCore>
+          </VehAvail>
+        </VehAvails>
+      </VehVendorAvail>
+    </VehVendorAvails>
+  </VehAvailRSCore>
+</OTA_VehAvailRateRS>

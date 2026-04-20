@@ -138,6 +138,7 @@ model Company {
   locationListEndpointUrl String? // Location list endpoint URL (POST XML with configurable root, e.g. GLORIA_locationlistrq)
   locationListRequestRoot String? // Request root element name (e.g. GLORIA_locationlistrq); response root derived as ...rs
   locationListAccountId String? // Account ID for request template (e.g. 1000097)
+  locationListTransport   String? // "http" | "grpc" — Location & Branches import: POST XML vs SourceProviderService.GetLocations
   availabilityEndpointUrl String? // Availability/pricing endpoint URL (OTA VehAvailRS JSON)
 
   // TLS/mTLS configuration for gRPC (JSON)

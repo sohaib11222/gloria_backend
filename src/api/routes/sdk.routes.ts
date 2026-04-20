@@ -6,17 +6,32 @@ import { requireAuth } from '../../infra/auth.js';
 
 const router = Router();
 
-// SDK type mapping
+// SDK type mapping (URL slug → folder under sdks/)
 const SDK_MAP: Record<string, string> = {
   nodejs: 'nodejs-agent',
   typescript: 'nodejs-agent', // TypeScript uses same SDK as Node.js
   javascript: 'nodejs-agent',
   python: 'python-agent',
   php: 'php-agent',
+  'php-agent': 'php-agent',
+  'php-source': 'gloria-source-supplier',
   java: 'java-agent',
   go: 'go-agent',
   perl: 'perl-agent',
 };
+
+/** Exclude heavy / generated dirs from downloadable zips */
+function sdkFolderZipFilter(entryPath: string): boolean {
+  const p = entryPath.replace(/\\/g, '/').toLowerCase();
+  return !(
+    p.includes('/node_modules/') ||
+    p.includes('/vendor/') ||
+    p.includes('/.phpunit.cache/') ||
+    p.includes('/dist/') ||
+    p.includes('/coverage/') ||
+    p.includes('/.git/')
+  );
+}
 
 /**
  * GET /docs/sdk/:sdkType/download
@@ -48,8 +63,8 @@ router.get('/sdk/:sdkType/download', requireAuth(), async (req, res) => {
     // Create zip file
     const zip = new AdmZip();
 
-    // Add SDK directory
-    zip.addLocalFolder(sdkPath, sdkDir);
+    // Add SDK directory (skip vendor/node_modules etc.)
+    zip.addLocalFolder(sdkPath, sdkDir, sdkFolderZipFilter);
 
     // Add proto files (for gRPC support)
     const protoPath = path.join(process.cwd(), 'protos');
@@ -59,6 +74,11 @@ router.get('/sdk/:sdkType/download', requireAuth(), async (req, res) => {
         const filePath = path.join(protoPath, file);
         zip.addLocalFile(filePath, 'protos');
       });
+    }
+
+    const clientSupplierProto = path.join(sdkPath, 'proto', 'gloria_client_supplier.proto');
+    if (fs.existsSync(clientSupplierProto)) {
+      zip.addLocalFile(clientSupplierProto, 'protos');
     }
 
     // Add README with installation instructions
@@ -133,8 +153,16 @@ router.get('/sdk/:sdkType/info', async (req, res) => {
         if (versionMatch) info.version = versionMatch[1];
         if (nameMatch) info.name = nameMatch[1];
       }
-    } else if (sdkType === 'php') {
+    } else if (sdkType === 'php' || sdkType === 'php-agent') {
       const composerPath = path.join(sdkPath, 'composer.json');
+      if (fs.existsSync(composerPath)) {
+        const composer = JSON.parse(fs.readFileSync(composerPath, 'utf-8'));
+        info.name = composer.name || info.name;
+        info.version = composer.version || info.version;
+        info.description = composer.description || info.description;
+      }
+    } else if (sdkType === 'php-source') {
+      const composerPath = path.join(sdkPath, 'php', 'composer.json');
       if (fs.existsSync(composerPath)) {
         const composer = JSON.parse(fs.readFileSync(composerPath, 'utf-8'));
         info.name = composer.name || info.name;
@@ -221,6 +249,8 @@ function getInstallCommand(sdkType: string): string {
     javascript: 'npm install @carhire/nodejs-sdk',
     python: 'pip install carhire-python-sdk',
     php: 'composer require carhire/php-sdk',
+    'php-agent': 'composer require carhire/php-sdk',
+    'php-source': 'cd php && composer install   # see bundle README for Laravel + node-wrapper',
     java: 'Add dependency to pom.xml (see SDK info)',
     go: 'go get github.com/carhire/go-sdk',
     perl: 'cpanm CarHire::SDK',
@@ -229,11 +259,34 @@ function getInstallCommand(sdkType: string): string {
 }
 
 function generateReadme(sdkType: string, sdkDir: string): string {
-  const installCmd = getInstallCommand(sdkType);
-  
-  return `# ${sdkType.toUpperCase()} SDK Installation Guide
+  if (sdkDir === 'gloria-source-supplier') {
+    return `# Source (supplier) integration bundle
 
-## Installation
+This ZIP is for **rental companies / suppliers** exposing OTA XML to Gloria: PHP adapter, Laravel routes, optional Node gRPC bridge, and \`gloria_client_supplier.proto\`.
+
+It is **not** the agent broker PHP SDK (\`CarHireClient\`). Booking agents should download **php-agent** from the Agent portal SDK docs.
+
+## Layout
+
+- \`php/\` — Composer package (run \`composer install\` here)
+- \`laravel/\` — copy routes, controller, config into your app
+- \`node-wrapper/\` — optional gRPC server to Laravel
+- \`docs/MAPPING.md\` — contract vs backend TS
+
+See \`README.md\` in the bundle root for the full quick start.
+`;
+  }
+
+  const installCmd = getInstallCommand(sdkType);
+  const title = sdkDir === 'php-agent' ? 'PHP AGENT (broker) SDK' : `${sdkType.toUpperCase()} SDK`;
+  const roleBlurb =
+    sdkDir === 'php-agent'
+      ? `**Role:** This package is for **booking agents / brokers** calling Gloria (REST/gRPC). Suppliers integrating OTA should use the **php-source** bundle instead.\n\n`
+      : '';
+
+  return `# ${title} Installation Guide
+
+${roleBlurb}## Installation
 
 \`\`\`bash
 ${installCmd}

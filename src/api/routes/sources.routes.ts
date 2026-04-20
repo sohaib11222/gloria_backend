@@ -3002,7 +3002,9 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
         locationListEndpointUrl: true,
         locationListRequestRoot: true,
         locationListAccountId: true,
+        locationListTransport: true,
         locationEndpointUrl: true,
+        grpcEndpoint: true,
         branchDefaultCountryCode: true,
         whitelistedDomains: true,
       },
@@ -3025,16 +3027,30 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
     const subscriptionCheck = await requireActiveSubscription(sourceId);
     if (subscriptionCheck) return res.status(subscriptionCheck.status).json(subscriptionCheck.body);
 
+    const transport = String(source.locationListTransport || "http").toLowerCase();
     const endpointUrl = source.locationListEndpointUrl || source.locationEndpointUrl || null;
-    if (!endpointUrl) {
+    if (transport !== "grpc" && !endpointUrl) {
       return res.status(400).json({
         error: "ENDPOINT_NOT_CONFIGURED",
-        message: "Configure location list endpoint URL (Location & Branches tab)",
+        message: "Configure location list endpoint URL (Location & Branches tab), or set transport to gRPC and configure gRPC endpoint.",
+      });
+    }
+    if (transport === "grpc" && !(source.grpcEndpoint || "").trim()) {
+      return res.status(400).json({
+        error: "GRPC_NOT_CONFIGURED",
+        message: "Set gRPC endpoint (host:port) in endpoint configuration to import locations via SourceProviderService.GetLocations.",
       });
     }
     const { enforceWhitelist } = await import("../../infra/whitelistEnforcement.js");
+    const whitelistTarget =
+      transport === "grpc"
+        ? (() => {
+            const a = (source.grpcEndpoint || "").trim();
+            return /^https?:\/\//i.test(a) ? a : `http://${a.replace(/^grpc:\/\//i, "")}`;
+          })()
+        : String(endpointUrl);
     try {
-      await enforceWhitelist(sourceId, endpointUrl);
+      await enforceWhitelist(sourceId, whitelistTarget);
     } catch (e: any) {
       return res.status(403).json({
         error: "WHITELIST_VIOLATION",
@@ -3042,13 +3058,49 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
       });
     }
 
+    let locations: any[] = [];
+    let branches: any[] = [];
+    let responseText = "";
+    let isXmlResponse = false;
+    const defaultCountryCode = source.branchDefaultCountryCode?.trim() || null;
+
+    if (transport === "grpc") {
+      const addr = (source.grpcEndpoint || "").trim();
+      const { makeGrpcSourceAdapter } = await import("../../adapters/grpcSourceAdapter.js");
+      let grpcRes: any;
+      try {
+        grpcRes = await makeGrpcSourceAdapter(addr).locations();
+      } catch (grpcErr: any) {
+        console.error("[import-location-list] gRPC GetLocations failed:", grpcErr);
+        return res.status(502).json({
+          error: "GRPC_ERROR",
+          message: grpcErr?.message || String(grpcErr),
+        });
+      }
+      responseText = JSON.stringify(grpcRes != null ? grpcRes : {});
+      for (const l of grpcRes?.locations || []) {
+        const unlocode = (l.unlocode || "").toString().toUpperCase().trim();
+        if (!unlocode || unlocode.length < 4 || unlocode.length > 5) continue;
+        locations.push({
+          unlocode,
+          country: unlocode.substring(0, 2),
+          place: (l.name != null ? String(l.name) : "").trim() || unlocode,
+          iataCode: null,
+          latitude: null,
+          longitude: null,
+        });
+      }
+      branches = [];
+      console.log(`[import-location-list] gRPC GetLocations: ${locations.length} location(s) after UN/LOCODE filter`);
+    } else {
+    const httpListUrl = endpointUrl as string;
     const requestRoot = (source.locationListRequestRoot || "GLORIA_locationlistrq").trim();
     const accountId = (source.locationListAccountId || "Gloria001").trim();
     const responseRoot = requestRoot.replace(/rq$/i, "rs") || "GLORIA_locationlistrs";
     const ts = new Date().toISOString().slice(0, 19);
     const xmlBody = `<?xml version="1.0" encoding="UTF-8"?><${requestRoot} TimeStamp="${ts}" Target="Production" Version="1.00"><ACC><Source><AccountID ID="${accountId}"/></Source></ACC></${requestRoot}>`;
 
-    let finalUrl = endpointUrl.trim();
+    let finalUrl = httpListUrl.trim();
     if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
       finalUrl = `http://${finalUrl}`;
     }
@@ -3213,10 +3265,6 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
       }
     }
 
-    let locations: any[] = [];
-    let branches: any[] = [];
-    const defaultCountryCode = source.branchDefaultCountryCode?.trim() || null;
-
     // Helper: extract location + branch data from a normalized LocationDetail
     // attrs = XML attributes (Code, Name, Latitude, Longitude, BranchType, etc.)
     // countryCodeOverride = country code from parent Country element (for XML with CountryList)
@@ -3271,7 +3319,7 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
 
     // ──── Strategy 1: Raw XML response (e.g. <GLORIA_locationlistrs ...>) ────
     const trimmedResponse = responseText.trimStart();
-    const isXmlResponse = trimmedResponse.startsWith("<?xml") || trimmedResponse.startsWith(`<${responseRoot}`) || (trimmedResponse.startsWith("<") && responseText.includes(responseRoot));
+    isXmlResponse = trimmedResponse.startsWith("<?xml") || trimmedResponse.startsWith(`<${responseRoot}`) || (trimmedResponse.startsWith("<") && responseText.includes(responseRoot));
     if (isXmlResponse && responseText.includes(responseRoot)) {
       try {
         // ── Helper: regex-based extraction of LocationDetail blocks from raw XML ──
@@ -3627,6 +3675,7 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
         });
       }
     }
+    }
 
     const sub = await prisma.sourceSubscription.findUnique({ where: { sourceId }, include: { plan: true } });
     if (sub?.plan) {
@@ -3764,7 +3813,14 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
       result.debug = {
         responseLength: responseText.length,
         responseExcerpt: responseText.substring(0, 300),
-        strategy: isXmlResponse ? "xml" : responseText.includes("array(") ? "php" : "json",
+        strategy:
+          transport === "grpc"
+            ? "grpc"
+            : isXmlResponse
+              ? "xml"
+              : responseText.includes("array(")
+                ? "php"
+                : "json",
       };
     }
     res.json(result);

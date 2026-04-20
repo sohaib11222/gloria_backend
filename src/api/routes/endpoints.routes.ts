@@ -24,6 +24,7 @@ const endpointConfigSchema = z.object({
   locationListEndpointUrl: z.string().url().optional(),
   locationListRequestRoot: z.string().min(1).optional(),
   locationListAccountId: z.string().optional(),
+  locationListTransport: z.enum(["http", "grpc"]).optional(),
   availabilityEndpointUrl: z.string().url().optional(),
 });
 
@@ -106,6 +107,7 @@ endpointsRouter.get(
           locationListEndpointUrl: true,
           locationListRequestRoot: true,
           locationListAccountId: true,
+          locationListTransport: true,
           availabilityEndpointUrl: true,
           updatedAt: true,
           lastGrpcTestResult: true,
@@ -140,6 +142,7 @@ endpointsRouter.get(
         locationListEndpointUrl: company.locationListEndpointUrl ?? null,
         locationListRequestRoot: company.locationListRequestRoot ?? null,
         locationListAccountId: company.locationListAccountId ?? null,
+        locationListTransport: company.locationListTransport ?? null,
         availabilityEndpointUrl: company.availabilityEndpointUrl || null,
         adapterType: company.adapterType,
         description: `${
@@ -347,6 +350,7 @@ endpointsRouter.put(
           locationListEndpointUrl: body.locationListEndpointUrl ?? undefined,
           locationListRequestRoot: body.locationListRequestRoot ? String(body.locationListRequestRoot).trim() : null,
           locationListAccountId: body.locationListAccountId ? String(body.locationListAccountId).trim() : null,
+          locationListTransport: body.locationListTransport ?? undefined,
           availabilityEndpointUrl: body.availabilityEndpointUrl,
           updatedAt: new Date(),
         },
@@ -364,6 +368,7 @@ endpointsRouter.put(
           locationListEndpointUrl: true,
           locationListRequestRoot: true,
           locationListAccountId: true,
+          locationListTransport: true,
           availabilityEndpointUrl: true,
           updatedAt: true,
         },
@@ -385,6 +390,7 @@ endpointsRouter.put(
         locationListEndpointUrl: updatedCompany.locationListEndpointUrl ?? null,
         locationListRequestRoot: updatedCompany.locationListRequestRoot ?? null,
         locationListAccountId: updatedCompany.locationListAccountId ?? null,
+        locationListTransport: updatedCompany.locationListTransport ?? null,
         availabilityEndpointUrl: updatedCompany.availabilityEndpointUrl,
         adapterType: updatedCompany.adapterType,
         updatedAt: updatedCompany.updatedAt,

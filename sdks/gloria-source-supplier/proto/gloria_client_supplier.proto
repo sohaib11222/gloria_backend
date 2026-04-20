@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package gloria.client.supplier;
+
+option go_package = "github.com/gloria/client-supplier/proto";
+
+// Normalized client-side gateway API: aggregator calls this via gRPC;
+// the Node wrapper forwards to Laravel/PHP which speaks OTA XML to the supplier.
+
+message ServiceError {
+  string code = 1;       // e.g. SUPPLIER_FAULT, PARSE_ERROR, CONFIG_ERROR
+  string message = 2;
+  string detail = 3;     // optional supplier raw message (truncated)
+}
+
+message Branch {
+  string id = 1;
+  string name = 2;
+  string city = 3;
+}
+
+message Car {
+  string id = 1;
+  string name = 2;
+  double price = 3;
+  string currency = 4;
+}
+
+message Booking {
+  string reservation_id = 1;
+  string status = 2;     // e.g. CONFIRMED, CANCELLED, PENDING, FAILED
+}
+
+// --- GetBranches ---
+
+message GetBranchesRequest {
+  map<string, string> metadata = 1; // tracing, tenant ids, etc.
+}
+
+message GetBranchesResponse {
+  bool success = 1;
+  ServiceError error = 2;
+  repeated Branch branches = 3;
+  map<string, string> metadata = 4;
+}
+
+// --- SearchCars ---
+
+message SearchCarsRequest {
+  string pickup_unlocode = 1;
+  string dropoff_unlocode = 2;
+  string pickup_iso = 3;
+  string dropoff_iso = 4;
+  int32 driver_age = 5;
+  string residency_country = 6;
+  map<string, string> metadata = 7;
+}
+
+message SearchCarsResponse {
+  bool success = 1;
+  ServiceError error = 2;
+  repeated Car cars = 3;
+  map<string, string> metadata = 4;
+}
+
+// --- BookCar ---
+
+message BookCarRequest {
+  string agreement_ref = 1;
+  string supplier_offer_ref = 2;
+  string agent_booking_ref = 3;
+  string pickup_unlocode = 4;
+  string dropoff_unlocode = 5;
+  string pickup_iso = 6;
+  string dropoff_iso = 7;
+  string vehicle_class = 8;
+  string agent_id = 9;
+  map<string, string> metadata = 10;
+}
+
+message BookCarResponse {
+  bool success = 1;
+  ServiceError error = 2;
+  Booking booking = 3;
+  map<string, string> metadata = 4;
+}
+
+// --- CancelBooking ---
+
+message CancelBookingRequest {
+  string reservation_id = 1;
+  string agreement_ref = 2;
+  map<string, string> metadata = 3;
+}
+
+message CancelBookingResponse {
+  bool success = 1;
+  ServiceError error = 2;
+  Booking booking = 3;
+  map<string, string> metadata = 4;
+}
+
+// --- GetBooking (status / VehRetRes) ---
+
+message GetBookingRequest {
+  string reservation_id = 1;
+  string agreement_ref = 2;
+  map<string, string> metadata = 3;
+}
+
+message GetBookingResponse {
+  bool success = 1;
+  ServiceError error = 2;
+  Booking booking = 3;
+  map<string, string> metadata = 4;
+}
+
+service ClientSupplierService {
+  rpc GetBranches (GetBranchesRequest) returns (GetBranchesResponse);
+  rpc SearchCars (SearchCarsRequest) returns (SearchCarsResponse);
+  rpc BookCar (BookCarRequest) returns (BookCarResponse);
+  rpc CancelBooking (CancelBookingRequest) returns (CancelBookingResponse);
+  rpc GetBooking (GetBookingRequest) returns (GetBookingResponse);
+}
