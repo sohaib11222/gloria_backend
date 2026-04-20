@@ -2784,7 +2784,9 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
                 locationListEndpointUrl: true,
                 locationListRequestRoot: true,
                 locationListAccountId: true,
+                locationListTransport: true,
                 locationEndpointUrl: true,
+                grpcEndpoint: true,
                 branchDefaultCountryCode: true,
                 whitelistedDomains: true,
             },
@@ -2807,16 +2809,29 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
         const subscriptionCheck = await requireActiveSubscription(sourceId);
         if (subscriptionCheck)
             return res.status(subscriptionCheck.status).json(subscriptionCheck.body);
+        const transport = String(source.locationListTransport || "http").toLowerCase();
         const endpointUrl = source.locationListEndpointUrl || source.locationEndpointUrl || null;
-        if (!endpointUrl) {
+        if (transport !== "grpc" && !endpointUrl) {
             return res.status(400).json({
                 error: "ENDPOINT_NOT_CONFIGURED",
-                message: "Configure location list endpoint URL (Location & Branches tab)",
+                message: "Configure location list endpoint URL (Location & Branches tab), or set transport to gRPC and configure gRPC endpoint.",
+            });
+        }
+        if (transport === "grpc" && !(source.grpcEndpoint || "").trim()) {
+            return res.status(400).json({
+                error: "GRPC_NOT_CONFIGURED",
+                message: "Set gRPC endpoint (host:port) in endpoint configuration to import locations via SourceProviderService.GetLocations.",
             });
         }
         const { enforceWhitelist } = await import("../../infra/whitelistEnforcement.js");
+        const whitelistTarget = transport === "grpc"
+            ? (() => {
+                const a = (source.grpcEndpoint || "").trim();
+                return /^https?:\/\//i.test(a) ? a : `http://${a.replace(/^grpc:\/\//i, "")}`;
+            })()
+            : String(endpointUrl);
         try {
-            await enforceWhitelist(sourceId, endpointUrl);
+            await enforceWhitelist(sourceId, whitelistTarget);
         }
         catch (e) {
             return res.status(403).json({
@@ -2824,433 +2839,477 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
                 message: e.message || "Endpoint not whitelisted",
             });
         }
-        const requestRoot = (source.locationListRequestRoot || "GLORIA_locationlistrq").trim();
-        const accountId = (source.locationListAccountId || "Gloria001").trim();
-        const responseRoot = requestRoot.replace(/rq$/i, "rs") || "GLORIA_locationlistrs";
-        const ts = new Date().toISOString().slice(0, 19);
-        const xmlBody = `<?xml version="1.0" encoding="UTF-8"?><${requestRoot} TimeStamp="${ts}" Target="Production" Version="1.00"><ACC><Source><AccountID ID="${accountId}"/></Source></ACC></${requestRoot}>`;
-        let finalUrl = endpointUrl.trim();
-        if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
-            finalUrl = `http://${finalUrl}`;
-        }
-        // Ensure trailing slash on path-like URLs to avoid POST→GET redirect issues
-        // e.g. /gloria → /gloria/ (servers often 301 redirect, which converts POST to GET)
-        try {
-            const parsed = new URL(finalUrl);
-            if (parsed.pathname && !parsed.pathname.endsWith("/") && !parsed.pathname.includes(".")) {
-                parsed.pathname += "/";
-                finalUrl = parsed.toString();
-                console.log(`[import-location-list] Normalized URL with trailing slash: ${finalUrl}`);
+        let locations = [];
+        let branches = [];
+        let responseText = "";
+        let isXmlResponse = false;
+        const defaultCountryCode = source.branchDefaultCountryCode?.trim() || null;
+        if (transport === "grpc") {
+            const addr = (source.grpcEndpoint || "").trim();
+            const { makeGrpcSourceAdapter } = await import("../../adapters/grpcSourceAdapter.js");
+            let grpcRes;
+            try {
+                grpcRes = await makeGrpcSourceAdapter(addr).locations();
             }
+            catch (grpcErr) {
+                console.error("[import-location-list] gRPC GetLocations failed:", grpcErr);
+                return res.status(502).json({
+                    error: "GRPC_ERROR",
+                    message: grpcErr?.message || String(grpcErr),
+                });
+            }
+            responseText = JSON.stringify(grpcRes != null ? grpcRes : {});
+            for (const l of grpcRes?.locations || []) {
+                const unlocode = (l.unlocode || "").toString().toUpperCase().trim();
+                if (!unlocode || unlocode.length < 4 || unlocode.length > 5)
+                    continue;
+                locations.push({
+                    unlocode,
+                    country: unlocode.substring(0, 2),
+                    place: (l.name != null ? String(l.name) : "").trim() || unlocode,
+                    iataCode: null,
+                    latitude: null,
+                    longitude: null,
+                });
+            }
+            branches = [];
+            console.log(`[import-location-list] gRPC GetLocations: ${locations.length} location(s) after UN/LOCODE filter`);
         }
-        catch { }
-        console.log(`[import-location-list] Request URL: ${finalUrl}, root: ${requestRoot}, accountId: ${accountId}`);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000);
-        let responseText;
-        try {
-            // Use redirect:'manual' to prevent node-fetch from converting POST→GET on 301/302
-            let fetchResponse = await fetch(finalUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/xml" },
-                body: xmlBody,
-                signal: controller.signal,
-                redirect: "manual",
-            });
-            // Follow redirects manually, preserving POST method and body
-            let redirectCount = 0;
-            while ([301, 302, 303, 307, 308].includes(fetchResponse.status) && redirectCount < 5) {
-                const location = fetchResponse.headers.get("location");
-                if (!location)
-                    break;
-                const redirectUrl = new URL(location, finalUrl).toString();
-                console.log(`[import-location-list] Following redirect ${fetchResponse.status} from ${finalUrl} to ${redirectUrl}`);
-                finalUrl = redirectUrl;
-                redirectCount++;
-                fetchResponse = await fetch(finalUrl, {
+        else {
+            const httpListUrl = endpointUrl;
+            const requestRoot = (source.locationListRequestRoot || "GLORIA_locationlistrq").trim();
+            const accountId = (source.locationListAccountId || "Gloria001").trim();
+            const responseRoot = requestRoot.replace(/rq$/i, "rs") || "GLORIA_locationlistrs";
+            const ts = new Date().toISOString().slice(0, 19);
+            const xmlBody = `<?xml version="1.0" encoding="UTF-8"?><${requestRoot} TimeStamp="${ts}" Target="Production" Version="1.00"><ACC><Source><AccountID ID="${accountId}"/></Source></ACC></${requestRoot}>`;
+            let finalUrl = httpListUrl.trim();
+            if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
+                finalUrl = `http://${finalUrl}`;
+            }
+            // Ensure trailing slash on path-like URLs to avoid POST→GET redirect issues
+            // e.g. /gloria → /gloria/ (servers often 301 redirect, which converts POST to GET)
+            try {
+                const parsed = new URL(finalUrl);
+                if (parsed.pathname && !parsed.pathname.endsWith("/") && !parsed.pathname.includes(".")) {
+                    parsed.pathname += "/";
+                    finalUrl = parsed.toString();
+                    console.log(`[import-location-list] Normalized URL with trailing slash: ${finalUrl}`);
+                }
+            }
+            catch { }
+            console.log(`[import-location-list] Request URL: ${finalUrl}, root: ${requestRoot}, accountId: ${accountId}`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000);
+            let responseText;
+            try {
+                // Use redirect:'manual' to prevent node-fetch from converting POST→GET on 301/302
+                let fetchResponse = await fetch(finalUrl, {
                     method: "POST",
                     headers: { "Content-Type": "application/xml" },
                     body: xmlBody,
                     signal: controller.signal,
                     redirect: "manual",
                 });
-            }
-            clearTimeout(timeoutId);
-            if (!fetchResponse.ok) {
-                return res.status(fetchResponse.status).json({
-                    error: "SUPPLIER_ERROR",
-                    message: `Supplier returned ${fetchResponse.status}`,
-                });
-            }
-            responseText = await fetchResponse.text();
-            console.log(`[import-location-list] Response received: ${responseText.length} bytes from ${finalUrl}`);
-            // If response is empty, it might be the endpoint requires a trailing slash
-            if (!responseText.trim() && !finalUrl.endsWith("/")) {
-                console.log(`[import-location-list] Empty response, retrying with trailing slash`);
-                const retryUrl = finalUrl + "/";
-                const retryResponse = await fetch(retryUrl, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/xml" },
-                    body: xmlBody,
-                    redirect: "manual",
-                });
-                // Follow any redirects on retry too
-                let retryFinal = retryResponse;
-                if ([301, 302, 303, 307, 308].includes(retryFinal.status)) {
-                    const loc = retryFinal.headers.get("location");
-                    if (loc) {
-                        retryFinal = await fetch(new URL(loc, retryUrl).toString(), {
-                            method: "POST",
-                            headers: { "Content-Type": "application/xml" },
-                            body: xmlBody,
-                            redirect: "manual",
-                        });
-                    }
-                }
-                if (retryFinal.ok) {
-                    const retryText = await retryFinal.text();
-                    if (retryText.trim()) {
-                        responseText = retryText;
-                        console.log(`[import-location-list] Trailing slash retry succeeded: ${responseText.length} bytes`);
-                    }
-                }
-            }
-        }
-        catch (fetchErr) {
-            clearTimeout(timeoutId);
-            if (fetchErr.name === "AbortError" || fetchErr.code === "ETIMEDOUT") {
-                return res.status(504).json({
-                    error: "TIMEOUT",
-                    message: `Endpoint timeout: ${finalUrl}`,
-                });
-            }
-            if (fetchErr.message?.includes("fetch failed") || fetchErr.code === "ECONNREFUSED" || fetchErr.code === "ENOTFOUND") {
-                return res.status(503).json({
-                    error: "ENDPOINT_CONNECTION_ERROR",
-                    message: "Cannot connect to endpoint",
-                    details: fetchErr.message || fetchErr.code,
-                });
-            }
-            throw fetchErr;
-        }
-        // If still empty after all attempts, return a clear error
-        if (!responseText.trim()) {
-            return res.status(400).json({
-                error: "EMPTY_RESPONSE",
-                message: "Supplier returned an empty response. This may happen if the URL is incorrect or the endpoint requires a trailing slash. Check your endpoint URL.",
-                url: finalUrl,
-            });
-        }
-        // If supplier wraps XML in an HTML page, try to extract the real payload
-        if (responseText.includes("<html") || responseText.includes("<!DOCTYPE")) {
-            // First, try to pull content from <pre> tags (common for PHP var_dump inside HTML)
-            const preMatch = responseText.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
-            if (preMatch) {
-                responseText = preMatch[1];
-            }
-            else if (responseText.includes(`<${responseRoot}`) || responseText.includes("GLORIA_locationlist")) {
-                // The HTML page contains our XML root — extract the XML block instead of stripping all tags
-                const xmlStartTag = `<${responseRoot}`;
-                const xmlStart = responseText.indexOf(xmlStartTag);
-                if (xmlStart !== -1) {
-                    const xmlEndTag = `</${responseRoot}>`;
-                    const xmlEnd = responseText.indexOf(xmlEndTag, xmlStart);
-                    if (xmlEnd !== -1) {
-                        responseText = responseText.substring(xmlStart, xmlEnd + xmlEndTag.length);
-                    }
-                    else {
-                        // No closing tag — take everything from the start tag onward
-                        responseText = responseText.substring(xmlStart);
-                    }
-                }
-                // If no start tag found either, leave responseText as-is for the parsers to report
-            }
-            else if (responseText.includes("array(")) {
-                // HTML wrapping a PHP var_dump — strip only HTML tags, keep the PHP output
-                const bodyMatch = responseText.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-                if (bodyMatch)
-                    responseText = bodyMatch[1].replace(/<[^>]+>/g, "").trim();
-                else
-                    responseText = responseText.replace(/<[^>]+>/g, "").trim();
-            }
-            else {
-                // Truly an HTML error page with no relevant data
-                const bodyMatch = responseText.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-                const htmlText = bodyMatch ? bodyMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : responseText.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-                return res.status(400).json({
-                    error: "INVALID_RESPONSE_FORMAT",
-                    message: "Supplier returned an HTML page instead of XML/JSON. The endpoint may be misconfigured or returning an error page.",
-                    supplierResponse: htmlText.substring(0, 800) || "(empty)",
-                });
-            }
-        }
-        responseText = responseText.replace(/&quot;/g, '"').replace(/&#91;/g, "[").replace(/&#93;/g, "]");
-        if (responseText.includes(responseRoot)) {
-            const trailingMatch = responseText.match(/\}\s*\}\s*\}\s*[\r\n\s]*string\s*\(/);
-            if (trailingMatch && typeof trailingMatch.index === "number") {
-                const stringStart = responseText.indexOf("string(", trailingMatch.index);
-                if (stringStart !== -1) {
-                    const before = responseText;
-                    responseText = responseText.substring(0, stringStart);
-                    if (!responseText.includes('["Locs"]') && !responseText.includes("['Locs']"))
-                        responseText = before;
-                }
-            }
-        }
-        let locations = [];
-        let branches = [];
-        const defaultCountryCode = source.branchDefaultCountryCode?.trim() || null;
-        // Helper: extract location + branch data from a normalized LocationDetail
-        // attrs = XML attributes (Code, Name, Latitude, Longitude, BranchType, etc.)
-        // countryCodeOverride = country code from parent Country element (for XML with CountryList)
-        function extractFromLocationDetail(locationDetail, countryCodeOverride) {
-            // Handle both PHP var_dump (attrs in .attr sub-object) and XML (attrs as direct @_ prefixed or direct properties)
-            const attrs = locationDetail.attr || {};
-            const address = locationDetail.Address || {};
-            const countryName = address.CountryName || {};
-            // Country code: from CountryName.Code attribute, or from CountryName.attr.Code (PHP), or from parent Country element, or from attrs
-            let countryCode = "";
-            if (countryCodeOverride) {
-                countryCode = countryCodeOverride;
-            }
-            else if (typeof countryName === "string") {
-                // no code
-            }
-            else {
-                countryCode = (countryName["@_Code"] || countryName.attr?.Code || countryName.Code || attrs.CountryCode || "").toString().toUpperCase().trim();
-            }
-            const code = String(attrs.Code || attrs.BranchType || locationDetail.Code || locationDetail.BranchType || "").toUpperCase().trim();
-            const name = String(attrs.Name || locationDetail.Name || "").trim();
-            const latStr = attrs.Latitude ?? locationDetail.Latitude ?? locationDetail["@_Latitude"];
-            const lonStr = attrs.Longitude ?? locationDetail.Longitude ?? locationDetail["@_Longitude"];
-            const latitude = latStr != null ? parseFloat(String(latStr)) : null;
-            const longitude = lonStr != null ? parseFloat(String(lonStr)) : null;
-            // Derive unlocode
-            let unlocode = null;
-            if (attrs.NatoLocode || locationDetail.NatoLocode) {
-                unlocode = String(attrs.NatoLocode || locationDetail.NatoLocode).toUpperCase().trim();
-            }
-            else if (code && countryCode) {
-                if (code.length === 5 && code.startsWith(countryCode)) {
-                    unlocode = code;
-                }
-                else if (code.length === 6) {
-                    unlocode = `${countryCode}${code.substring(0, 3)}`;
-                }
-                else if (code.length >= 3) {
-                    unlocode = `${countryCode}${code.substring(code.length - 3)}`;
-                }
-                else {
-                    unlocode = `${countryCode}${code}`;
-                }
-            }
-            if (unlocode) {
-                locations.push({
-                    unlocode,
-                    country: countryCode || unlocode.substring(0, 2),
-                    place: name,
-                    iataCode: (attrs.IataCode || locationDetail.IataCode || "").toString().trim() || null,
-                    latitude: latitude != null && !isNaN(latitude) ? latitude : null,
-                    longitude: longitude != null && !isNaN(longitude) ? longitude : null,
-                });
-            }
-        }
-        // ──── Strategy 1: Raw XML response (e.g. <GLORIA_locationlistrs ...>) ────
-        const trimmedResponse = responseText.trimStart();
-        const isXmlResponse = trimmedResponse.startsWith("<?xml") || trimmedResponse.startsWith(`<${responseRoot}`) || (trimmedResponse.startsWith("<") && responseText.includes(responseRoot));
-        if (isXmlResponse && responseText.includes(responseRoot)) {
-            try {
-                // ── Helper: regex-based extraction of LocationDetail blocks from raw XML ──
-                function regexExtractLocations(xmlText) {
-                    const locationDetailRegex = /<LocationDetail\b([^>]*)>([\s\S]*?)<\/LocationDetail>/gi;
-                    const attrRegex = /(\w+)\s*=\s*"([^"]*)"/g;
-                    const countryBlockRegex = /<Country>([^<]*)<CountryCode>([^<]+)<\/CountryCode>/gi;
-                    const countryBlocks = [];
-                    let cbMatch;
-                    while ((cbMatch = countryBlockRegex.exec(xmlText)) !== null) {
-                        countryBlocks.push({ name: cbMatch[1].trim(), code: cbMatch[2].trim().toUpperCase(), startIdx: cbMatch.index });
-                    }
-                    console.log(`[import-location-list] Regex: found ${countryBlocks.length} country blocks`);
-                    let ldMatch;
-                    const regexLocs = [];
-                    while ((ldMatch = locationDetailRegex.exec(xmlText)) !== null) {
-                        const attrStr = ldMatch[1];
-                        const innerXml = ldMatch[2];
-                        const matchIdx = ldMatch.index;
-                        const attrs = {};
-                        let am;
-                        const attrRe = new RegExp(attrRegex.source, "g");
-                        while ((am = attrRe.exec(attrStr)) !== null) {
-                            attrs[am[1]] = am[2];
-                        }
-                        let cc = "";
-                        for (const cb of countryBlocks) {
-                            if (cb.startIdx < matchIdx)
-                                cc = cb.code;
-                            else
-                                break;
-                        }
-                        const address = {};
-                        const addressMatch = innerXml.match(/<Address>([\s\S]*?)<\/Address>/i);
-                        if (addressMatch) {
-                            const addrXml = addressMatch[1];
-                            const alMatch = addrXml.match(/<AddressLine[^>]*>([\s\S]*?)<\/AddressLine>/i);
-                            if (alMatch)
-                                address.AddressLine = { value: alMatch[1].trim() };
-                            const cnMatch = addrXml.match(/<CityName[^>]*>([\s\S]*?)<\/CityName>/i);
-                            if (cnMatch)
-                                address.CityName = { value: cnMatch[1].trim() };
-                            const pcMatch = addrXml.match(/<PostalCode[^>]*>([\s\S]*?)<\/PostalCode>/i);
-                            if (pcMatch)
-                                address.PostalCode = { value: pcMatch[1].trim() };
-                            else if (addrXml.match(/<PostalCode\s*\/>/i))
-                                address.PostalCode = { value: "" };
-                            const countryNameMatch = addrXml.match(/<CountryName\s+([^>]*)>([\s\S]*?)<\/CountryName>/i);
-                            if (countryNameMatch) {
-                                const cnAttrs = {};
-                                const cnAttrRe = new RegExp(attrRegex.source, "g");
-                                let cnA;
-                                while ((cnA = cnAttrRe.exec(countryNameMatch[1])) !== null)
-                                    cnAttrs[cnA[1]] = cnA[2];
-                                address.CountryName = { value: countryNameMatch[2].trim(), attr: { Code: cnAttrs.Code || cc } };
-                                if (cnAttrs.Code)
-                                    cc = cnAttrs.Code.toUpperCase();
-                            }
-                            else {
-                                address.CountryName = { value: "", attr: { Code: cc } };
-                            }
-                        }
-                        let phone = "";
-                        const telMatch = innerXml.match(/<Telephone\s+([^/>]*)\/?\s*>/i);
-                        if (telMatch) {
-                            const phMatch = telMatch[1].match(/PhoneNumber\s*=\s*"([^"]*)"/i);
-                            if (phMatch)
-                                phone = phMatch[1].trim();
-                        }
-                        let pickup = "";
-                        const piMatch = innerXml.match(/<PickupInstructions\s+([^/>]*)\/?\s*>/i);
-                        if (piMatch) {
-                            const pkMatch = piMatch[1].match(/Pickup\s*=\s*"([^"]*)"/i);
-                            if (pkMatch)
-                                pickup = pkMatch[1].trim();
-                        }
-                        const opening = {};
-                        const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-                        for (const day of days) {
-                            const dayRe = new RegExp(`<${day}\\s+([^/>]*)\\/?\\s*>`, "i");
-                            const dayMatch = innerXml.match(dayRe);
-                            if (dayMatch) {
-                                const openMatch = dayMatch[1].match(/Open\s*=\s*"([^"]*)"/i);
-                                if (openMatch)
-                                    opening[day] = { attr: { Open: openMatch[1].replace(/\n/g, "").trim() } };
-                            }
-                        }
-                        const normalized = {
-                            attr: attrs,
-                            Address: Object.keys(address).length > 0 ? address : { CountryName: { value: "", attr: { Code: cc } } },
-                            Telephone: phone ? { attr: { PhoneNumber: phone } } : undefined,
-                            Opening: Object.keys(opening).length > 0 ? opening : undefined,
-                            PickupInstructions: pickup ? { attr: { Pickup: pickup } } : undefined,
-                        };
-                        extractFromLocationDetail({ ...normalized, ...attrs }, cc);
-                        regexLocs.push({ VehMatchedLoc: { LocationDetail: normalized } });
-                    }
-                    return { regexLocs, regexBranches: [] };
-                }
-                // ── Approach A: Try fast-xml-parser ──
-                let xmlParserExtracted = 0;
-                let xmlParserError = null;
-                let diagnostics = { responseLength: responseText.length, responseExcerpt: responseText.substring(0, 200) };
-                try {
-                    const { XMLParser } = await import("fast-xml-parser");
-                    const xmlParser = new XMLParser({
-                        ignoreAttributes: false,
-                        attributeNamePrefix: "@_",
-                        textNodeName: "#text",
-                        trimValues: true,
-                        isArray: (name) => ["Country", "VehMatchedLoc", "VehMatchedLocs", "Code"].includes(name),
-                        stopNodes: [],
-                        processEntities: true,
+                // Follow redirects manually, preserving POST method and body
+                let redirectCount = 0;
+                while ([301, 302, 303, 307, 308].includes(fetchResponse.status) && redirectCount < 5) {
+                    const location = fetchResponse.headers.get("location");
+                    if (!location)
+                        break;
+                    const redirectUrl = new URL(location, finalUrl).toString();
+                    console.log(`[import-location-list] Following redirect ${fetchResponse.status} from ${finalUrl} to ${redirectUrl}`);
+                    finalUrl = redirectUrl;
+                    redirectCount++;
+                    fetchResponse = await fetch(finalUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/xml" },
+                        body: xmlBody,
+                        signal: controller.signal,
+                        redirect: "manual",
                     });
-                    const parsed = xmlParser.parse(responseText);
-                    diagnostics.parsedKeys = Object.keys(parsed || {});
-                    console.log(`[import-location-list] fast-xml-parser parsed, top-level keys: ${diagnostics.parsedKeys.join(", ")}`);
-                    const root = parsed[responseRoot] || parsed["GLORIA_locationlistrs"];
-                    if (root) {
-                        diagnostics.rootKeys = Object.keys(root);
-                        console.log(`[import-location-list] Root element found, keys: ${diagnostics.rootKeys.join(", ")}`);
-                        const vehMatchedLocs = [];
-                        const countryCodeMap = new Map();
-                        const countryList = root.CountryList;
-                        diagnostics.hasCountryList = !!countryList;
-                        console.log(`[import-location-list] CountryList exists: ${!!countryList}`);
-                        if (countryList) {
-                            diagnostics.countryListType = typeof countryList;
-                            diagnostics.countryListKeys = typeof countryList === "object" ? Object.keys(countryList) : [];
-                            console.log(`[import-location-list] CountryList type: ${typeof countryList}, keys: ${diagnostics.countryListKeys?.join(", ")}`);
-                            const countries = [];
-                            function collectCountries(node) {
-                                if (!node)
-                                    return;
-                                if (Array.isArray(node)) {
-                                    node.forEach(collectCountries);
-                                    return;
-                                }
-                                if (node.CountryCode || node.VehMatchedLocs) {
-                                    countries.push(node);
-                                }
-                                if (node.Country) {
-                                    collectCountries(node.Country);
-                                }
-                                if (node.VehMatchedLocs) {
-                                    const vmlArr = Array.isArray(node.VehMatchedLocs) ? node.VehMatchedLocs : [node.VehMatchedLocs];
-                                    for (const vml of vmlArr) {
-                                        if (vml.Country)
-                                            collectCountries(vml.Country);
-                                    }
-                                }
-                            }
-                            const startNode = countryList.Country || countryList;
-                            diagnostics.collectStartIsArray = Array.isArray(startNode);
-                            diagnostics.collectStartType = typeof startNode;
-                            console.log(`[import-location-list] collectCountries start node: isArray=${Array.isArray(startNode)}, type=${typeof startNode}`);
-                            collectCountries(startNode);
-                            diagnostics.countriesFound = countries.length;
-                            console.log(`[import-location-list] collectCountries found ${countries.length} countries`);
-                            for (const country of countries) {
-                                const cc = (country.CountryCode || country["#text"] || "").toString().toUpperCase().trim();
-                                let matchedLocsArr = country.VehMatchedLocs;
-                                if (!matchedLocsArr) {
-                                    console.log(`[import-location-list] Country ${cc} has no VehMatchedLocs, skipping`);
-                                    continue;
-                                }
-                                if (!Array.isArray(matchedLocsArr))
-                                    matchedLocsArr = [matchedLocsArr];
-                                for (const matchedLocs of matchedLocsArr) {
-                                    let locs = matchedLocs.VehMatchedLoc;
-                                    if (!locs) {
-                                        console.log(`[import-location-list] Country ${cc} VehMatchedLocs entry has no VehMatchedLoc`);
-                                        continue;
-                                    }
-                                    if (!Array.isArray(locs))
-                                        locs = [locs];
-                                    for (const loc of locs) {
-                                        vehMatchedLocs.push(loc);
-                                        if (loc.LocationDetail)
-                                            countryCodeMap.set(loc.LocationDetail, cc);
-                                    }
-                                }
-                            }
+                }
+                clearTimeout(timeoutId);
+                if (!fetchResponse.ok) {
+                    return res.status(fetchResponse.status).json({
+                        error: "SUPPLIER_ERROR",
+                        message: `Supplier returned ${fetchResponse.status}`,
+                    });
+                }
+                responseText = await fetchResponse.text();
+                console.log(`[import-location-list] Response received: ${responseText.length} bytes from ${finalUrl}`);
+                // If response is empty, it might be the endpoint requires a trailing slash
+                if (!responseText.trim() && !finalUrl.endsWith("/")) {
+                    console.log(`[import-location-list] Empty response, retrying with trailing slash`);
+                    const retryUrl = finalUrl + "/";
+                    const retryResponse = await fetch(retryUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/xml" },
+                        body: xmlBody,
+                        redirect: "manual",
+                    });
+                    // Follow any redirects on retry too
+                    let retryFinal = retryResponse;
+                    if ([301, 302, 303, 307, 308].includes(retryFinal.status)) {
+                        const loc = retryFinal.headers.get("location");
+                        if (loc) {
+                            retryFinal = await fetch(new URL(loc, retryUrl).toString(), {
+                                method: "POST",
+                                headers: { "Content-Type": "application/xml" },
+                                body: xmlBody,
+                                redirect: "manual",
+                            });
+                        }
+                    }
+                    if (retryFinal.ok) {
+                        const retryText = await retryFinal.text();
+                        if (retryText.trim()) {
+                            responseText = retryText;
+                            console.log(`[import-location-list] Trailing slash retry succeeded: ${responseText.length} bytes`);
+                        }
+                    }
+                }
+            }
+            catch (fetchErr) {
+                clearTimeout(timeoutId);
+                if (fetchErr.name === "AbortError" || fetchErr.code === "ETIMEDOUT") {
+                    return res.status(504).json({
+                        error: "TIMEOUT",
+                        message: `Endpoint timeout: ${finalUrl}`,
+                    });
+                }
+                if (fetchErr.message?.includes("fetch failed") || fetchErr.code === "ECONNREFUSED" || fetchErr.code === "ENOTFOUND") {
+                    return res.status(503).json({
+                        error: "ENDPOINT_CONNECTION_ERROR",
+                        message: "Cannot connect to endpoint",
+                        details: fetchErr.message || fetchErr.code,
+                    });
+                }
+                throw fetchErr;
+            }
+            // If still empty after all attempts, return a clear error
+            if (!responseText.trim()) {
+                return res.status(400).json({
+                    error: "EMPTY_RESPONSE",
+                    message: "Supplier returned an empty response. This may happen if the URL is incorrect or the endpoint requires a trailing slash. Check your endpoint URL.",
+                    url: finalUrl,
+                });
+            }
+            // If supplier wraps XML in an HTML page, try to extract the real payload
+            if (responseText.includes("<html") || responseText.includes("<!DOCTYPE")) {
+                // First, try to pull content from <pre> tags (common for PHP var_dump inside HTML)
+                const preMatch = responseText.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+                if (preMatch) {
+                    responseText = preMatch[1];
+                }
+                else if (responseText.includes(`<${responseRoot}`) || responseText.includes("GLORIA_locationlist")) {
+                    // The HTML page contains our XML root — extract the XML block instead of stripping all tags
+                    const xmlStartTag = `<${responseRoot}`;
+                    const xmlStart = responseText.indexOf(xmlStartTag);
+                    if (xmlStart !== -1) {
+                        const xmlEndTag = `</${responseRoot}>`;
+                        const xmlEnd = responseText.indexOf(xmlEndTag, xmlStart);
+                        if (xmlEnd !== -1) {
+                            responseText = responseText.substring(xmlStart, xmlEnd + xmlEndTag.length);
                         }
                         else {
-                            let vmlRoot = root.VehMatchedLocs;
-                            if (vmlRoot) {
-                                if (!Array.isArray(vmlRoot))
-                                    vmlRoot = [vmlRoot];
-                                for (const vml of vmlRoot) {
-                                    let directLocs = vml.VehMatchedLoc;
-                                    if (!directLocs)
+                            // No closing tag — take everything from the start tag onward
+                            responseText = responseText.substring(xmlStart);
+                        }
+                    }
+                    // If no start tag found either, leave responseText as-is for the parsers to report
+                }
+                else if (responseText.includes("array(")) {
+                    // HTML wrapping a PHP var_dump — strip only HTML tags, keep the PHP output
+                    const bodyMatch = responseText.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+                    if (bodyMatch)
+                        responseText = bodyMatch[1].replace(/<[^>]+>/g, "").trim();
+                    else
+                        responseText = responseText.replace(/<[^>]+>/g, "").trim();
+                }
+                else {
+                    // Truly an HTML error page with no relevant data
+                    const bodyMatch = responseText.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+                    const htmlText = bodyMatch ? bodyMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : responseText.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+                    return res.status(400).json({
+                        error: "INVALID_RESPONSE_FORMAT",
+                        message: "Supplier returned an HTML page instead of XML/JSON. The endpoint may be misconfigured or returning an error page.",
+                        supplierResponse: htmlText.substring(0, 800) || "(empty)",
+                    });
+                }
+            }
+            responseText = responseText.replace(/&quot;/g, '"').replace(/&#91;/g, "[").replace(/&#93;/g, "]");
+            if (responseText.includes(responseRoot)) {
+                const trailingMatch = responseText.match(/\}\s*\}\s*\}\s*[\r\n\s]*string\s*\(/);
+                if (trailingMatch && typeof trailingMatch.index === "number") {
+                    const stringStart = responseText.indexOf("string(", trailingMatch.index);
+                    if (stringStart !== -1) {
+                        const before = responseText;
+                        responseText = responseText.substring(0, stringStart);
+                        if (!responseText.includes('["Locs"]') && !responseText.includes("['Locs']"))
+                            responseText = before;
+                    }
+                }
+            }
+            // Helper: extract location + branch data from a normalized LocationDetail
+            // attrs = XML attributes (Code, Name, Latitude, Longitude, BranchType, etc.)
+            // countryCodeOverride = country code from parent Country element (for XML with CountryList)
+            function extractFromLocationDetail(locationDetail, countryCodeOverride) {
+                // Handle both PHP var_dump (attrs in .attr sub-object) and XML (attrs as direct @_ prefixed or direct properties)
+                const attrs = locationDetail.attr || {};
+                const address = locationDetail.Address || {};
+                const countryName = address.CountryName || {};
+                // Country code: from CountryName.Code attribute, or from CountryName.attr.Code (PHP), or from parent Country element, or from attrs
+                let countryCode = "";
+                if (countryCodeOverride) {
+                    countryCode = countryCodeOverride;
+                }
+                else if (typeof countryName === "string") {
+                    // no code
+                }
+                else {
+                    countryCode = (countryName["@_Code"] || countryName.attr?.Code || countryName.Code || attrs.CountryCode || "").toString().toUpperCase().trim();
+                }
+                const code = String(attrs.Code || attrs.BranchType || locationDetail.Code || locationDetail.BranchType || "").toUpperCase().trim();
+                const name = String(attrs.Name || locationDetail.Name || "").trim();
+                const latStr = attrs.Latitude ?? locationDetail.Latitude ?? locationDetail["@_Latitude"];
+                const lonStr = attrs.Longitude ?? locationDetail.Longitude ?? locationDetail["@_Longitude"];
+                const latitude = latStr != null ? parseFloat(String(latStr)) : null;
+                const longitude = lonStr != null ? parseFloat(String(lonStr)) : null;
+                // Derive unlocode
+                let unlocode = null;
+                if (attrs.NatoLocode || locationDetail.NatoLocode) {
+                    unlocode = String(attrs.NatoLocode || locationDetail.NatoLocode).toUpperCase().trim();
+                }
+                else if (code && countryCode) {
+                    if (code.length === 5 && code.startsWith(countryCode)) {
+                        unlocode = code;
+                    }
+                    else if (code.length === 6) {
+                        unlocode = `${countryCode}${code.substring(0, 3)}`;
+                    }
+                    else if (code.length >= 3) {
+                        unlocode = `${countryCode}${code.substring(code.length - 3)}`;
+                    }
+                    else {
+                        unlocode = `${countryCode}${code}`;
+                    }
+                }
+                if (unlocode) {
+                    locations.push({
+                        unlocode,
+                        country: countryCode || unlocode.substring(0, 2),
+                        place: name,
+                        iataCode: (attrs.IataCode || locationDetail.IataCode || "").toString().trim() || null,
+                        latitude: latitude != null && !isNaN(latitude) ? latitude : null,
+                        longitude: longitude != null && !isNaN(longitude) ? longitude : null,
+                    });
+                }
+            }
+            // ──── Strategy 1: Raw XML response (e.g. <GLORIA_locationlistrs ...>) ────
+            const trimmedResponse = responseText.trimStart();
+            isXmlResponse = trimmedResponse.startsWith("<?xml") || trimmedResponse.startsWith(`<${responseRoot}`) || (trimmedResponse.startsWith("<") && responseText.includes(responseRoot));
+            if (isXmlResponse && responseText.includes(responseRoot)) {
+                try {
+                    // ── Helper: regex-based extraction of LocationDetail blocks from raw XML ──
+                    function regexExtractLocations(xmlText) {
+                        const locationDetailRegex = /<LocationDetail\b([^>]*)>([\s\S]*?)<\/LocationDetail>/gi;
+                        const attrRegex = /(\w+)\s*=\s*"([^"]*)"/g;
+                        const countryBlockRegex = /<Country>([^<]*)<CountryCode>([^<]+)<\/CountryCode>/gi;
+                        const countryBlocks = [];
+                        let cbMatch;
+                        while ((cbMatch = countryBlockRegex.exec(xmlText)) !== null) {
+                            countryBlocks.push({ name: cbMatch[1].trim(), code: cbMatch[2].trim().toUpperCase(), startIdx: cbMatch.index });
+                        }
+                        console.log(`[import-location-list] Regex: found ${countryBlocks.length} country blocks`);
+                        let ldMatch;
+                        const regexLocs = [];
+                        while ((ldMatch = locationDetailRegex.exec(xmlText)) !== null) {
+                            const attrStr = ldMatch[1];
+                            const innerXml = ldMatch[2];
+                            const matchIdx = ldMatch.index;
+                            const attrs = {};
+                            let am;
+                            const attrRe = new RegExp(attrRegex.source, "g");
+                            while ((am = attrRe.exec(attrStr)) !== null) {
+                                attrs[am[1]] = am[2];
+                            }
+                            let cc = "";
+                            for (const cb of countryBlocks) {
+                                if (cb.startIdx < matchIdx)
+                                    cc = cb.code;
+                                else
+                                    break;
+                            }
+                            const address = {};
+                            const addressMatch = innerXml.match(/<Address>([\s\S]*?)<\/Address>/i);
+                            if (addressMatch) {
+                                const addrXml = addressMatch[1];
+                                const alMatch = addrXml.match(/<AddressLine[^>]*>([\s\S]*?)<\/AddressLine>/i);
+                                if (alMatch)
+                                    address.AddressLine = { value: alMatch[1].trim() };
+                                const cnMatch = addrXml.match(/<CityName[^>]*>([\s\S]*?)<\/CityName>/i);
+                                if (cnMatch)
+                                    address.CityName = { value: cnMatch[1].trim() };
+                                const pcMatch = addrXml.match(/<PostalCode[^>]*>([\s\S]*?)<\/PostalCode>/i);
+                                if (pcMatch)
+                                    address.PostalCode = { value: pcMatch[1].trim() };
+                                else if (addrXml.match(/<PostalCode\s*\/>/i))
+                                    address.PostalCode = { value: "" };
+                                const countryNameMatch = addrXml.match(/<CountryName\s+([^>]*)>([\s\S]*?)<\/CountryName>/i);
+                                if (countryNameMatch) {
+                                    const cnAttrs = {};
+                                    const cnAttrRe = new RegExp(attrRegex.source, "g");
+                                    let cnA;
+                                    while ((cnA = cnAttrRe.exec(countryNameMatch[1])) !== null)
+                                        cnAttrs[cnA[1]] = cnA[2];
+                                    address.CountryName = { value: countryNameMatch[2].trim(), attr: { Code: cnAttrs.Code || cc } };
+                                    if (cnAttrs.Code)
+                                        cc = cnAttrs.Code.toUpperCase();
+                                }
+                                else {
+                                    address.CountryName = { value: "", attr: { Code: cc } };
+                                }
+                            }
+                            let phone = "";
+                            const telMatch = innerXml.match(/<Telephone\s+([^/>]*)\/?\s*>/i);
+                            if (telMatch) {
+                                const phMatch = telMatch[1].match(/PhoneNumber\s*=\s*"([^"]*)"/i);
+                                if (phMatch)
+                                    phone = phMatch[1].trim();
+                            }
+                            let pickup = "";
+                            const piMatch = innerXml.match(/<PickupInstructions\s+([^/>]*)\/?\s*>/i);
+                            if (piMatch) {
+                                const pkMatch = piMatch[1].match(/Pickup\s*=\s*"([^"]*)"/i);
+                                if (pkMatch)
+                                    pickup = pkMatch[1].trim();
+                            }
+                            const opening = {};
+                            const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+                            for (const day of days) {
+                                const dayRe = new RegExp(`<${day}\\s+([^/>]*)\\/?\\s*>`, "i");
+                                const dayMatch = innerXml.match(dayRe);
+                                if (dayMatch) {
+                                    const openMatch = dayMatch[1].match(/Open\s*=\s*"([^"]*)"/i);
+                                    if (openMatch)
+                                        opening[day] = { attr: { Open: openMatch[1].replace(/\n/g, "").trim() } };
+                                }
+                            }
+                            const normalized = {
+                                attr: attrs,
+                                Address: Object.keys(address).length > 0 ? address : { CountryName: { value: "", attr: { Code: cc } } },
+                                Telephone: phone ? { attr: { PhoneNumber: phone } } : undefined,
+                                Opening: Object.keys(opening).length > 0 ? opening : undefined,
+                                PickupInstructions: pickup ? { attr: { Pickup: pickup } } : undefined,
+                            };
+                            extractFromLocationDetail({ ...normalized, ...attrs }, cc);
+                            regexLocs.push({ VehMatchedLoc: { LocationDetail: normalized } });
+                        }
+                        return { regexLocs, regexBranches: [] };
+                    }
+                    // ── Approach A: Try fast-xml-parser ──
+                    let xmlParserExtracted = 0;
+                    let xmlParserError = null;
+                    let diagnostics = { responseLength: responseText.length, responseExcerpt: responseText.substring(0, 200) };
+                    try {
+                        const { XMLParser } = await import("fast-xml-parser");
+                        const xmlParser = new XMLParser({
+                            ignoreAttributes: false,
+                            attributeNamePrefix: "@_",
+                            textNodeName: "#text",
+                            trimValues: true,
+                            isArray: (name) => ["Country", "VehMatchedLoc", "VehMatchedLocs", "Code"].includes(name),
+                            stopNodes: [],
+                            processEntities: true,
+                        });
+                        const parsed = xmlParser.parse(responseText);
+                        diagnostics.parsedKeys = Object.keys(parsed || {});
+                        console.log(`[import-location-list] fast-xml-parser parsed, top-level keys: ${diagnostics.parsedKeys.join(", ")}`);
+                        const root = parsed[responseRoot] || parsed["GLORIA_locationlistrs"];
+                        if (root) {
+                            diagnostics.rootKeys = Object.keys(root);
+                            console.log(`[import-location-list] Root element found, keys: ${diagnostics.rootKeys.join(", ")}`);
+                            const vehMatchedLocs = [];
+                            const countryCodeMap = new Map();
+                            const countryList = root.CountryList;
+                            diagnostics.hasCountryList = !!countryList;
+                            console.log(`[import-location-list] CountryList exists: ${!!countryList}`);
+                            if (countryList) {
+                                diagnostics.countryListType = typeof countryList;
+                                diagnostics.countryListKeys = typeof countryList === "object" ? Object.keys(countryList) : [];
+                                console.log(`[import-location-list] CountryList type: ${typeof countryList}, keys: ${diagnostics.countryListKeys?.join(", ")}`);
+                                const countries = [];
+                                function collectCountries(node) {
+                                    if (!node)
+                                        return;
+                                    if (Array.isArray(node)) {
+                                        node.forEach(collectCountries);
+                                        return;
+                                    }
+                                    if (node.CountryCode || node.VehMatchedLocs) {
+                                        countries.push(node);
+                                    }
+                                    if (node.Country) {
+                                        collectCountries(node.Country);
+                                    }
+                                    if (node.VehMatchedLocs) {
+                                        const vmlArr = Array.isArray(node.VehMatchedLocs) ? node.VehMatchedLocs : [node.VehMatchedLocs];
+                                        for (const vml of vmlArr) {
+                                            if (vml.Country)
+                                                collectCountries(vml.Country);
+                                        }
+                                    }
+                                }
+                                const startNode = countryList.Country || countryList;
+                                diagnostics.collectStartIsArray = Array.isArray(startNode);
+                                diagnostics.collectStartType = typeof startNode;
+                                console.log(`[import-location-list] collectCountries start node: isArray=${Array.isArray(startNode)}, type=${typeof startNode}`);
+                                collectCountries(startNode);
+                                diagnostics.countriesFound = countries.length;
+                                console.log(`[import-location-list] collectCountries found ${countries.length} countries`);
+                                for (const country of countries) {
+                                    const cc = (country.CountryCode || country["#text"] || "").toString().toUpperCase().trim();
+                                    let matchedLocsArr = country.VehMatchedLocs;
+                                    if (!matchedLocsArr) {
+                                        console.log(`[import-location-list] Country ${cc} has no VehMatchedLocs, skipping`);
                                         continue;
+                                    }
+                                    if (!Array.isArray(matchedLocsArr))
+                                        matchedLocsArr = [matchedLocsArr];
+                                    for (const matchedLocs of matchedLocsArr) {
+                                        let locs = matchedLocs.VehMatchedLoc;
+                                        if (!locs) {
+                                            console.log(`[import-location-list] Country ${cc} VehMatchedLocs entry has no VehMatchedLoc`);
+                                            continue;
+                                        }
+                                        if (!Array.isArray(locs))
+                                            locs = [locs];
+                                        for (const loc of locs) {
+                                            vehMatchedLocs.push(loc);
+                                            if (loc.LocationDetail)
+                                                countryCodeMap.set(loc.LocationDetail, cc);
+                                        }
+                                    }
+                                }
+                            }
+                            else {
+                                let vmlRoot = root.VehMatchedLocs;
+                                if (vmlRoot) {
+                                    if (!Array.isArray(vmlRoot))
+                                        vmlRoot = [vmlRoot];
+                                    for (const vml of vmlRoot) {
+                                        let directLocs = vml.VehMatchedLoc;
+                                        if (!directLocs)
+                                            continue;
+                                        if (!Array.isArray(directLocs))
+                                            directLocs = [directLocs];
+                                        for (const loc of directLocs) {
+                                            vehMatchedLocs.push(loc);
+                                        }
+                                    }
+                                }
+                                else if (root.VehMatchedLoc) {
+                                    let directLocs = root.VehMatchedLoc;
                                     if (!Array.isArray(directLocs))
                                         directLocs = [directLocs];
                                     for (const loc of directLocs) {
@@ -3258,162 +3317,154 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
                                     }
                                 }
                             }
-                            else if (root.VehMatchedLoc) {
-                                let directLocs = root.VehMatchedLoc;
-                                if (!Array.isArray(directLocs))
-                                    directLocs = [directLocs];
-                                for (const loc of directLocs) {
-                                    vehMatchedLocs.push(loc);
-                                }
+                            diagnostics.vehMatchedLocsCount = vehMatchedLocs.length;
+                            diagnostics.countryCodeMapSize = countryCodeMap.size;
+                            console.log(`[import-location-list] XML parser extracted ${vehMatchedLocs.length} VehMatchedLoc elements, countryCodeMap size: ${countryCodeMap.size}`);
+                            if (vehMatchedLocs.length > 0) {
+                                xmlParserExtracted = vehMatchedLocs.length;
+                                const normalizedLocs = vehMatchedLocs.map((loc) => {
+                                    const ld = loc.LocationDetail || loc;
+                                    const attrs = {};
+                                    for (const key of Object.keys(ld)) {
+                                        if (key.startsWith("@_")) {
+                                            attrs[key.substring(2)] = ld[key];
+                                        }
+                                    }
+                                    const normalized = { attr: attrs };
+                                    if (ld.Address) {
+                                        const addr = ld.Address;
+                                        normalized.Address = {
+                                            AddressLine: typeof addr.AddressLine === "string" ? { value: addr.AddressLine } : addr.AddressLine,
+                                            CityName: typeof addr.CityName === "string" ? { value: addr.CityName } : addr.CityName,
+                                            PostalCode: typeof addr.PostalCode === "string" ? { value: (addr.PostalCode || "").toString() } : addr.PostalCode,
+                                            CountryName: addr.CountryName ? {
+                                                value: typeof addr.CountryName === "string" ? addr.CountryName : (addr.CountryName["#text"] || addr.CountryName.value || ""),
+                                                attr: {
+                                                    Code: addr.CountryName?.["@_Code"] || addr.CountryName?.Code || countryCodeMap.get(ld) || "",
+                                                },
+                                            } : { value: "", attr: { Code: countryCodeMap.get(ld) || "" } },
+                                        };
+                                    }
+                                    else {
+                                        normalized.Address = { CountryName: { value: "", attr: { Code: countryCodeMap.get(ld) || "" } } };
+                                    }
+                                    if (ld.Telephone) {
+                                        normalized.Telephone = {
+                                            attr: { PhoneNumber: ld.Telephone?.["@_PhoneNumber"] || ld.Telephone?.PhoneNumber || "" },
+                                        };
+                                    }
+                                    if (ld.Opening)
+                                        normalized.Opening = ld.Opening;
+                                    if (ld.PickupInstructions)
+                                        normalized.PickupInstructions = ld.PickupInstructions;
+                                    if (ld.Cars)
+                                        normalized.Cars = ld.Cars;
+                                    const cc = countryCodeMap.get(ld) || normalized.Address?.CountryName?.attr?.Code || "";
+                                    extractFromLocationDetail({ ...normalized, ...attrs }, cc);
+                                    return { VehMatchedLoc: { LocationDetail: normalized } };
+                                });
+                                const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
+                                branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: normalizedLocs }, gloria: { VehMatchedLocs: normalizedLocs } });
+                                console.log(`[import-location-list] XML parser: locations=${locations.length}, branches=${branches.length}`);
+                            }
+                            else {
+                                console.log(`[import-location-list] XML parser found 0 VehMatchedLoc, will try regex fallback`);
                             }
                         }
-                        diagnostics.vehMatchedLocsCount = vehMatchedLocs.length;
-                        diagnostics.countryCodeMapSize = countryCodeMap.size;
-                        console.log(`[import-location-list] XML parser extracted ${vehMatchedLocs.length} VehMatchedLoc elements, countryCodeMap size: ${countryCodeMap.size}`);
-                        if (vehMatchedLocs.length > 0) {
-                            xmlParserExtracted = vehMatchedLocs.length;
-                            const normalizedLocs = vehMatchedLocs.map((loc) => {
-                                const ld = loc.LocationDetail || loc;
-                                const attrs = {};
-                                for (const key of Object.keys(ld)) {
-                                    if (key.startsWith("@_")) {
-                                        attrs[key.substring(2)] = ld[key];
-                                    }
-                                }
-                                const normalized = { attr: attrs };
-                                if (ld.Address) {
-                                    const addr = ld.Address;
-                                    normalized.Address = {
-                                        AddressLine: typeof addr.AddressLine === "string" ? { value: addr.AddressLine } : addr.AddressLine,
-                                        CityName: typeof addr.CityName === "string" ? { value: addr.CityName } : addr.CityName,
-                                        PostalCode: typeof addr.PostalCode === "string" ? { value: (addr.PostalCode || "").toString() } : addr.PostalCode,
-                                        CountryName: addr.CountryName ? {
-                                            value: typeof addr.CountryName === "string" ? addr.CountryName : (addr.CountryName["#text"] || addr.CountryName.value || ""),
-                                            attr: {
-                                                Code: addr.CountryName?.["@_Code"] || addr.CountryName?.Code || countryCodeMap.get(ld) || "",
-                                            },
-                                        } : { value: "", attr: { Code: countryCodeMap.get(ld) || "" } },
-                                    };
-                                }
-                                else {
-                                    normalized.Address = { CountryName: { value: "", attr: { Code: countryCodeMap.get(ld) || "" } } };
-                                }
-                                if (ld.Telephone) {
-                                    normalized.Telephone = {
-                                        attr: { PhoneNumber: ld.Telephone?.["@_PhoneNumber"] || ld.Telephone?.PhoneNumber || "" },
-                                    };
-                                }
-                                if (ld.Opening)
-                                    normalized.Opening = ld.Opening;
-                                if (ld.PickupInstructions)
-                                    normalized.PickupInstructions = ld.PickupInstructions;
-                                if (ld.Cars)
-                                    normalized.Cars = ld.Cars;
-                                const cc = countryCodeMap.get(ld) || normalized.Address?.CountryName?.attr?.Code || "";
-                                extractFromLocationDetail({ ...normalized, ...attrs }, cc);
-                                return { VehMatchedLoc: { LocationDetail: normalized } };
-                            });
-                            const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-                            branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: normalizedLocs }, gloria: { VehMatchedLocs: normalizedLocs } });
-                            console.log(`[import-location-list] XML parser: locations=${locations.length}, branches=${branches.length}`);
-                        }
                         else {
-                            console.log(`[import-location-list] XML parser found 0 VehMatchedLoc, will try regex fallback`);
+                            xmlParserError = `Root element not found. Parsed keys: ${diagnostics.parsedKeys?.join(", ")}`;
+                            console.log(`[import-location-list] ${xmlParserError}`);
                         }
                     }
-                    else {
-                        xmlParserError = `Root element not found. Parsed keys: ${diagnostics.parsedKeys?.join(", ")}`;
-                        console.log(`[import-location-list] ${xmlParserError}`);
+                    catch (xmlErr) {
+                        xmlParserError = xmlErr.message || String(xmlErr);
+                        console.warn(`[import-location-list] fast-xml-parser error: ${xmlParserError}`);
+                    }
+                    // ── Approach B: Regex fallback (if XML parser extracted 0 items) ──
+                    if (xmlParserExtracted === 0) {
+                        console.log(`[import-location-list] Using regex fallback (xmlParserExtracted=${xmlParserExtracted}, xmlParserError=${xmlParserError})`);
+                        const { regexLocs } = regexExtractLocations(responseText);
+                        console.log(`[import-location-list] Regex fallback extracted ${regexLocs.length} LocationDetail blocks, locations now: ${locations.length}`);
+                        if (regexLocs.length > 0) {
+                            const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
+                            branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: regexLocs }, gloria: { VehMatchedLocs: regexLocs } });
+                            diagnostics.usedRegexFallback = true;
+                            diagnostics.regexLocsCount = regexLocs.length;
+                        }
+                        else if (locations.length === 0) {
+                            return res.status(400).json({
+                                error: "INVALID_RESPONSE_FORMAT",
+                                message: `XML response contained <${responseRoot}> but no <LocationDetail> elements could be extracted. XML parser error: ${xmlParserError || "none"}`,
+                                diagnostics,
+                                details: responseText.substring(0, 800),
+                            });
+                        }
                     }
                 }
-                catch (xmlErr) {
-                    xmlParserError = xmlErr.message || String(xmlErr);
-                    console.warn(`[import-location-list] fast-xml-parser error: ${xmlParserError}`);
-                }
-                // ── Approach B: Regex fallback (if XML parser extracted 0 items) ──
-                if (xmlParserExtracted === 0) {
-                    console.log(`[import-location-list] Using regex fallback (xmlParserExtracted=${xmlParserExtracted}, xmlParserError=${xmlParserError})`);
-                    const { regexLocs } = regexExtractLocations(responseText);
-                    console.log(`[import-location-list] Regex fallback extracted ${regexLocs.length} LocationDetail blocks, locations now: ${locations.length}`);
-                    if (regexLocs.length > 0) {
-                        const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-                        branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: regexLocs }, gloria: { VehMatchedLocs: regexLocs } });
-                        diagnostics.usedRegexFallback = true;
-                        diagnostics.regexLocsCount = regexLocs.length;
-                    }
-                    else if (locations.length === 0) {
-                        return res.status(400).json({
-                            error: "INVALID_RESPONSE_FORMAT",
-                            message: `XML response contained <${responseRoot}> but no <LocationDetail> elements could be extracted. XML parser error: ${xmlParserError || "none"}`,
-                            diagnostics,
-                            details: responseText.substring(0, 800),
-                        });
-                    }
+                catch (parseErr) {
+                    console.error("[import-location-list] XML parse error:", parseErr);
+                    return res.status(400).json({
+                        error: "INVALID_RESPONSE_FORMAT",
+                        message: `Failed to parse XML response: ${parseErr.message || String(parseErr)}`,
+                        details: responseText.substring(0, 500),
+                    });
                 }
             }
-            catch (parseErr) {
-                console.error("[import-location-list] XML parse error:", parseErr);
-                return res.status(400).json({
-                    error: "INVALID_RESPONSE_FORMAT",
-                    message: `Failed to parse XML response: ${parseErr.message || String(parseErr)}`,
-                    details: responseText.substring(0, 500),
-                });
-            }
-        }
-        // ──── Strategy 2: PHP var_dump response ────
-        else if (responseText.includes("array(") && responseText.includes(responseRoot)) {
-            try {
-                const gloriaList = convertPhpVarDumpToGloriaLocationList(responseText, responseRoot);
-                const vehMatchedLocs = gloriaList.VehMatchedLocs || [];
-                const gloriaResponse = { OTA_VehLocSearchRS: { VehMatchedLocs: vehMatchedLocs }, gloria: { VehMatchedLocs: vehMatchedLocs } };
-                const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-                branches = extractBranchesFromGloria(gloriaResponse);
-                for (const loc of vehMatchedLocs) {
-                    const locationDetail = loc.VehMatchedLoc?.LocationDetail;
-                    if (!locationDetail)
-                        continue;
-                    extractFromLocationDetail(locationDetail);
-                }
-            }
-            catch (parseErr) {
-                console.error("[import-location-list] PHP parse error:", parseErr);
-                return res.status(400).json({
-                    error: "INVALID_RESPONSE_FORMAT",
-                    message: `Failed to parse PHP var_dump response: ${parseErr.message || String(parseErr)}`,
-                });
-            }
-        }
-        // ──── Strategy 3: JSON response ────
-        else {
-            try {
-                const data = JSON.parse(responseText);
-                const root = data[responseRoot] || data.GLORIA_locationlistrs;
-                const locs = root?.Locs || root?.CountryList || [];
-                if (Array.isArray(locs) && locs.length > 0) {
+            // ──── Strategy 2: PHP var_dump response ────
+            else if (responseText.includes("array(") && responseText.includes(responseRoot)) {
+                try {
+                    const gloriaList = convertPhpVarDumpToGloriaLocationList(responseText, responseRoot);
+                    const vehMatchedLocs = gloriaList.VehMatchedLocs || [];
+                    const gloriaResponse = { OTA_VehLocSearchRS: { VehMatchedLocs: vehMatchedLocs }, gloria: { VehMatchedLocs: vehMatchedLocs } };
                     const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-                    const vehMatchedLocs = locs.map((item) => ({
-                        VehMatchedLoc: {
-                            LocationDetail: item.location?.LocationDetail || item.LocationDetail || item,
-                        },
-                    }));
-                    branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: vehMatchedLocs }, gloria: { VehMatchedLocs: vehMatchedLocs } });
-                    for (const item of locs) {
-                        const locationDetail = item.location?.LocationDetail || item.LocationDetail || item;
+                    branches = extractBranchesFromGloria(gloriaResponse);
+                    for (const loc of vehMatchedLocs) {
+                        const locationDetail = loc.VehMatchedLoc?.LocationDetail;
+                        if (!locationDetail)
+                            continue;
                         extractFromLocationDetail(locationDetail);
                     }
                 }
+                catch (parseErr) {
+                    console.error("[import-location-list] PHP parse error:", parseErr);
+                    return res.status(400).json({
+                        error: "INVALID_RESPONSE_FORMAT",
+                        message: `Failed to parse PHP var_dump response: ${parseErr.message || String(parseErr)}`,
+                    });
+                }
             }
-            catch (jsonErr) {
-                const preview = (responseText || "").substring(0, 600);
-                const detected = preview.startsWith("<") ? "XML-like" : preview.startsWith("{") || preview.startsWith("[") ? "JSON-like" : preview.includes("array(") ? "PHP var_dump" : "unknown";
-                return res.status(400).json({
-                    error: "INVALID_RESPONSE_FORMAT",
-                    message: `Could not parse supplier response as JSON. Expected XML with <${responseRoot}>, PHP var_dump, or JSON.`,
-                    detected,
-                    parseError: jsonErr?.message || String(jsonErr),
-                    responseLength: (responseText || "").length,
-                    responseExcerpt: preview || "(empty response)",
-                });
+            // ──── Strategy 3: JSON response ────
+            else {
+                try {
+                    const data = JSON.parse(responseText);
+                    const root = data[responseRoot] || data.GLORIA_locationlistrs;
+                    const locs = root?.Locs || root?.CountryList || [];
+                    if (Array.isArray(locs) && locs.length > 0) {
+                        const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
+                        const vehMatchedLocs = locs.map((item) => ({
+                            VehMatchedLoc: {
+                                LocationDetail: item.location?.LocationDetail || item.LocationDetail || item,
+                            },
+                        }));
+                        branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: vehMatchedLocs }, gloria: { VehMatchedLocs: vehMatchedLocs } });
+                        for (const item of locs) {
+                            const locationDetail = item.location?.LocationDetail || item.LocationDetail || item;
+                            extractFromLocationDetail(locationDetail);
+                        }
+                    }
+                }
+                catch (jsonErr) {
+                    const preview = (responseText || "").substring(0, 600);
+                    const detected = preview.startsWith("<") ? "XML-like" : preview.startsWith("{") || preview.startsWith("[") ? "JSON-like" : preview.includes("array(") ? "PHP var_dump" : "unknown";
+                    return res.status(400).json({
+                        error: "INVALID_RESPONSE_FORMAT",
+                        message: `Could not parse supplier response as JSON. Expected XML with <${responseRoot}>, PHP var_dump, or JSON.`,
+                        detected,
+                        parseError: jsonErr?.message || String(jsonErr),
+                        responseLength: (responseText || "").length,
+                        responseExcerpt: preview || "(empty response)",
+                    });
+                }
             }
         }
         const sub = await prisma.sourceSubscription.findUnique({ where: { sourceId }, include: { plan: true } });
@@ -3549,7 +3600,13 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
             result.debug = {
                 responseLength: responseText.length,
                 responseExcerpt: responseText.substring(0, 300),
-                strategy: isXmlResponse ? "xml" : responseText.includes("array(") ? "php" : "json",
+                strategy: transport === "grpc"
+                    ? "grpc"
+                    : isXmlResponse
+                        ? "xml"
+                        : responseText.includes("array(")
+                            ? "php"
+                            : "json",
             };
         }
         res.json(result);
