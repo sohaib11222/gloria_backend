@@ -6,7 +6,16 @@ import { requireAuth } from '../../infra/auth.js';
 
 const router = Router();
 
-// SDK type mapping (URL slug → folder under sdks/)
+/**
+ * URL slug → folder under `sdks/` (repository root when the API runs).
+ *
+ * Portals use:
+ * - **php-agent** — broker `CarHireClient` (Agent app download).
+ * - **php-source** — supplier OTA + Laravel + optional gRPC bundle (`gloria-source-supplier`).
+ * - **php** — alias of **php-agent** (legacy).
+ *
+ * After deploy, verify: `GET /api/docs/sdk/registry` includes `php-source` and `php-agent`.
+ */
 const SDK_MAP: Record<string, string> = {
   nodejs: 'nodejs-agent',
   typescript: 'nodejs-agent', // TypeScript uses same SDK as Node.js
@@ -15,10 +24,31 @@ const SDK_MAP: Record<string, string> = {
   php: 'php-agent',
   'php-agent': 'php-agent',
   'php-source': 'gloria-source-supplier',
+  /** Same folder; allows download URL to match repo directory name */
+  'gloria-source-supplier': 'gloria-source-supplier',
+  /** Tolerate underscore in clients or old links */
+  php_source: 'gloria-source-supplier',
   java: 'java-agent',
   go: 'go-agent',
   perl: 'perl-agent',
 };
+
+/** Sorted list for error responses and `GET .../sdk/registry` */
+export const SDK_DOWNLOAD_SLUGS = Object.keys(SDK_MAP).sort();
+
+/**
+ * GET /docs/sdk/registry (also under /api/docs when mounted)
+ * Public: lets you confirm production has the same route map as git (includes php-source / php-agent).
+ */
+router.get('/sdk/registry', (_req, res) => {
+  res.json({
+    slugs: SDK_DOWNLOAD_SLUGS,
+    bundles: {
+      agentBroker: ['php', 'php-agent'],
+      sourceSupplier: ['php-source', 'gloria-source-supplier', 'php_source'],
+    },
+  });
+});
 
 /** Exclude heavy / generated dirs from downloadable zips */
 function sdkFolderZipFilter(entryPath: string): boolean {
@@ -46,7 +76,8 @@ router.get('/sdk/:sdkType/download', requireAuth(), async (req, res) => {
       return res.status(400).json({
         error: 'INVALID_SDK_TYPE',
         message: `Unknown SDK type: ${sdkType}`,
-        available: Object.keys(SDK_MAP),
+        available: SDK_DOWNLOAD_SLUGS,
+        hint: 'Deploy backend that includes php-source & php-agent in sdk.routes.ts, or GET /api/docs/sdk/registry to verify.',
       });
     }
 
@@ -114,7 +145,8 @@ router.get('/sdk/:sdkType/info', async (req, res) => {
       return res.status(400).json({
         error: 'INVALID_SDK_TYPE',
         message: `Unknown SDK type: ${sdkType}`,
-        available: Object.keys(SDK_MAP),
+        available: SDK_DOWNLOAD_SLUGS,
+        hint: 'Deploy backend that includes php-source & php-agent in sdk.routes.ts, or GET /api/docs/sdk/registry to verify.',
       });
     }
 
@@ -153,7 +185,7 @@ router.get('/sdk/:sdkType/info', async (req, res) => {
         if (versionMatch) info.version = versionMatch[1];
         if (nameMatch) info.name = nameMatch[1];
       }
-    } else if (sdkType === 'php' || sdkType === 'php-agent') {
+    } else if (sdkDir === 'php-agent') {
       const composerPath = path.join(sdkPath, 'composer.json');
       if (fs.existsSync(composerPath)) {
         const composer = JSON.parse(fs.readFileSync(composerPath, 'utf-8'));
@@ -161,7 +193,7 @@ router.get('/sdk/:sdkType/info', async (req, res) => {
         info.version = composer.version || info.version;
         info.description = composer.description || info.description;
       }
-    } else if (sdkType === 'php-source') {
+    } else if (sdkDir === 'gloria-source-supplier') {
       const composerPath = path.join(sdkPath, 'php', 'composer.json');
       if (fs.existsSync(composerPath)) {
         const composer = JSON.parse(fs.readFileSync(composerPath, 'utf-8'));
@@ -251,6 +283,8 @@ function getInstallCommand(sdkType: string): string {
     php: 'composer require carhire/php-sdk',
     'php-agent': 'composer require carhire/php-sdk',
     'php-source': 'cd php && composer install   # see bundle README for Laravel + node-wrapper',
+    php_source: 'cd php && composer install   # see bundle README for Laravel + node-wrapper',
+    'gloria-source-supplier': 'cd php && composer install   # see bundle README for Laravel + node-wrapper',
     java: 'Add dependency to pom.xml (see SDK info)',
     go: 'go get github.com/carhire/go-sdk',
     perl: 'cpanm CarHire::SDK',
