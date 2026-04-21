@@ -533,10 +533,12 @@ billingRouter.patch(
 );
 
 // --- Source: checkout session ---
-// Stripe Price IDs (plan.stripePriceId) should be created in Stripe Dashboard with currency EUR.
+// Checkout uses inline price_data (EUR + quantity) so totals match Gloria; plan.stripePriceId is optional for other flows.
 
 const checkoutSessionSchema = z.object({
   planId: z.string(),
+  /** Per-branch subscription quantity (Stripe line item qty). Charged: qty × plan price per branch. */
+  branchQuantity: z.coerce.number().int().min(1).max(100_000).optional().default(1),
   successUrl: z.string().url().optional(),
   cancelUrl: z.string().url().optional(),
 });
@@ -547,27 +549,25 @@ const STRIPE_INTERVAL: Record<string, "week" | "month" | "year"> = {
   YEARLY: "year",
 };
 
-async function ensurePlanStripePrice(plan: { id: string; name: string; interval: string; pricePerBranchCents: number; stripePriceId: string | null }): Promise<string> {
-  if (plan.stripePriceId) return plan.stripePriceId;
-  if (!stripe) throw new Error("Stripe not configured");
-  const effectivePricePerBranchCents = plan.pricePerBranchCents > 0 ? plan.pricePerBranchCents : ((plan as any).amountCents ?? 0);
-  const interval = STRIPE_INTERVAL[plan.interval] ?? "month";
-  const product = await stripe.products.create({
-    name: `Gloria Source – ${plan.name} (per branch)`,
-    metadata: { planId: plan.id },
-  });
-  const price = await stripe.prices.create({
-    product: product.id,
-    unit_amount: effectivePricePerBranchCents,
-    currency: "eur",
-    recurring: { interval },
-    metadata: { planId: plan.id },
-  });
-  await prisma.plan.update({
-    where: { id: plan.id },
-    data: { stripePriceId: price.id },
-  });
-  return price.id;
+function resolveSourceCheckoutBranchQuantity(plan: { branchLimit: number }, requested: number): number {
+  const q = Number.isFinite(requested) ? Math.floor(requested) : 1;
+  const clamped = Math.min(100_000, Math.max(1, q));
+  if (plan.branchLimit > 0 && clamped > plan.branchLimit) {
+    const err = new Error(`Branch quantity cannot exceed this plan's limit of ${plan.branchLimit}.`);
+    (err as any).code = "BRANCH_LIMIT_EXCEEDED";
+    throw err;
+  }
+  return clamped;
+}
+
+function sourcePlanUnitAmountCents(plan: { pricePerBranchCents: number; amountCents: number }): number {
+  const per = plan.pricePerBranchCents > 0 ? plan.pricePerBranchCents : plan.amountCents;
+  if (per <= 0) {
+    const err = new Error("Plan has no positive per-branch or base price in cents");
+    (err as any).code = "INVALID_PLAN_PRICE";
+    throw err;
+  }
+  return per;
 }
 
 billingRouter.post(
@@ -587,20 +587,79 @@ billingRouter.post(
       if (!plan) {
         return res.status(400).json({ error: "INVALID_PLAN", message: "Plan not found or inactive" });
       }
-      const stripePriceId = await ensurePlanStripePrice(plan);
+      let branchQty: number;
+      try {
+        branchQty = resolveSourceCheckoutBranchQuantity(plan, body.branchQuantity ?? 1);
+      } catch (e: any) {
+        if (e?.code === "BRANCH_LIMIT_EXCEEDED") {
+          return res.status(400).json({
+            error: e.code,
+            message: e.message,
+            branchLimit: plan.branchLimit,
+          });
+        }
+        throw e;
+      }
+      let unitAmountCents: number;
+      try {
+        unitAmountCents = sourcePlanUnitAmountCents(plan);
+      } catch (e: any) {
+        if (e?.code === "INVALID_PLAN_PRICE") {
+          return res.status(400).json({
+            error: e.code,
+            message: e.message,
+          });
+        }
+        throw e;
+      }
+      const recurringInterval = STRIPE_INTERVAL[plan.interval] ?? "month";
+      const totalCents = branchQty * unitAmountCents;
+      const eur = (c: number) =>
+        new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" }).format(c / 100);
       const existing = await prisma.sourceSubscription.findUnique({
         where: { sourceId: companyId },
       });
       const baseUrl = (req.headers.origin || req.headers.referer || "").replace(/\/$/, "");
       const successUrl = body.successUrl || `${baseUrl}?checkout=success`;
       const cancelUrl = body.cancelUrl || `${baseUrl}?checkout=cancel`;
+      /** Inline EUR price + quantity so Checkout matches Gloria (avoids stale USD catalog Price IDs). */
       const sessionParams: Stripe.Checkout.SessionCreateParams = {
         mode: "subscription",
-        line_items: [{ price: stripePriceId, quantity: 1 }],
+        line_items: [
+          {
+            quantity: branchQty,
+            price_data: {
+              currency: "eur",
+              unit_amount: unitAmountCents,
+              recurring: { interval: recurringInterval },
+              product_data: {
+                name: `Gloria Source — ${plan.name}`,
+                description: `${branchQty.toLocaleString("en-IE")} branches × ${eur(unitAmountCents)} per branch / ${recurringInterval}. Period total ${eur(totalCents)}.`,
+                metadata: { planId: plan.id, gloriaSourceCheckout: "1" },
+              },
+            },
+          },
+        ],
         success_url: successUrl,
         cancel_url: cancelUrl,
-        metadata: { sourceId: companyId, planId: plan.id },
-        subscription_data: { metadata: { sourceId: companyId, planId: plan.id } },
+        locale: "auto",
+        custom_text: {
+          submit: {
+            message: `You are subscribing to ${branchQty.toLocaleString("en-IE")} branches at ${eur(unitAmountCents)} each per ${recurringInterval}. Estimated charge this period: ${eur(totalCents)} (EUR).`,
+          },
+        },
+        metadata: {
+          sourceId: companyId,
+          planId: plan.id,
+          branchQuantity: String(branchQty),
+        },
+        subscription_data: {
+          metadata: {
+            sourceId: companyId,
+            planId: plan.id,
+            branchQuantity: String(branchQty),
+          },
+        },
       };
       if (existing?.stripeCustomerId) {
         sessionParams.customer = existing.stripeCustomerId;

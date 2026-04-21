@@ -106,6 +106,12 @@ model SourceSubscription {
 model Company {
   id           String        @id @default(cuid())
   companyName  String
+  /// Primary / flagship branch name at SOURCE self-registration (admin review)
+  registrationBranchName String?
+  /// Postal / street address from SOURCE registration
+  companyAddress        String? @db.Text
+  /// Public company website (https://…), from SOURCE registration
+  companyWebsiteUrl     String?
   type         CompanyType
   email        String        @unique
   passwordHash String

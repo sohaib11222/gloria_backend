@@ -1038,6 +1038,7 @@ endpointsRouter.get("/settings", requireAuth(), async (req: any, res, next) => {
         companyName: true,
         whitelistedDomains: true,
         companyCode: true,
+        companyWebsiteUrl: true,
       },
     });
 
@@ -1049,11 +1050,82 @@ endpointsRouter.get("/settings", requireAuth(), async (req: any, res, next) => {
       companyId: company.id,
       companyName: company.companyName,
       companyCode: company.companyCode,
+      companyWebsiteUrl: company.companyWebsiteUrl || "",
       whitelistedDomains: company.whitelistedDomains
         ? normalizeWhitelist(company.whitelistedDomains)
         : [],
     });
   } catch (e) {
+    next(e);
+  }
+});
+
+const patchSettingsSchema = z.object({
+  companyName: z.string().trim().min(1, "Company name is required").max(160).optional(),
+  companyWebsiteUrl: z
+    .union([z.string().url("Enter a valid URL (https://…)"), z.literal(""), z.null()])
+    .optional(),
+});
+
+/**
+ * @openapi
+ * /settings:
+ *   patch:
+ *     tags: [Settings]
+ *     summary: Update company display name and optional website
+ *     security:
+ *       - bearerAuth: []
+ */
+endpointsRouter.patch("/settings", requireAuth(), async (req: any, res, next) => {
+  try {
+    const body = patchSettingsSchema.parse(req.body);
+    if (body.companyName === undefined && body.companyWebsiteUrl === undefined) {
+      return res.status(400).json({
+        error: "NO_FIELDS",
+        message: "Provide companyName and/or companyWebsiteUrl to update",
+      });
+    }
+
+    const data: { companyName?: string; companyWebsiteUrl?: string | null } = {};
+    if (body.companyName !== undefined) {
+      data.companyName = body.companyName;
+    }
+    if (body.companyWebsiteUrl !== undefined) {
+      data.companyWebsiteUrl =
+        body.companyWebsiteUrl === "" || body.companyWebsiteUrl === null
+          ? null
+          : body.companyWebsiteUrl;
+    }
+
+    const company = await prisma.company.update({
+      where: { id: req.user.companyId },
+      data,
+      select: {
+        id: true,
+        companyName: true,
+        companyCode: true,
+        whitelistedDomains: true,
+        companyWebsiteUrl: true,
+      },
+    });
+
+    res.json({
+      companyId: company.id,
+      companyName: company.companyName,
+      companyCode: company.companyCode,
+      companyWebsiteUrl: company.companyWebsiteUrl || "",
+      whitelistedDomains: company.whitelistedDomains
+        ? normalizeWhitelist(company.whitelistedDomains)
+        : [],
+    });
+  } catch (e: any) {
+    if (e.name === "ZodError") {
+      return res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Invalid request data",
+        details: e.errors,
+      });
+    }
     next(e);
   }
 });

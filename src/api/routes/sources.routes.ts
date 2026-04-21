@@ -70,6 +70,46 @@ async function autoAssignLocode(countryCode: string | null, city: string | null)
   return null;
 }
 
+/** True when supplier payload includes an explicit UN/LOCODE (not empty). */
+function explicitNatoFromBranch(branch: Record<string, unknown>): string | null {
+  const v = (branch as any).NatoLocode ?? (branch as any).natoLocode;
+  if (v == null || String(v).trim() === "") return null;
+  return String(v).trim().toUpperCase();
+}
+
+/**
+ * If the code is missing from the UN/LOCODE reference table, create a minimal row (same pattern as location import).
+ * Lets sources save a valid-format code and refine place/country later.
+ */
+async function ensureUnlocodeRowForBranch(
+  unlocodeIn: string,
+  hints: { countryCode?: string | null; city?: string | null; country?: string | null }
+): Promise<string> {
+  const unlocode = unlocodeIn.toUpperCase().trim();
+  if (!unlocode || unlocode.length < 4 || unlocode.length > 5) {
+    const err = new Error("UN/LOCODE must be 4 to 5 characters (e.g. GBMAN or AEDXB)");
+    (err as any).code = "INVALID_UNLOCODE_FORMAT";
+    throw err;
+  }
+  const row = await prisma.uNLocode.findUnique({ where: { unlocode } });
+  if (row) return unlocode;
+  const cc = (hints.countryCode || "").toUpperCase().trim().slice(0, 2);
+  const country = cc.length === 2 ? cc : unlocode.slice(0, 2);
+  const placeRaw = hints.city?.trim() || hints.country?.trim() || unlocode.slice(2) || "Location";
+  const place = placeRaw.slice(0, 200) || "Location";
+  await prisma.uNLocode.create({
+    data: {
+      unlocode,
+      country,
+      place,
+      iataCode: null,
+      latitude: null,
+      longitude: null,
+    },
+  });
+  return unlocode;
+}
+
 /** Check branch quota (subscribed quantity); locations are unlimited and not counted.
  *  Return null if ok, or { status, body } for 402. */
 async function checkBranchQuota(
@@ -598,6 +638,106 @@ function parsePhpLocationDetail(locationText: string): any {
 
 export const sourcesRouter = Router();
 
+function formatSourceBookingCustomer(ci: unknown): { customerName: string; contact: string } {
+  if (ci == null) return { customerName: "", contact: "" };
+  let o: any = ci;
+  if (typeof o === "string") {
+    try {
+      o = JSON.parse(o);
+    } catch {
+      return { customerName: "", contact: String(ci).slice(0, 120) };
+    }
+  }
+  if (typeof o !== "object" || o === null) return { customerName: "", contact: "" };
+  const given = String(o.given_name || o.givenName || o.GivenName || "").trim();
+  const sur = String(o.surname || o.Surname || "").trim();
+  const name =
+    (given && sur ? `${given} ${sur}` : given || sur) ||
+    String(o.name || o.customerName || o.full_name || o.FullName || "").trim();
+  const contact = String(
+    o.email || o.Email || o.telephone || o.phone || o.mobile || o.PhoneNumber || ""
+  ).trim();
+  return { customerName: name, contact };
+}
+
+/**
+ * List bookings routed to this source (created by agents via Gloria). Query view:
+ * - reservations: excludes CANCELLED
+ * - cancellations: only CANCELLED
+ * - all: every status
+ */
+sourcesRouter.get("/sources/bookings", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
+  try {
+    const sourceId = req.user.companyId;
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
+    const offset = Math.max(0, Number(req.query.offset || 0));
+    const view = String(req.query.view || "all").toLowerCase();
+
+    const where: any = { sourceId };
+    if (view === "reservations") {
+      where.status = { not: "CANCELLED" };
+    } else if (view === "cancellations") {
+      where.status = "CANCELLED";
+    }
+
+    const [rows, total] = await Promise.all([
+      prisma.booking.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.booking.count({ where }),
+    ]);
+
+    const agentIds = [...new Set(rows.map((r) => r.agentId))];
+    const agents =
+      agentIds.length === 0
+        ? []
+        : await prisma.company.findMany({
+            where: { id: { in: agentIds } },
+            select: { id: true, companyName: true, email: true },
+          });
+    const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
+
+    const items = rows.map((b) => {
+      const { customerName, contact } = formatSourceBookingCustomer(b.customerInfoJson);
+      return {
+        id: b.id,
+        agentId: b.agentId,
+        agentCompanyName: agentMap[b.agentId]?.companyName || b.agentId,
+        agentEmail: agentMap[b.agentId]?.email ?? null,
+        agreementRef: b.agreementRef,
+        supplierBookingRef: b.supplierBookingRef,
+        agentBookingRef: b.agentBookingRef,
+        status: b.status,
+        pickupUnlocode: b.pickupUnlocode,
+        dropoffUnlocode: b.dropoffUnlocode,
+        pickupDateTime: b.pickupDateTime?.toISOString() ?? null,
+        dropoffDateTime: b.dropoffDateTime?.toISOString() ?? null,
+        vehicleClass: b.vehicleClass,
+        vehicleMakeModel: b.vehicleMakeModel,
+        ratePlanCode: b.ratePlanCode,
+        customerName: customerName || null,
+        contact: contact || null,
+        createdAt: b.createdAt.toISOString(),
+        updatedAt: b.updatedAt.toISOString(),
+      };
+    });
+
+    res.json({
+      items,
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
+      view: view === "reservations" || view === "cancellations" ? view : "all",
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /**
  * @openapi
  * /sources/branches:
@@ -693,7 +833,7 @@ const createSourceBranchSchema = z.object({
   status: z.string().optional(),
   locationType: z.string().optional(),
   collectionType: z.string().optional(),
-  email: z.string().email().optional().nullable(),
+  email: z.preprocess((v) => (v === "" || v === null ? undefined : v), z.string().email().optional()).optional(),
   phone: z.string().optional().nullable(),
   latitude: z.number().optional().nullable(),
   longitude: z.number().optional().nullable(),
@@ -704,6 +844,10 @@ const createSourceBranchSchema = z.object({
   countryCode: z.string().optional().nullable(),
   natoLocode: z.string().optional().nullable(),
   agreementId: z.string().optional().nullable(),
+  /** Same shape as supplier import / edit-branch merge (Opening, PickupInstructions, AtAirport, Brand, …) */
+  rawJson: z.any().optional().nullable(),
+  pickupTimes: z.any().optional().nullable(),
+  dropoffTimes: z.any().optional().nullable(),
 });
 
 sourcesRouter.post("/sources/branches", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
@@ -728,17 +872,22 @@ sourcesRouter.post("/sources/branches", requireAuth(), requireCompanyType("SOURC
       });
     }
 
-    // Validate natoLocode if provided
-    if (body.natoLocode) {
-      const locode = await prisma.uNLocode.findUnique({
-        where: { unlocode: body.natoLocode },
-      });
-      if (!locode) {
-        return res.status(400).json({
-          error: "INVALID_UNLOCODE",
-          message: `UN/LOCODE ${body.natoLocode} not found`,
+    let natoLocodeCreate: string | null = body.natoLocode ? String(body.natoLocode).trim() : "";
+    if (natoLocodeCreate) {
+      try {
+        natoLocodeCreate = await ensureUnlocodeRowForBranch(natoLocodeCreate, {
+          countryCode: body.countryCode,
+          city: body.city,
+          country: body.country,
         });
+      } catch (e: any) {
+        if (e?.code === "INVALID_UNLOCODE_FORMAT") {
+          return res.status(400).json({ error: e.code, message: e.message });
+        }
+        throw e;
       }
+    } else {
+      natoLocodeCreate = null;
     }
 
     // Validate agreementId if provided
@@ -765,7 +914,7 @@ sourcesRouter.post("/sources/branches", requireAuth(), requireCompanyType("SOURC
         status: body.status || null,
         locationType: body.locationType || null,
         collectionType: body.collectionType || null,
-        email: body.email || null,
+        email: body.email ?? null,
         phone: body.phone || null,
         latitude: body.latitude || null,
         longitude: body.longitude || null,
@@ -774,8 +923,11 @@ sourcesRouter.post("/sources/branches", requireAuth(), requireCompanyType("SOURC
         postalCode: body.postalCode || null,
         country: body.country || null,
         countryCode: body.countryCode || null,
-        natoLocode: body.natoLocode || null,
+        natoLocode: natoLocodeCreate,
         agreementId: body.agreementId || null,
+        ...(body.rawJson !== undefined ? { rawJson: body.rawJson } : {}),
+        ...(body.pickupTimes !== undefined ? { pickupTimes: body.pickupTimes } : {}),
+        ...(body.dropoffTimes !== undefined ? { dropoffTimes: body.dropoffTimes } : {}),
       },
     });
 
@@ -876,21 +1028,28 @@ sourcesRouter.patch("/sources/branches/:id", requireAuth(), requireCompanyType("
       return res.status(404).json({ error: "BRANCH_NOT_FOUND", message: "Branch not found" });
     }
 
-    // Validate natoLocode if provided
-    if (body.natoLocode) {
-      const locode = await prisma.uNLocode.findUnique({
-        where: { unlocode: body.natoLocode },
-      });
-      if (!locode) {
-        return res.status(400).json({
-          error: "INVALID_UNLOCODE",
-          message: `UN/LOCODE ${body.natoLocode} not found`,
-        });
-      }
-    }
-
     // Merge rawJson if provided (don't completely replace existing data)
     let updateData: any = { ...body };
+
+    if (body.natoLocode !== undefined) {
+      const raw = body.natoLocode == null ? "" : String(body.natoLocode).trim();
+      if (!raw) {
+        updateData.natoLocode = null;
+      } else {
+        try {
+          updateData.natoLocode = await ensureUnlocodeRowForBranch(raw, {
+            countryCode: body.countryCode ?? existing.countryCode,
+            city: body.city ?? existing.city,
+            country: body.country ?? existing.country,
+          });
+        } catch (e: any) {
+          if (e?.code === "INVALID_UNLOCODE_FORMAT") {
+            return res.status(400).json({ error: e.code, message: e.message });
+          }
+          throw e;
+        }
+      }
+    }
     if (body.rawJson && existing.rawJson && typeof existing.rawJson === "object") {
       updateData.rawJson = { ...(existing.rawJson as any), ...body.rawJson };
     }
@@ -1398,10 +1557,22 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
           countryCode = defaultCountryCode;
         }
 
-        // Auto-assign UN/LOCODE from countryCode + city if not explicitly provided
-        let natoLocode = branch.NatoLocode || null;
+        const existing = await prisma.branch.findUnique({
+          where: {
+            sourceId_branchCode: {
+              sourceId: source.id,
+              branchCode: branchCode, // Use extracted branchCode, not branch.Branchcode
+            },
+          },
+        });
+
+        // Explicit code from feed > auto-assign > keep DB value if feed left mapping empty
+        let natoLocode = explicitNatoFromBranch(branch as Record<string, unknown>);
         if (!natoLocode && countryCode && city) {
           natoLocode = await autoAssignLocode(countryCode, city);
+        }
+        if (!natoLocode && existing?.natoLocode) {
+          natoLocode = existing.natoLocode;
         }
 
         // Build branch data - store missing fields as null (user can fill later)
@@ -1424,15 +1595,6 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
           natoLocode,
           rawJson: branch,
         };
-
-        const existing = await prisma.branch.findUnique({
-          where: {
-            sourceId_branchCode: {
-              sourceId: source.id,
-              branchCode: branchCode, // Use extracted branchCode, not branch.Branchcode
-            },
-          },
-        });
 
         if (existing) {
           await prisma.branch.update({
@@ -2105,10 +2267,21 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
         countryCode = uploadDefaultCountry;
       }
 
-      // Auto-assign UN/LOCODE from countryCode + city if not explicitly provided
-      let natoLocode = branch.NatoLocode || null;
+      const existing = await prisma.branch.findUnique({
+        where: {
+          sourceId_branchCode: {
+            sourceId: source.id,
+            branchCode: branchCode, // Use the extracted branchCode, not branch.Branchcode
+          },
+        },
+      });
+
+      let natoLocode = explicitNatoFromBranch(branch as Record<string, unknown>);
       if (!natoLocode && countryCode && city) {
         natoLocode = await autoAssignLocode(countryCode, city);
+      }
+      if (!natoLocode && existing?.natoLocode) {
+        natoLocode = existing.natoLocode;
       }
 
       const branchData = {
@@ -2130,15 +2303,6 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
         natoLocode,
         rawJson: branch,
       };
-
-      const existing = await prisma.branch.findUnique({
-        where: {
-          sourceId_branchCode: {
-            sourceId: source.id,
-            branchCode: branchCode, // Use the extracted branchCode, not branch.Branchcode
-          },
-        },
-      });
 
       if (existing) {
         await prisma.branch.update({
@@ -3754,10 +3918,16 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
         const latitude = latVal != null ? (typeof latVal === "number" ? latVal : parseFloat(String(latVal))) : null;
         const longitude = lonVal != null ? (typeof lonVal === "number" ? lonVal : parseFloat(String(lonVal))) : null;
 
-        // Auto-assign UN/LOCODE from countryCode + city if not explicitly provided
-        let natoLocode = branch.NatoLocode || null;
+        const existingBranch = await prisma.branch.findUnique({
+          where: { sourceId_branchCode: { sourceId: source.id, branchCode } },
+        });
+
+        let natoLocode = explicitNatoFromBranch(branch as Record<string, unknown>);
         if (!natoLocode && countryCode && city) {
           natoLocode = await autoAssignLocode(countryCode, city);
+        }
+        if (!natoLocode && existingBranch?.natoLocode) {
+          natoLocode = existingBranch.natoLocode;
         }
 
         const branchData = {
@@ -3779,9 +3949,6 @@ sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompan
           natoLocode,
           rawJson: branch,
         };
-        const existingBranch = await prisma.branch.findUnique({
-          where: { sourceId_branchCode: { sourceId: source.id, branchCode } },
-        });
         if (existingBranch) {
           await prisma.branch.update({ where: { id: existingBranch.id }, data: branchData });
           branchesUpdated++;

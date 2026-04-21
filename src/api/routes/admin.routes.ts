@@ -910,7 +910,21 @@ adminRouter.post("/admin/companies", requireAuth(), requireRole("ADMIN"), async 
 adminRouter.put("/admin/companies/:id", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { companyName, email, type, password, adapterType, grpcEndpoint, status, billingCountryCode } = req.body;
+    const {
+      companyName,
+      email,
+      type,
+      password,
+      adapterType,
+      grpcEndpoint,
+      httpEndpoint,
+      companyCode,
+      status,
+      billingCountryCode,
+      registrationBranchName,
+      companyAddress,
+      companyWebsiteUrl,
+    } = req.body;
     
     // Check if company exists
     const existingCompany = await prisma.company.findUnique({
@@ -984,7 +998,28 @@ adminRouter.put("/admin/companies/:id", requireAuth(), requireRole("ADMIN"), asy
     if (grpcEndpoint !== undefined) updateData.grpcEndpoint = grpcEndpoint;
     if (status) updateData.status = status;
     if (billingCountryCode !== undefined) updateData.billingCountryCode = billingCountryCode ? String(billingCountryCode).toUpperCase().slice(0, 2) : null;
-    
+    if (httpEndpoint !== undefined) updateData.httpEndpoint = httpEndpoint ? String(httpEndpoint).trim() : null;
+    if (companyCode !== undefined) updateData.companyCode = companyCode ? String(companyCode).trim() : null;
+    if (registrationBranchName !== undefined) {
+      updateData.registrationBranchName = registrationBranchName ? String(registrationBranchName).trim() : null;
+    }
+    if (companyAddress !== undefined) {
+      updateData.companyAddress = companyAddress ? String(companyAddress).trim() : null;
+    }
+    if (companyWebsiteUrl !== undefined) {
+      const u = companyWebsiteUrl ? String(companyWebsiteUrl).trim() : "";
+      if (u) {
+        try {
+          new URL(u);
+          updateData.companyWebsiteUrl = u;
+        } catch {
+          return res.status(400).json({ error: "INVALID_URL", message: "companyWebsiteUrl must be a valid URL" });
+        }
+      } else {
+        updateData.companyWebsiteUrl = null;
+      }
+    }
+
     // Hash password if provided
     if (password) {
       updateData.passwordHash = await Auth.hash(password);
