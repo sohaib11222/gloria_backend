@@ -104,11 +104,15 @@ async function main() {
     }, 2000); // Wait 2 seconds for gRPC servers to start
     const app = buildApp();
     // Add catch-all error handler to prevent crashes
-    app.use((err, req, res, next) => {
-        logger.error({ err, path: req.path }, "Unhandled route error");
-        if (!res.headersSent) {
-            res.status(500).json({ error: "INTERNAL_ERROR", message: "An unexpected error occurred" });
-        }
+    app.use((err, req, res, _next) => {
+        logger.error({ err, path: req.path }, "Unhandled route error (after primary errorHandler)");
+        if (res.headersSent)
+            return;
+        res.status(500).json({
+            error: "INTERNAL_ERROR",
+            message: typeof err?.message === "string" ? err.message : "An unexpected error occurred",
+            requestId: req.requestId,
+        });
     });
     const server = app.listen(PORT, '0.0.0.0', () => {
         logger.info({

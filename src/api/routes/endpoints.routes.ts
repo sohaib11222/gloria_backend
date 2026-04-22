@@ -12,20 +12,49 @@ export const endpointsRouter = Router();
 const branchEndpointFormatEnum = z.enum(["XML", "JSON", "PHP", "CSV", "EXCEL"]);
 export type BranchEndpointFormat = z.infer<typeof branchEndpointFormatEnum>;
 
+/** JSON clients often send `null` for unset fields; Zod `.optional()` only allows `undefined`. */
+function optionalUrl() {
+  return z.preprocess(
+    (val) => (val === null || val === "" ? undefined : val),
+    z.string().url().optional()
+  );
+}
+function optionalString() {
+  return z.preprocess(
+    (val) => (val === null || val === "" ? undefined : val),
+    z.string().optional()
+  );
+}
+
 const endpointConfigSchema = z.object({
-  httpEndpoint: z.string().url().optional(),
-  grpcEndpoint: z.string().optional(),
-  adapterType: z.enum(["mock", "grpc", "http"]).optional(),
-  description: z.string().optional(),
-  branchEndpointUrl: z.string().url().optional(),
-  branchEndpointFormat: branchEndpointFormatEnum.optional(),
-  branchDefaultCountryCode: z.string().max(3).optional(),
-  locationEndpointUrl: z.string().url().optional(),
-  locationListEndpointUrl: z.string().url().optional(),
-  locationListRequestRoot: z.string().min(1).optional(),
-  locationListAccountId: z.string().optional(),
-  locationListTransport: z.enum(["http", "grpc"]).optional(),
-  availabilityEndpointUrl: z.string().url().optional(),
+  httpEndpoint: optionalUrl(),
+  grpcEndpoint: optionalString(),
+  adapterType: z.preprocess(
+    (val) => (val === null || val === "" ? undefined : val),
+    z.enum(["mock", "grpc", "http"]).optional()
+  ),
+  description: optionalString(),
+  branchEndpointUrl: optionalUrl(),
+  branchEndpointFormat: z.preprocess(
+    (val) => (val === null || val === "" ? undefined : val),
+    branchEndpointFormatEnum.optional()
+  ),
+  branchDefaultCountryCode: z.preprocess(
+    (val) => (val === null || val === "" ? undefined : val),
+    z.string().max(3).optional()
+  ),
+  locationEndpointUrl: optionalUrl(),
+  locationListEndpointUrl: optionalUrl(),
+  locationListRequestRoot: z.preprocess(
+    (val) => (val === null || val === "" ? undefined : val),
+    z.string().min(1).optional()
+  ),
+  locationListAccountId: optionalString(),
+  locationListTransport: z.preprocess(
+    (val) => (val === null || val === "" ? undefined : val),
+    z.enum(["http", "grpc"]).optional()
+  ),
+  availabilityEndpointUrl: optionalUrl(),
 });
 
 /**

@@ -706,7 +706,7 @@ model SupportMessage {
   senderId    String            // Company ID or Admin user ID
   senderType  MessageSenderType
   content     String?           @db.Text
-  imageUrl    String?           @db.Text // Base64 encoded image data URL
+  imageUrl    String?           @db.LongText // Base64 data URLs exceed MySQL TEXT (64KB); multer allows up to 5MB files
   readAt      DateTime?
   createdAt   DateTime          @default(now())
 

@@ -6,11 +6,53 @@ import { EmailVerificationService } from "../../services/emailVerification.js";
 import { PasswordResetService } from "../../services/passwordReset.js";
 import { requireAuth } from "../../infra/auth.js";
 export const authRouter = Router();
-const registerSchema = z.object({
+const registerSchema = z
+    .object({
     companyName: z.string().min(2),
     type: z.enum(["AGENT", "SOURCE"]),
     email: z.string().email(),
     password: z.string().min(6),
+    registrationBranchName: z.string().max(300).optional(),
+    companyAddress: z.string().max(2000).optional(),
+    companyWebsiteUrl: z.string().max(500).optional(),
+})
+    .superRefine((val, ctx) => {
+    if (val.type !== "SOURCE")
+        return;
+    if (!val.registrationBranchName?.trim()) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Branch name is required",
+            path: ["registrationBranchName"],
+        });
+    }
+    if (!val.companyAddress?.trim()) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Company address is required",
+            path: ["companyAddress"],
+        });
+    }
+    const url = val.companyWebsiteUrl?.trim();
+    if (!url) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Company website URL is required",
+            path: ["companyWebsiteUrl"],
+        });
+        return;
+    }
+    try {
+        // eslint-disable-next-line no-new
+        new URL(url);
+    }
+    catch {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Enter a valid URL including https://",
+            path: ["companyWebsiteUrl"],
+        });
+    }
 });
 /**
  * @openapi
@@ -75,6 +117,13 @@ authRouter.post("/auth/register", async (req, res, next) => {
                 passwordHash,
                 status: "PENDING_VERIFICATION", // Keep as pending until email verified
                 approvalStatus: "PENDING", // Explicitly set to PENDING - requires admin approval
+                ...(body.type === "SOURCE"
+                    ? {
+                        registrationBranchName: body.registrationBranchName.trim(),
+                        companyAddress: body.companyAddress.trim(),
+                        companyWebsiteUrl: body.companyWebsiteUrl.trim(),
+                    }
+                    : {}),
             },
         });
         const user = await prisma.user.create({

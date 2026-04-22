@@ -10,6 +10,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 import { notifyAgreementOffered, notifyAgreementAccepted, notifyAgreementStatus, } from "../services/notifications.js";
 import { getAdapterForSource } from "../adapters/registry.js";
+import { syncSourceCoverage } from "../services/sourceCoverageSync.service.js";
 import { auditLog } from "../services/audit.js";
 import { SourceHealthService } from "../services/health.js";
 import { hasActiveSubscription } from "../services/subscriptionCheck.js";
@@ -1407,66 +1408,11 @@ export async function startGrpcServers() {
             try {
                 const { source_id } = call.request;
                 const sid = String(source_id || "").trim();
-                if (!sid)
-                    return cb({ code: 3, message: "source_id is required" });
-                // Lookup SOURCE company (case-safe)
-                let src = await prisma.company
-                    .findFirst({ where: { id: sid }, select: { id: true, type: true } })
-                    .catch(() => null);
-                if (!src) {
-                    const anyUpper = await prisma.$queryRaw `SELECT id, type FROM Company WHERE id = ${sid} LIMIT 1`;
-                    src = Array.isArray(anyUpper) ? anyUpper[0] : null;
-                    if (!src) {
-                        const anyLower = await prisma.$queryRawUnsafe("SELECT id, type FROM company WHERE id = ? LIMIT 1", sid);
-                        src = Array.isArray(anyLower) ? anyLower[0] : null;
-                    }
-                }
-                if (!src || src.type !== "SOURCE") {
-                    return cb({ code: 3, message: "Invalid source" });
-                }
-                // Pull fresh list from adapter (USE sid consistently)
-                const adapter = await getAdapterForSource(sid);
-                const latest = await adapter.locations(); // array of UN/LOCODEs (strings)
-                // Filter to known UN/LOCODEs
-                const known = await prisma.uNLocode.findMany({
-                    where: { unlocode: { in: latest } },
-                    select: { unlocode: true },
-                });
-                const validSet = new Set(known.map((k) => k.unlocode));
-                // Count before
-                const before = await prisma.sourceLocation.count({
-                    where: { sourceId: sid },
-                });
-                // Remove obsolete
-                await prisma.sourceLocation.deleteMany({
-                    where: {
-                        sourceId: sid,
-                        NOT: { unlocode: { in: Array.from(validSet) } },
-                    },
-                });
-                const afterDelete = await prisma.sourceLocation.count({
-                    where: { sourceId: sid },
-                });
-                const removed = Math.max(0, before - afterDelete);
-                // Insert new (skip duplicates)
-                const toAdd = Array.from(validSet).map((u) => ({
-                    sourceId: sid,
-                    unlocode: u,
-                }));
-                if (toAdd.length) {
-                    await prisma.sourceLocation.createMany({
-                        data: toAdd,
-                        skipDuplicates: true,
-                    });
-                }
-                const total = await prisma.sourceLocation.count({
-                    where: { sourceId: sid },
-                });
-                const added = Math.max(0, total - afterDelete);
-                cb(null, { added, removed, total });
+                const result = await syncSourceCoverage(sid);
+                cb(null, result);
             }
             catch (e) {
-                cb({ code: 13, message: e?.message || "internal error" });
+                cb({ code: e?.code ?? 13, message: e?.message || "internal error" });
             }
         },
         ListCoverageByAgreement: async (call, cb) => {

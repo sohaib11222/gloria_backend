@@ -120,11 +120,14 @@ async function main() {
   const app = buildApp();
   
   // Add catch-all error handler to prevent crashes
-  app.use((err: any, req: any, res: any, next: any) => {
-    logger.error({ err, path: req.path }, "Unhandled route error");
-    if (!res.headersSent) {
-      res.status(500).json({ error: "INTERNAL_ERROR", message: "An unexpected error occurred" });
-    }
+  app.use((err: any, req: any, res: any, _next: any) => {
+    logger.error({ err, path: req.path }, "Unhandled route error (after primary errorHandler)");
+    if (res.headersSent) return;
+    res.status(500).json({
+      error: "INTERNAL_ERROR",
+      message: typeof err?.message === "string" ? err.message : "An unexpected error occurred",
+      requestId: req.requestId,
+    });
   });
   
   const server = app.listen(PORT, '0.0.0.0', () => {

@@ -7,6 +7,10 @@ import { metaFromReq } from "../../grpc/meta.js";
 import { prisma } from "../../data/prisma.js";
 import { LocationsService } from "../../services/locations.js";
 import { auditLog } from "../../services/audit.js";
+import {
+  syncSourceCoverage,
+  type SyncSourceCoverageResult,
+} from "../../services/sourceCoverageSync.service.js";
 
 export const locationsRouter = Router();
 // Alias to support UI requirement: /locations/by-agreement/:agreementId
@@ -271,55 +275,51 @@ locationsRouter.post("/coverage/source/:sourceId/sync", requireAuth(), requireCo
       return res.status(403).json({ error: "FORBIDDEN", message: "Can only sync your own coverage" });
     }
     
-    const client = locationClient();
-    client.SyncSourceCoverage({ source_id: sourceId }, metaFromReq(req), async (err: any, resp: any) => {
+    let resp: SyncSourceCoverageResult;
+    try {
+      resp = await syncSourceCoverage(sourceId);
+    } catch (err: any) {
       const duration = Date.now() - startTime;
-      
-      if (err) {
-        // Log sync error
-        await auditLog({
-          direction: "IN",
-          endpoint: "locations.sync",
-          requestId,
-          companyId: sourceId,
-          sourceId: sourceId,
-          grpcStatus: err.code || 13,
-          request: { sourceId },
-          response: { error: err.message },
-          durationMs: duration,
-        });
-        
-        return next(err);
-      }
-      
-      // Save sync timestamp to database
-      try {
-        await prisma.company.update({
-          where: { id: sourceId },
-          data: {
-            lastLocationSyncAt: new Date(),
-          },
-        });
-      } catch (error) {
-        console.error('Failed to save location sync timestamp to database:', error);
-        // Don't fail the request if saving fails
-      }
-      
-      // Log successful sync
       await auditLog({
         direction: "IN",
         endpoint: "locations.sync",
         requestId,
         companyId: sourceId,
         sourceId: sourceId,
-        httpStatus: 200,
+        grpcStatus: err.code || 13,
         request: { sourceId },
-        response: resp,
+        response: { error: err.message },
         durationMs: duration,
       });
-      
-      res.json(resp);
+      err.status =
+        err.code === 3 ? 400 : err.code === 5 ? 404 : err.code === 14 ? 503 : 500;
+      return next(err);
+    }
+
+    try {
+      await prisma.company.update({
+        where: { id: sourceId },
+        data: {
+          lastLocationSyncAt: new Date(),
+        },
+      });
+    } catch (error) {
+      console.error("Failed to save location sync timestamp to database:", error);
+    }
+
+    await auditLog({
+      direction: "IN",
+      endpoint: "locations.sync",
+      requestId,
+      companyId: sourceId,
+      sourceId: sourceId,
+      httpStatus: 200,
+      request: { sourceId },
+      response: resp,
+      durationMs: Date.now() - startTime,
     });
+
+    res.json(resp);
   } catch (e) { next(e); }
 });
 

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireAuth } from "../../infra/auth.js";
 import { requireCompanyType } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
+import { syncSourceCoverage } from "../../services/sourceCoverageSync.service.js";
 export const coverageRouter = Router();
 /**
  * @openapi
@@ -103,22 +104,27 @@ coverageRouter.post("/coverage/source/:sourceId/sync", requireAuth(), requireCom
     try {
         const { sourceId } = req.params;
         const userCompanyId = req.user.companyId;
-        // Verify user owns this source
         if (userCompanyId !== sourceId) {
             return res.status(403).json({
                 error: "FORBIDDEN",
                 message: "You can only sync coverage for your own source",
             });
         }
-        // This would trigger a gRPC sync - for now return a message
-        // The actual sync logic should be implemented based on your gRPC setup
-        res.json({
-            message: "Sync initiated",
-            sourceId,
-            note: "This endpoint should trigger gRPC sync - implementation pending",
-        });
+        const resp = await syncSourceCoverage(sourceId);
+        try {
+            await prisma.company.update({
+                where: { id: sourceId },
+                data: { lastLocationSyncAt: new Date() },
+            });
+        }
+        catch {
+            /* non-fatal */
+        }
+        res.json(resp);
     }
     catch (e) {
+        e.status =
+            e.code === 3 ? 400 : e.code === 5 ? 404 : e.code === 14 ? 503 : 500;
         next(e);
     }
 });

@@ -8,20 +8,27 @@ import { normalizeWhitelist } from "../../infra/whitelistEnforcement.js";
 export const endpointsRouter = Router();
 // Schema for endpoint configuration
 const branchEndpointFormatEnum = z.enum(["XML", "JSON", "PHP", "CSV", "EXCEL"]);
+/** JSON clients often send `null` for unset fields; Zod `.optional()` only allows `undefined`. */
+function optionalUrl() {
+    return z.preprocess((val) => (val === null || val === "" ? undefined : val), z.string().url().optional());
+}
+function optionalString() {
+    return z.preprocess((val) => (val === null || val === "" ? undefined : val), z.string().optional());
+}
 const endpointConfigSchema = z.object({
-    httpEndpoint: z.string().url().optional(),
-    grpcEndpoint: z.string().optional(),
-    adapterType: z.enum(["mock", "grpc", "http"]).optional(),
-    description: z.string().optional(),
-    branchEndpointUrl: z.string().url().optional(),
-    branchEndpointFormat: branchEndpointFormatEnum.optional(),
-    branchDefaultCountryCode: z.string().max(3).optional(),
-    locationEndpointUrl: z.string().url().optional(),
-    locationListEndpointUrl: z.string().url().optional(),
-    locationListRequestRoot: z.string().min(1).optional(),
-    locationListAccountId: z.string().optional(),
-    locationListTransport: z.enum(["http", "grpc"]).optional(),
-    availabilityEndpointUrl: z.string().url().optional(),
+    httpEndpoint: optionalUrl(),
+    grpcEndpoint: optionalString(),
+    adapterType: z.preprocess((val) => (val === null || val === "" ? undefined : val), z.enum(["mock", "grpc", "http"]).optional()),
+    description: optionalString(),
+    branchEndpointUrl: optionalUrl(),
+    branchEndpointFormat: z.preprocess((val) => (val === null || val === "" ? undefined : val), branchEndpointFormatEnum.optional()),
+    branchDefaultCountryCode: z.preprocess((val) => (val === null || val === "" ? undefined : val), z.string().max(3).optional()),
+    locationEndpointUrl: optionalUrl(),
+    locationListEndpointUrl: optionalUrl(),
+    locationListRequestRoot: z.preprocess((val) => (val === null || val === "" ? undefined : val), z.string().min(1).optional()),
+    locationListAccountId: optionalString(),
+    locationListTransport: z.preprocess((val) => (val === null || val === "" ? undefined : val), z.enum(["http", "grpc"]).optional()),
+    availabilityEndpointUrl: optionalUrl(),
 });
 /**
  * @openapi
@@ -963,6 +970,7 @@ endpointsRouter.get("/settings", requireAuth(), async (req, res, next) => {
                 companyName: true,
                 whitelistedDomains: true,
                 companyCode: true,
+                companyWebsiteUrl: true,
             },
         });
         if (!company) {
@@ -972,12 +980,79 @@ endpointsRouter.get("/settings", requireAuth(), async (req, res, next) => {
             companyId: company.id,
             companyName: company.companyName,
             companyCode: company.companyCode,
+            companyWebsiteUrl: company.companyWebsiteUrl || "",
             whitelistedDomains: company.whitelistedDomains
                 ? normalizeWhitelist(company.whitelistedDomains)
                 : [],
         });
     }
     catch (e) {
+        next(e);
+    }
+});
+const patchSettingsSchema = z.object({
+    companyName: z.string().trim().min(1, "Company name is required").max(160).optional(),
+    companyWebsiteUrl: z
+        .union([z.string().url("Enter a valid URL (https://…)"), z.literal(""), z.null()])
+        .optional(),
+});
+/**
+ * @openapi
+ * /settings:
+ *   patch:
+ *     tags: [Settings]
+ *     summary: Update company display name and optional website
+ *     security:
+ *       - bearerAuth: []
+ */
+endpointsRouter.patch("/settings", requireAuth(), async (req, res, next) => {
+    try {
+        const body = patchSettingsSchema.parse(req.body);
+        if (body.companyName === undefined && body.companyWebsiteUrl === undefined) {
+            return res.status(400).json({
+                error: "NO_FIELDS",
+                message: "Provide companyName and/or companyWebsiteUrl to update",
+            });
+        }
+        const data = {};
+        if (body.companyName !== undefined) {
+            data.companyName = body.companyName;
+        }
+        if (body.companyWebsiteUrl !== undefined) {
+            data.companyWebsiteUrl =
+                body.companyWebsiteUrl === "" || body.companyWebsiteUrl === null
+                    ? null
+                    : body.companyWebsiteUrl;
+        }
+        const company = await prisma.company.update({
+            where: { id: req.user.companyId },
+            data,
+            select: {
+                id: true,
+                companyName: true,
+                companyCode: true,
+                whitelistedDomains: true,
+                companyWebsiteUrl: true,
+            },
+        });
+        res.json({
+            companyId: company.id,
+            companyName: company.companyName,
+            companyCode: company.companyCode,
+            companyWebsiteUrl: company.companyWebsiteUrl || "",
+            whitelistedDomains: company.whitelistedDomains
+                ? normalizeWhitelist(company.whitelistedDomains)
+                : [],
+        });
+    }
+    catch (e) {
+        if (e.name === "ZodError") {
+            return res.status(400).json({
+                error: "VALIDATION_ERROR",
+                message: "Invalid request data",
+                details: e.errors,
+            });
+        }
         next(e);
     }
 });
