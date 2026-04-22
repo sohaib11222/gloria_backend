@@ -11,6 +11,7 @@ import {
   syncSourceCoverage,
   type SyncSourceCoverageResult,
 } from "../../services/sourceCoverageSync.service.js";
+import { buildCoverageListItems } from "../../services/coverageListEnrichment.js";
 
 export const locationsRouter = Router();
 // Alias to support UI requirement: /locations/by-agreement/:agreementId
@@ -113,24 +114,27 @@ locationsRouter.get("/coverage/source/:sourceId", requireAuth(), requireCompanyT
             place: true,
             iataCode: true,
             latitude: true,
-            longitude: true
-          }
-        }
+            longitude: true,
+          },
+        },
       },
       orderBy: { unlocode: "asc" },
-      take: limit + 1
+      take: limit + 1,
     });
 
     const hasMore = sourceLocations.length > limit;
-    const items = sourceLocations.slice(0, limit).map(sl => ({
-      unlocode: sl.unlocode,
-      country: sl.loc.country,
-      place: sl.loc.place,
-      iata_code: sl.loc.iataCode || "",
-      latitude: sl.loc.latitude || 0,
-      longitude: sl.loc.longitude || 0,
-      isMock: (sl as any).isMock || false,
-      synced_at: (sl as any).createdAt?.toISOString() || null
+    const page = sourceLocations.slice(0, limit);
+    const enriched = await buildCoverageListItems(
+      sourceId,
+      page.map((sl) => ({
+        unlocode: sl.unlocode,
+        isMock: Boolean((sl as { isMock?: boolean }).isMock),
+        loc: sl.loc,
+      }))
+    );
+    const items = enriched.map((row) => ({
+      ...row,
+      synced_at: null as string | null,
     }));
 
     const next_cursor = hasMore ? sourceLocations[limit].unlocode : "";

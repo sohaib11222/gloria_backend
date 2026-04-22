@@ -3,6 +3,7 @@ import { requireAuth } from "../../infra/auth.js";
 import { requireCompanyType } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
 import { syncSourceCoverage } from "../../services/sourceCoverageSync.service.js";
+import { buildCoverageListItems } from "../../services/coverageListEnrichment.js";
 
 export const coverageRouter = Router();
 
@@ -69,19 +70,14 @@ coverageRouter.get("/coverage/source/:sourceId", requireAuth(), async (req: any,
       orderBy: { unlocode: "asc" },
     });
 
-    // Format response
-    const items = sourceLocations.map((sl) => ({
-      unlocode: sl.unlocode,
-      isMock: sl.isMock,
-      location: sl.loc ? {
-        unlocode: sl.loc.unlocode,
-        place: sl.loc.place,
-        country: sl.loc.country,
-        iataCode: sl.loc.iataCode,
-        latitude: sl.loc.latitude,
-        longitude: sl.loc.longitude,
-      } : null,
-    }));
+    const items = await buildCoverageListItems(
+      sourceId,
+      sourceLocations.map((sl) => ({
+        unlocode: sl.unlocode,
+        isMock: sl.isMock,
+        loc: sl.loc,
+      }))
+    );
 
     res.json({
       sourceId,
