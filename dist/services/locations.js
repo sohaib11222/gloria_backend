@@ -27,26 +27,60 @@ export const LocationsService = {
             finalSet.add(u);
         for (const u of denyItems)
             finalSet.delete(u);
+        const enrich = (codes) => prisma.uNLocode.findMany({
+            where: { unlocode: { in: codes } },
+            select: {
+                unlocode: true,
+                country: true,
+                place: true,
+                iataCode: true,
+                latitude: true,
+                longitude: true,
+            },
+        });
         // If no specific source locations configured, inherit global UN/LOCODE list
         if (finalSet.size === 0) {
-            const all = await prisma.uNLocode.findMany({ select: { unlocode: true } });
+            const all = await prisma.uNLocode.findMany({
+                select: { unlocode: true, country: true, place: true, iataCode: true, latitude: true, longitude: true },
+                orderBy: { unlocode: "asc" },
+            });
             return {
-                items: all.map((r) => ({ unlocode: r.unlocode, allowed: true, isMock: false })),
+                items: all.map((r) => ({
+                    unlocode: r.unlocode,
+                    allowed: true,
+                    isMock: false,
+                    country: r.country,
+                    place: r.place,
+                    iataCode: r.iataCode,
+                    latitude: r.latitude,
+                    longitude: r.longitude,
+                    hasMasterRecord: true,
+                })),
                 inherited: true,
-                hasMockData: false
+                hasMockData: false,
             };
         }
-        const items = Array.from(finalSet)
-            .sort()
-            .map((u) => ({
-            unlocode: u,
-            allowed: true,
-            isMock: isMockSource || mockLocationsSet.has(u)
-        }));
+        const sortedCodes = Array.from(finalSet).sort();
+        const locRows = await enrich(sortedCodes);
+        const byUnlocode = new Map(locRows.map((r) => [r.unlocode, r]));
+        const items = sortedCodes.map((u) => {
+            const meta = byUnlocode.get(u);
+            return {
+                unlocode: u,
+                allowed: true,
+                isMock: isMockSource || mockLocationsSet.has(u),
+                country: meta?.country,
+                place: meta?.place,
+                iataCode: meta?.iataCode ?? null,
+                latitude: meta?.latitude ?? null,
+                longitude: meta?.longitude ?? null,
+                hasMasterRecord: !!meta,
+            };
+        });
         return {
             items,
             inherited: false,
-            hasMockData: isMockSource || items.some(i => i.isMock)
+            hasMockData: isMockSource || items.some((i) => i.isMock),
         };
     },
     async validateAgreementCoverage(agreementId, pickupUnlocode, dropoffUnlocode) {
