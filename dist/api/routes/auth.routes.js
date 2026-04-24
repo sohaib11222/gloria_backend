@@ -5,7 +5,22 @@ import { Auth } from "../../infra/auth.js";
 import { EmailVerificationService } from "../../services/emailVerification.js";
 import { PasswordResetService } from "../../services/passwordReset.js";
 import { requireAuth } from "../../infra/auth.js";
+import { normalizeReferralSlug } from "../../services/referralSlug.js";
 export const authRouter = Router();
+/** Avoids Prisma P2022 when the DB is behind `schema.prisma` (e.g. migrations pending). `company: true` selects every column. */
+const companyIncludeForAuth = {
+    select: {
+        id: true,
+        companyName: true,
+        type: true,
+        status: true,
+        approvalStatus: true,
+        emailVerified: true,
+        adapterType: true,
+        grpcEndpoint: true,
+        httpEndpoint: true,
+    },
+};
 const registerSchema = z
     .object({
     companyName: z.string().min(2),
@@ -15,6 +30,8 @@ const registerSchema = z
     registrationBranchName: z.string().max(300).optional(),
     companyAddress: z.string().max(2000).optional(),
     companyWebsiteUrl: z.string().max(500).optional(),
+    /** Optional admin referral slug (same as URL ?ref=) */
+    referralSlug: z.string().max(64).optional(),
 })
     .superRefine((val, ctx) => {
     if (val.type !== "SOURCE")
@@ -65,6 +82,46 @@ const registerSchema = z
  *       User must verify email before they can login.
  */
 // Handle OPTIONS preflight for register route - COMPLETELY OPEN
+function setRegisterCors(res) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "*");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    res.setHeader("Access-Control-Allow-Credentials", "false");
+    res.setHeader("Access-Control-Expose-Headers", "*");
+    res.setHeader("Access-Control-Max-Age", "86400");
+    res.removeHeader("Vary");
+}
+authRouter.options("/auth/referral/:slug", (req, res) => {
+    setRegisterCors(res);
+    res.status(204).end();
+});
+authRouter.get("/auth/referral/:slug", async (req, res, next) => {
+    setRegisterCors(res);
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    try {
+        const raw = typeof req.params.slug === "string" ? decodeURIComponent(req.params.slug) : "";
+        const slug = normalizeReferralSlug(raw);
+        if (!slug || slug.length < 2) {
+            return res.status(400).json({ error: "INVALID_SLUG", message: "Invalid referral code." });
+        }
+        const link = await prisma.referralLink.findFirst({
+            where: { slug, active: true },
+            select: { slug: true, label: true, restrictToType: true },
+        });
+        if (!link) {
+            return res.status(404).json({ error: "NOT_FOUND", message: "Referral link not found or inactive." });
+        }
+        return res.json({
+            ok: true,
+            slug: link.slug,
+            label: link.label,
+            restrictToType: link.restrictToType,
+        });
+    }
+    catch (e) {
+        next(e);
+    }
+});
 authRouter.options("/auth/register", (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', '*'); // Allow ALL methods
@@ -89,6 +146,39 @@ authRouter.post("/auth/register", async (req, res, next) => {
     res.removeHeader('Vary');
     try {
         const body = registerSchema.parse(req.body);
+        let referralLinkId = null;
+        const rawRef = body.referralSlug?.trim();
+        if (rawRef) {
+            const slug = normalizeReferralSlug(rawRef);
+            if (slug.length >= 2) {
+                const link = await prisma.referralLink.findFirst({
+                    where: { slug, active: true },
+                });
+                if (!link) {
+                    res.setHeader("Access-Control-Allow-Origin", "*");
+                    res.setHeader("Access-Control-Allow-Methods", "*");
+                    res.setHeader("Access-Control-Allow-Headers", "*");
+                    res.setHeader("Access-Control-Allow-Credentials", "false");
+                    res.removeHeader("Vary");
+                    return res.status(400).json({
+                        error: "INVALID_REFERRAL",
+                        message: "This referral link is not valid or is no longer active.",
+                    });
+                }
+                if (link.restrictToType && link.restrictToType !== body.type) {
+                    res.setHeader("Access-Control-Allow-Origin", "*");
+                    res.setHeader("Access-Control-Allow-Methods", "*");
+                    res.setHeader("Access-Control-Allow-Headers", "*");
+                    res.setHeader("Access-Control-Allow-Credentials", "false");
+                    res.removeHeader("Vary");
+                    return res.status(400).json({
+                        error: "INVALID_REFERRAL",
+                        message: `This referral link is only for ${link.restrictToType} registration.`,
+                    });
+                }
+                referralLinkId = link.id;
+            }
+        }
         const exists = await prisma.company.findUnique({
             where: { email: body.email },
         });
@@ -117,6 +207,7 @@ authRouter.post("/auth/register", async (req, res, next) => {
                 passwordHash,
                 status: "PENDING_VERIFICATION", // Keep as pending until email verified
                 approvalStatus: "PENDING", // Explicitly set to PENDING - requires admin approval
+                ...(referralLinkId ? { referralLinkId } : {}),
                 ...(body.type === "SOURCE"
                     ? {
                         registrationBranchName: body.registrationBranchName.trim(),
@@ -258,7 +349,7 @@ authRouter.post("/auth/verify-email", async (req, res, next) => {
         // Get user and company data after verification
         const user = await prisma.user.findUnique({
             where: { email: body.email },
-            include: { company: true },
+            include: { company: companyIncludeForAuth },
         });
         if (!user) {
             // Ensure CORS headers are set before error response
@@ -271,6 +362,17 @@ authRouter.post("/auth/verify-email", async (req, res, next) => {
             return res.status(404).json({
                 error: "USER_NOT_FOUND",
                 message: "User not found"
+            });
+        }
+        if (!user.company) {
+            res.setHeader("Access-Control-Allow-Origin", "*");
+            res.setHeader("Access-Control-Allow-Methods", "*");
+            res.setHeader("Access-Control-Allow-Headers", "*");
+            res.setHeader("Access-Control-Allow-Credentials", "false");
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            return res.status(500).json({
+                error: "INTERNAL_ERROR",
+                message: "User company not found",
             });
         }
         const access = Auth.signAccess({
@@ -514,7 +616,7 @@ authRouter.post("/auth/login", async (req, res, next) => {
             // Add timeout wrapper to prevent database queries from hanging
             const userQuery = prisma.user.findUnique({
                 where: { email: body.email },
-                include: { company: true },
+                include: { company: companyIncludeForAuth },
             });
             // Race the query against a timeout
             const timeoutPromise = new Promise((_, reject) => {
@@ -706,14 +808,24 @@ authRouter.post("/auth/login", async (req, res, next) => {
                     hint: "The database is taking too long to respond. This may be a temporary issue."
                 });
             }
-            // Generic database error - include Prisma code when present for debugging
             const code = dbError?.code;
             const isPrisma = typeof code === "string" && code.startsWith("P");
+            if (code === "P2022") {
+                const col = dbError?.meta?.column ??
+                    dbError?.meta?.field_name;
+                return sendError(503, {
+                    error: "DATABASE_SCHEMA_DRIFT",
+                    message: "The database is missing one or more columns the app expects. Run pending migrations on the server (e.g. `npx prisma migrate deploy`).",
+                    code: "P2022",
+                    ...(col ? { column: col } : {}),
+                    hint: "If migrations are blocked (P3009/P3018), resolve failed migrations first, then deploy.",
+                });
+            }
             return sendError(500, {
                 error: "DATABASE_ERROR",
                 message: "Database operation failed. Please try again later.",
                 ...(isPrisma && { code }),
-                hint: "If this problem persists, please contact support."
+                hint: "If this problem persists, please contact support.",
             });
         }
     }
@@ -792,7 +904,7 @@ authRouter.get("/auth/me", requireAuth(), async (req, res, next) => {
     try {
         const user = await prisma.user.findUnique({
             where: { id: req.user.sub },
-            include: { company: true }
+            include: { company: companyIncludeForAuth },
         });
         if (!user || !user.company) {
             return res.status(404).json({

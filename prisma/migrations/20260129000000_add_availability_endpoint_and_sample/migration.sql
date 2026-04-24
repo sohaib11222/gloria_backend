@@ -1,8 +1,14 @@
--- AlterTable
-ALTER TABLE `Company` ADD COLUMN `availabilityEndpointUrl` VARCHAR(191) NULL;
+-- Company.availabilityEndpointUrl + SourceAvailabilitySample (idempotent for drift / partial runs)
+SET @dbname = DATABASE();
 
--- CreateTable
-CREATE TABLE `SourceAvailabilitySample` (
+SELECT COUNT(*) INTO @cnt FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @dbname AND TABLE_NAME = 'Company' AND COLUMN_NAME = 'availabilityEndpointUrl';
+SET @q = IF(@cnt = 0, 'ALTER TABLE `Company` ADD COLUMN `availabilityEndpointUrl` VARCHAR(191) NULL', 'SELECT 1');
+PREPARE stmt FROM @q;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+CREATE TABLE IF NOT EXISTS `SourceAvailabilitySample` (
     `id` VARCHAR(191) NOT NULL,
     `sourceId` VARCHAR(191) NOT NULL,
     `criteriaHash` VARCHAR(191) NOT NULL,
@@ -20,5 +26,9 @@ CREATE TABLE `SourceAvailabilitySample` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- AddForeignKey
-ALTER TABLE `SourceAvailabilitySample` ADD CONSTRAINT `SourceAvailabilitySample_sourceId_fkey` FOREIGN KEY (`sourceId`) REFERENCES `Company`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+SELECT COUNT(*) INTO @fk FROM information_schema.TABLE_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA = @dbname AND TABLE_NAME = 'SourceAvailabilitySample' AND CONSTRAINT_NAME = 'SourceAvailabilitySample_sourceId_fkey' AND CONSTRAINT_TYPE = 'FOREIGN KEY';
+SET @q = IF(@fk = 0, 'ALTER TABLE `SourceAvailabilitySample` ADD CONSTRAINT `SourceAvailabilitySample_sourceId_fkey` FOREIGN KEY (`sourceId`) REFERENCES `Company`(`id`) ON DELETE CASCADE ON UPDATE CASCADE', 'SELECT 1');
+PREPARE stmt FROM @q;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

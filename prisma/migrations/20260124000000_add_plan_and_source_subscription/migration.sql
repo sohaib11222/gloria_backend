@@ -1,5 +1,5 @@
--- CreateTable
-CREATE TABLE `Plan` (
+-- Plan + SourceSubscription (idempotent: safe when tables already exist from drift / manual DDL)
+CREATE TABLE IF NOT EXISTS `Plan` (
     `id` VARCHAR(191) NOT NULL,
     `name` VARCHAR(191) NOT NULL,
     `interval` ENUM('WEEKLY', 'MONTHLY', 'YEARLY') NOT NULL,
@@ -14,8 +14,7 @@ CREATE TABLE `Plan` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateTable
-CREATE TABLE `SourceSubscription` (
+CREATE TABLE IF NOT EXISTS `SourceSubscription` (
     `id` VARCHAR(191) NOT NULL,
     `sourceId` VARCHAR(191) NOT NULL,
     `planId` VARCHAR(191) NOT NULL,
@@ -34,8 +33,18 @@ CREATE TABLE `SourceSubscription` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- AddForeignKey
-ALTER TABLE `SourceSubscription` ADD CONSTRAINT `SourceSubscription_sourceId_fkey` FOREIGN KEY (`sourceId`) REFERENCES `Company`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+SET @dbname = DATABASE();
 
--- AddForeignKey
-ALTER TABLE `SourceSubscription` ADD CONSTRAINT `SourceSubscription_planId_fkey` FOREIGN KEY (`planId`) REFERENCES `Plan`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
+SELECT COUNT(*) INTO @fk FROM information_schema.TABLE_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA = @dbname AND TABLE_NAME = 'SourceSubscription' AND CONSTRAINT_NAME = 'SourceSubscription_sourceId_fkey' AND CONSTRAINT_TYPE = 'FOREIGN KEY';
+SET @q = IF(@fk = 0, 'ALTER TABLE `SourceSubscription` ADD CONSTRAINT `SourceSubscription_sourceId_fkey` FOREIGN KEY (`sourceId`) REFERENCES `Company`(`id`) ON DELETE CASCADE ON UPDATE CASCADE', 'SELECT 1');
+PREPARE stmt FROM @q;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @fk FROM information_schema.TABLE_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA = @dbname AND TABLE_NAME = 'SourceSubscription' AND CONSTRAINT_NAME = 'SourceSubscription_planId_fkey' AND CONSTRAINT_TYPE = 'FOREIGN KEY';
+SET @q = IF(@fk = 0, 'ALTER TABLE `SourceSubscription` ADD CONSTRAINT `SourceSubscription_planId_fkey` FOREIGN KEY (`planId`) REFERENCES `Plan`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE', 'SELECT 1');
+PREPARE stmt FROM @q;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
