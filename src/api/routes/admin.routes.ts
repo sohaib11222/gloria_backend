@@ -14,8 +14,21 @@ import { enforceWhitelist } from "../../infra/whitelistEnforcement.js";
 import { validateLocationArray } from "../../services/locationValidation.js";
 import { auditLog } from "../../services/audit.js";
 import { invalidateMailerCache } from "../../infra/mailer.js";
+import { normalizeReferralSlug } from "../../services/referralSlug.js";
 
 export const adminRouter = Router();
+
+const createReferralLinkSchema = z.object({
+  slug: z.string().min(2).max(48),
+  label: z.string().max(255).optional().nullable(),
+  restrictToType: z.enum(["AGENT", "SOURCE"]).optional().nullable(),
+});
+
+const patchReferralLinkSchema = z.object({
+  label: z.string().max(255).optional().nullable(),
+  active: z.boolean().optional(),
+  restrictToType: z.enum(["AGENT", "SOURCE"]).nullable().optional(),
+});
 
 /**
  * @openapi
@@ -378,6 +391,85 @@ adminRouter.get("/admin/overview", requireAuth(), requireRole("ADMIN"), async (_
     ]);
     res.json({ agents, sources, agreements, activeKeys, last24hRequests });
   } catch (e) { next(e); }
+});
+
+adminRouter.get("/admin/referral-links", requireAuth(), requireRole("ADMIN"), async (_req, res, next) => {
+  try {
+    const links = await prisma.referralLink.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+    const grouped = await prisma.company.groupBy({
+      by: ["referralLinkId", "type"],
+      where: { referralLinkId: { not: null } },
+      _count: { _all: true },
+    });
+    const stats = new Map<string, { total: number; AGENT: number; SOURCE: number }>();
+    for (const row of grouped) {
+      const id = row.referralLinkId as string;
+      if (!stats.has(id)) stats.set(id, { total: 0, AGENT: 0, SOURCE: 0 });
+      const s = stats.get(id)!;
+      const c = row._count._all;
+      s.total += c;
+      if (row.type === "AGENT") s.AGENT += c;
+      if (row.type === "SOURCE") s.SOURCE += c;
+    }
+    res.json({
+      items: links.map((l) => ({
+        ...l,
+        signupCount: stats.get(l.id)?.total ?? 0,
+        signupsByType: {
+          AGENT: stats.get(l.id)?.AGENT ?? 0,
+          SOURCE: stats.get(l.id)?.SOURCE ?? 0,
+        },
+      })),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+adminRouter.post("/admin/referral-links", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const body = createReferralLinkSchema.parse(req.body);
+    const slug = normalizeReferralSlug(body.slug);
+    if (slug.length < 2) {
+      return res.status(400).json({ error: "VALIDATION_ERROR", message: "Slug is too short after normalization." });
+    }
+    const created = await prisma.referralLink.create({
+      data: {
+        slug,
+        label: body.label?.trim() || null,
+        restrictToType: body.restrictToType ?? null,
+      },
+    });
+    res.status(201).json(created);
+  } catch (e: any) {
+    if (e?.code === "P2002") {
+      return res.status(409).json({ error: "CONFLICT", message: "A referral link with this slug already exists." });
+    }
+    next(e);
+  }
+});
+
+adminRouter.patch("/admin/referral-links/:id", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const body = patchReferralLinkSchema.parse(req.body);
+    const updated = await prisma.referralLink.update({
+      where: { id },
+      data: {
+        ...(body.label !== undefined ? { label: body.label?.trim() || null } : {}),
+        ...(body.active !== undefined ? { active: body.active } : {}),
+        ...(body.restrictToType !== undefined ? { restrictToType: body.restrictToType } : {}),
+      },
+    });
+    res.json(updated);
+  } catch (e: any) {
+    if (e?.code === "P2025") {
+      return res.status(404).json({ error: "NOT_FOUND", message: "Referral link not found." });
+    }
+    next(e);
+  }
 });
 
 /**

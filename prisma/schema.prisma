@@ -103,6 +103,22 @@ model SourceSubscription {
   @@index([status])
 }
 
+/// Admin-created referral slug; companies created via /auth/register may reference one.
+model ReferralLink {
+  id             String        @id @default(cuid())
+  slug           String        @unique
+  label          String?       @db.VarChar(255)
+  /// When set, only that company type may register with this link; when null, both AGENT and SOURCE are allowed.
+  restrictToType CompanyType?
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  companies      Company[]
+
+  @@index([slug])
+  @@index([active])
+}
+
 model Company {
   id           String        @id @default(cuid())
   companyName  String
@@ -163,6 +179,9 @@ model Company {
   // Billing country for agents (ISO 3166-1 alpha-2) - used for country-based plan pricing
   billingCountryCode String?
 
+  referralLinkId String?
+  referralLink   ReferralLink? @relation(fields: [referralLinkId], references: [id], onDelete: SetNull)
+
   users            User[]
   agentAgreements  Agreement[]       @relation("AgentAgreements")
   sourceAgreements Agreement[]       @relation("SourceAgreements")
@@ -176,6 +195,8 @@ model Company {
   sourceDailyRates SourceDailyRate[]
   sourceGroups AgentSourceGroup[] @relation("AgentSourceGroups")
   agentSubscription AgentSubscription?
+
+  @@index([referralLinkId])
 }
 
 model AgentPlan {

@@ -5,6 +5,7 @@ import { Auth } from "../../infra/auth.js";
 import { EmailVerificationService } from "../../services/emailVerification.js";
 import { PasswordResetService } from "../../services/passwordReset.js";
 import { requireAuth } from "../../infra/auth.js";
+import { normalizeReferralSlug } from "../../services/referralSlug.js";
 
 export const authRouter = Router();
 
@@ -17,6 +18,8 @@ const registerSchema = z
     registrationBranchName: z.string().max(300).optional(),
     companyAddress: z.string().max(2000).optional(),
     companyWebsiteUrl: z.string().max(500).optional(),
+    /** Optional admin referral slug (same as URL ?ref=) */
+    referralSlug: z.string().max(64).optional(),
   })
   .superRefine((val, ctx) => {
     if (val.type !== "SOURCE") return;
@@ -66,6 +69,48 @@ const registerSchema = z
  *       User must verify email before they can login.
  */
 // Handle OPTIONS preflight for register route - COMPLETELY OPEN
+function setRegisterCors(res: import("express").Response) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "*");
+  res.setHeader("Access-Control-Allow-Headers", "*");
+  res.setHeader("Access-Control-Allow-Credentials", "false");
+  res.setHeader("Access-Control-Expose-Headers", "*");
+  res.setHeader("Access-Control-Max-Age", "86400");
+  res.removeHeader("Vary");
+}
+
+authRouter.options("/auth/referral/:slug", (req, res) => {
+  setRegisterCors(res);
+  res.status(204).end();
+});
+
+authRouter.get("/auth/referral/:slug", async (req, res, next) => {
+  setRegisterCors(res);
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  try {
+    const raw = typeof req.params.slug === "string" ? decodeURIComponent(req.params.slug) : "";
+    const slug = normalizeReferralSlug(raw);
+    if (!slug || slug.length < 2) {
+      return res.status(400).json({ error: "INVALID_SLUG", message: "Invalid referral code." });
+    }
+    const link = await prisma.referralLink.findFirst({
+      where: { slug, active: true },
+      select: { slug: true, label: true, restrictToType: true },
+    });
+    if (!link) {
+      return res.status(404).json({ error: "NOT_FOUND", message: "Referral link not found or inactive." });
+    }
+    return res.json({
+      ok: true,
+      slug: link.slug,
+      label: link.label,
+      restrictToType: link.restrictToType,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 authRouter.options("/auth/register", (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', '*'); // Allow ALL methods
@@ -92,6 +137,41 @@ authRouter.post("/auth/register", async (req, res, next) => {
   
   try {
     const body = registerSchema.parse(req.body);
+
+    let referralLinkId: string | null = null;
+    const rawRef = body.referralSlug?.trim();
+    if (rawRef) {
+      const slug = normalizeReferralSlug(rawRef);
+      if (slug.length >= 2) {
+        const link = await prisma.referralLink.findFirst({
+          where: { slug, active: true },
+        });
+        if (!link) {
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Access-Control-Allow-Methods", "*");
+          res.setHeader("Access-Control-Allow-Headers", "*");
+          res.setHeader("Access-Control-Allow-Credentials", "false");
+          res.removeHeader("Vary");
+          return res.status(400).json({
+            error: "INVALID_REFERRAL",
+            message: "This referral link is not valid or is no longer active.",
+          });
+        }
+        if (link.restrictToType && link.restrictToType !== body.type) {
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Access-Control-Allow-Methods", "*");
+          res.setHeader("Access-Control-Allow-Headers", "*");
+          res.setHeader("Access-Control-Allow-Credentials", "false");
+          res.removeHeader("Vary");
+          return res.status(400).json({
+            error: "INVALID_REFERRAL",
+            message: `This referral link is only for ${link.restrictToType} registration.`,
+          });
+        }
+        referralLinkId = link.id;
+      }
+    }
+
     const exists = await prisma.company.findUnique({
       where: { email: body.email },
     });
@@ -122,6 +202,7 @@ authRouter.post("/auth/register", async (req, res, next) => {
         passwordHash,
         status: "PENDING_VERIFICATION", // Keep as pending until email verified
         approvalStatus: "PENDING", // Explicitly set to PENDING - requires admin approval
+        ...(referralLinkId ? { referralLinkId } : {}),
         ...(body.type === "SOURCE"
           ? {
               registrationBranchName: body.registrationBranchName!.trim(),
