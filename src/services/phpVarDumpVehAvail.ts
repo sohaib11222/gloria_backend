@@ -157,3 +157,27 @@ export function convertPhpVarDumpToVehAvailRS(phpText: string): any {
     },
   };
 }
+
+/**
+ * Parse PHP var_dump text into a generic JS object.
+ * Useful for non-OTA trees (e.g. GLORIA_availabilityrs with VehAvairsdetails/availcars).
+ */
+export function convertPhpVarDumpToObject(phpText: string): any {
+  if (!phpText || typeof phpText !== "string") {
+    throw new Error("Invalid input: expected string");
+  }
+  const trimmed = phpText.trim();
+  const firstArray = trimmed.indexOf("array(");
+  if (firstArray === -1) throw new Error("Could not find root array");
+  const openBrace = trimmed.indexOf("{", firstArray);
+  if (openBrace === -1) throw new Error("Could not find root opening brace");
+  const closeBrace = findMatchingBrace(trimmed, openBrace);
+  if (closeBrace === -1) throw new Error("Could not find root closing brace");
+
+  const content = trimmed.slice(openBrace + 1, closeBrace);
+  const root = parsePhpArrayContent(content);
+  if (!root || typeof root !== "object") {
+    throw new Error("Failed to parse root array");
+  }
+  return root;
+}
