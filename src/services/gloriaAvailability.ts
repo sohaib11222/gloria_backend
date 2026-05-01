@@ -26,7 +26,9 @@ function extractAvailCarsFromDetails(details: any): any[] {
     details.availcars ??
     details.AvailCars ??
     details.AVAILCARS ??
-    (details as any).availcar;
+    details.Availcar ??
+    details.availcar ??
+    (details as any).AvailCar;
   if (raw == null) return [];
   let list = asArray(raw);
   // One XML element <availcars> wrapping many <car> (or similar) children
@@ -49,6 +51,86 @@ function attrs(node: any): Record<string, any> {
   if (!node || typeof node !== "object") return {};
   const a = node["@attributes"];
   return a && typeof a === "object" ? a : {};
+}
+
+/** First XML child whose tag matches one of the names (case-insensitive). */
+function pickChildCI(obj: any, ...names: string[]): any {
+  if (!obj || typeof obj !== "object") return undefined;
+  const want = new Set(names.map((n) => n.toLowerCase()));
+  for (const k of Object.keys(obj)) {
+    if (want.has(k.toLowerCase())) return (obj as any)[k];
+  }
+  return undefined;
+}
+
+/** Unwrap [node] or pick first non-empty object element from an array. */
+function unwrapOne(node: any): any {
+  if (node == null) return undefined;
+  if (Array.isArray(node)) {
+    for (const el of node) {
+      if (el != null && typeof el === "object" && Object.keys(el).length > 0) return el;
+    }
+    return node[0];
+  }
+  return node;
+}
+
+/**
+ * All attribute-like fields for an XML/JSON element: grouped @attributes plus
+ * scalar fields merged on the node (some APIs / parsers omit @attributes).
+ */
+function readElementAttrs(node: any): Record<string, string> {
+  const out: Record<string, string> = {};
+  const add = (rec: Record<string, any>) => {
+    for (const [k, v] of Object.entries(rec)) {
+      if (v == null || v === "") continue;
+      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+        out[String(k)] = typeof v === "string" ? v : String(v);
+      }
+    }
+  };
+  const n = unwrapOne(node);
+  if (!n || typeof n !== "object") return out;
+  add(attrs(n) as any);
+  for (const [k, v] of Object.entries(n)) {
+    if (k === "@attributes" || k === "#text" || k.startsWith(":")) continue;
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+      if (out[k] == null || out[k] === "") out[k] = String(v);
+    }
+  }
+  return out;
+}
+
+function bagGet(bag: Record<string, string>, ...keys: string[]): string | undefined {
+  const lower: Record<string, string> = {};
+  for (const [k, v] of Object.entries(bag)) lower[k.toLowerCase()] = v;
+  for (const key of keys) {
+    const v = lower[key.toLowerCase()];
+    if (v != null && v !== "") return v;
+  }
+  return undefined;
+}
+
+const SKIP_CHILD_KEYS = new Set([
+  "pricing",
+  "includedinprice",
+  "notincludedinprice",
+  "optionalextras",
+  "@attributes",
+  "#text",
+]);
+
+/** If vehdetails path is empty, pick the first child object that looks like vehicle specs. */
+function fallbackAttrBagFromCar(car: any): Record<string, string> {
+  if (!car || typeof car !== "object") return {};
+  for (const [k, v] of Object.entries(car)) {
+    if (SKIP_CHILD_KEYS.has(k.toLowerCase())) continue;
+    const u = unwrapOne(v);
+    if (!u || typeof u !== "object") continue;
+    const bag = readElementAttrs(u);
+    if (bagGet(bag, "Make", "Model", "ACRISS")) return bag;
+  }
+  return {};
 }
 
 function toNum(v: any): number {
@@ -89,81 +171,93 @@ export function parseGloriaAvailabilityOffers(
   for (let i = 0; i < cars.length; i++) {
     const car = cars[i];
     if (car == null || typeof car !== "object") continue;
-    const carAttrs = attrs(car);
-    const veh = attrs(car?.vehdetails || car?.Vehdetails || car?.VehDetails);
-    const pricing = attrs(car?.pricing || car?.Pricing);
-    const acriss = String(carAttrs.ACRISS || carAttrs.Code || veh.ACRISS || "").trim();
-    const make = String(veh.Make || "").trim();
-    const model = String(veh.Model || "").trim();
+    const vehNode = unwrapOne(
+      pickChildCI(car, "vehdetails", "Vehdetails", "VehDetails", "vehicle", "Vehicle")
+    );
+    const pricingNode = unwrapOne(pickChildCI(car, "pricing", "Pricing"));
+    const carBag = readElementAttrs(car);
+    let veh = readElementAttrs(vehNode);
+    if (!Object.keys(veh).length) veh = fallbackAttrBagFromCar(car);
+    const pricing = readElementAttrs(pricingNode);
+    const acriss = String(
+      bagGet(carBag, "ACRISS", "Code", "VehicleClass") ||
+        bagGet(veh, "ACRISS", "Code") ||
+        ""
+    ).trim();
+    const make = String(bagGet(veh, "Make", "make") || "").trim();
+    const model = String(bagGet(veh, "Model", "model") || "").trim();
     const name = `${make} ${model}`.trim();
 
-    const includedRaw = asArray(car?.includedinprice?.Item || car?.includedinprice?.item).map((x: any) => {
-      const a = attrs(x);
-      const desc = String(a.ItemDescription || a.Description || "").trim();
-      const code = String(a.Code || "").trim();
+    const incBlock = unwrapOne(pickChildCI(car, "includedinprice", "includedInPrice", "IncludedInPrice"));
+    const incItemRaw = incBlock?.Item ?? incBlock?.item ?? incBlock;
+    const includedRaw = asArray(incItemRaw).map((x: any) => {
+      const a = readElementAttrs(unwrapOne(x));
+      const desc = String(bagGet(a, "ItemDescription", "Description", "Header") || "").trim();
+      const code = String(bagGet(a, "Code", "code") || "").trim();
       return {
         code,
         header: desc || code || "",
         details: desc || undefined,
-        price: a.Price != null ? String(a.Price) : undefined,
-        excess: a.Excess != null ? String(a.Excess) : undefined,
-        deposit: a.Deposit != null ? String(a.Deposit) : undefined,
-        currency: a.Currency != null ? String(a.Currency).trim() : undefined,
+        price: bagGet(a, "Price", "price"),
+        excess: bagGet(a, "Excess", "excess"),
+        deposit: bagGet(a, "Deposit", "deposit"),
+        currency: bagGet(a, "Currency", "currency"),
         mandatory: "Yes",
       };
     });
-    const notIncludedRaw = asArray(car?.notincludedinprice?.Item || car?.notincludedinprice?.item).map((x: any) => {
-      const a = attrs(x);
-      const desc = String(a.ItemDescription || a.Description || "").trim();
-      const code = String(a.Code || "").trim();
-      const cover = a.CoverAmount ?? a.cover_amount;
+    const niBlock = unwrapOne(pickChildCI(car, "notincludedinprice", "notIncludedInPrice", "NotIncludedInPrice"));
+    const niItemRaw = niBlock?.Item ?? niBlock?.item ?? niBlock;
+    const notIncludedRaw = asArray(niItemRaw).map((x: any) => {
+      const a = readElementAttrs(unwrapOne(x));
+      const desc = String(bagGet(a, "ItemDescription", "Description", "Header") || "").trim();
+      const code = String(bagGet(a, "Code", "code") || "").trim();
+      const cover = bagGet(a, "CoverAmount", "cover_amount", "Coveramount");
       return {
         code,
         header: desc || code || "",
         details: desc || undefined,
-        price: a.Price != null ? String(a.Price) : undefined,
-        excess: a.Excess != null ? String(a.Excess) : undefined,
-        deposit: a.Deposit != null ? String(a.Deposit) : undefined,
-        cover_amount: cover != null ? String(cover) : undefined,
-        currency: a.Currency != null ? String(a.Currency).trim() : undefined,
+        price: bagGet(a, "Price", "price"),
+        excess: bagGet(a, "Excess", "excess"),
+        deposit: bagGet(a, "Deposit", "deposit"),
+        cover_amount: cover,
+        currency: bagGet(a, "Currency", "currency"),
         mandatory: "No",
       };
     });
     const included = includedRaw.filter((x) => x.header || x.code);
     const notIncluded = notIncludedRaw.filter((x) => x.header || x.code);
 
-    const extraItems = asArray(
-      car?.OptionalExtras?.Item ||
-        car?.OptionalExtras?.item ||
-        car?.optionalextras?.Item ||
-        car?.optionalextras?.item
-    );
+    const ox = pickChildCI(car, "OptionalExtras", "optionalextras", "optionalExtras");
+    const extraItems = asArray(ox?.Item ?? ox?.item ?? ox);
     const pricedEquips = extraItems
       .map((x: any) => {
-        const a = attrs(x);
+        const a = readElementAttrs(unwrapOne(x));
         const description = String(
-          a.ItemDescription || a.Description || a.Name || a.EquipType || a.Code || ""
+          bagGet(a, "ItemDescription", "Description", "Name", "EquipType", "Code") || ""
         ).trim();
-        const amount = a.Price ?? a.Amount ?? a.TotalGross ?? a.DailyGross ?? "0.00";
+        const amount =
+          bagGet(a, "Price", "Amount", "TotalGross", "DailyGross") ?? "0.00";
         if (!description) return null;
         return {
           description,
-          equip_type: a.Code || a.EquipType || undefined,
-          vendor_equip_id: a.Code || undefined,
-          currency: a.Currency ? String(a.Currency).trim() : undefined,
-          long_description: a.LongDescription ? String(a.LongDescription) : undefined,
+          equip_type: bagGet(a, "Code", "EquipType") || undefined,
+          vendor_equip_id: bagGet(a, "Code", "EquipType") || undefined,
+          currency: bagGet(a, "Currency", "currency") || undefined,
+          long_description: bagGet(a, "LongDescription", "Description") || undefined,
           charge: { Amount: amount },
         };
       })
       .filter(Boolean) as any[];
 
     const gloria_pricing_attributes = stringifyAttrRecord(pricing);
-    const gloria_vehdetails_attributes = stringifyAttrRecord(veh);
+    const gloria_vehdetails_attributes = stringifyAttrRecord({ ...carBag, ...veh });
 
-    const totalGross = pricing.TotalGross ?? pricing.Total ?? pricing.DailyGross ?? "0";
-    const currency = String(pricing.Currency || "EUR").trim();
+    const totalGross =
+      bagGet(pricing, "TotalGross", "Total", "DailyGross", "RateTotalAmount") ?? "0";
+    const currency = String(bagGet(pricing, "Currency", "currency") || "EUR").trim();
     const offerRef = String(
-      pricing.CarOrderID || pricing.SupplierOfferRef || pricing.OfferRef || `${acriss || "CAR"}-${i + 1}`
+      bagGet(pricing, "CarOrderID", "SupplierOfferRef", "OfferRef", "VehID") ||
+        `${acriss || "CAR"}-${i + 1}`
     ).trim();
 
     offers.push({
@@ -177,14 +271,15 @@ export function parseGloriaAvailabilityOffers(
       supplier_offer_ref: offerRef || `${sourceId}-${i + 1}`,
       availability_status: "Available",
       veh_id: offerRef || undefined,
-      picture_url: veh.ImageURL || undefined,
-      door_count: veh.Doors ? String(veh.Doors) : undefined,
-      baggage:
-        veh.BagsSmall || veh.BagsMedium
-          ? [veh.BagsSmall, veh.BagsMedium].filter(Boolean).join(" / ")
-          : undefined,
+      picture_url: bagGet(veh, "ImageURL", "imageurl", "PictureURL") || undefined,
+      door_count: bagGet(veh, "Doors", "door_count") || undefined,
+      baggage: (() => {
+        const bs = bagGet(veh, "BagsSmall", "bagssmall");
+        const bm = bagGet(veh, "BagsMedium", "bagsmedium");
+        return bs || bm ? [bs, bm].filter(Boolean).join(" / ") : undefined;
+      })(),
       vehicle_category: acriss || undefined,
-      transmission_type: veh.Transmission || undefined,
+      transmission_type: bagGet(veh, "Transmission", "transmission") || undefined,
       veh_terms_included: included.length ? included : undefined,
       veh_terms_not_included: notIncluded.length ? notIncluded : undefined,
       priced_equips: pricedEquips.length ? pricedEquips : undefined,

@@ -5062,6 +5062,7 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                 attributeNamePrefix: "",
                 parseAttributeValue: false,
                 trimValues: true,
+                removeNSPrefix: true,
                 // Force arrays for repeated GLORIA children so we never collapse 16 cars into one node
                 isArray: (tagName: string) => {
                   const t = tagName.toLowerCase();
