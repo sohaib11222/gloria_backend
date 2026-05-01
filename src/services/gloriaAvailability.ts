@@ -75,6 +75,19 @@ function unwrapOne(node: any): any {
   return node;
 }
 
+/** PHP-decoded rows sometimes appear as { "0": { real availcar } } (single numeric wrapper). Strip repeatedly. */
+function unwrapPhpNumericSingleKeyShell(node: any, maxHops = 10): any {
+  let cur = node;
+  for (let h = 0; h < maxHops && cur && typeof cur === "object"; h++) {
+    const keys = Object.keys(cur).filter((k) => k !== "#text" && k !== "#comment" && !k.startsWith(":"));
+    if (keys.length !== 1 || !/^\d+$/.test(keys[0])) break;
+    const inner = unwrapOne((cur as any)[keys[0]]);
+    if (!inner || inner === cur) break;
+    cur = inner;
+  }
+  return cur;
+}
+
 /**
  * All attribute-like fields for an XML/JSON element: grouped @attributes plus
  * scalar fields merged on the node (some APIs / parsers omit @attributes).
@@ -211,7 +224,7 @@ export function parseGloriaAvailabilityOffers(
   const offers: Offer[] = [];
 
   for (let i = 0; i < cars.length; i++) {
-    const car = cars[i];
+    const car = unwrapPhpNumericSingleKeyShell(cars[i]);
     if (car == null || typeof car !== "object") continue;
     const vehNode = peelSameNameWrapper(
       pickChildCI(car, "vehdetails", "Vehdetails", "VehDetails", "vehicle", "Vehicle"),

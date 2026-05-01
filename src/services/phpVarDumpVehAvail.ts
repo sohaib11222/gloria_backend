@@ -5,8 +5,8 @@
  * is inside VehAvailRSCore for isOtaVehAvailResponse().
  */
 
-const KEY_VALUE_RE = /\["([^"]+)"\]\s*=>|\[(\d+)\]\s*=>/g;
-const STRING_VALUE_RE = /\s*string\s*\(\s*(\d+)\s*\)\s*"\s*/;
+// Do not consume the opening " — parsePhpString expects quoteStart to point at that quote.
+const STRING_VALUE_RE = /\s*string\s*\(\s*(\d+)\s*\)\s*(?=")/;
 const ARRAY_VALUE_RE = /\s*array\s*\(\s*\d+\s*\)\s*\{\s*/;
 
 function findMatchingBrace(str: string, openPos: number): number {
@@ -68,47 +68,91 @@ function parsePhpArray(str: string, start: number): { value: any; endIndex: numb
 /**
  * Parse content inside { ... } of a PHP array.
  * Entries are ["key"]=> value or [index]=> value. Value is string(n) "..." or array(n) { ... }.
+ *
+ * Must scan sequentially: a global regex over the whole body also matches nested ["@attributes"]=>
+ * inside child arrays, which flattened GLORIA availcars and produced empty @attributes / CAR-n rows.
  */
 function parsePhpArrayContent(content: string): any {
-  const contentTrimmed = content.trim();
-  if (!contentTrimmed) return {};
+  const body = content.trim();
+  if (!body) return {};
 
-  const entries: { key: string | number; start: number }[] = [];
-  KEY_VALUE_RE.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = KEY_VALUE_RE.exec(content)) !== null) {
-    const key = m[1] !== undefined ? m[1] : parseInt(m[2], 10);
-    const valueStart = m.index + m[0].length;
-    entries.push({ key, start: valueStart });
-  }
+  const skipWs = (j: number) => {
+    let k = j;
+    while (k < body.length && /\s/.test(body[k])) k++;
+    return k;
+  };
 
-  const result: any = {};
-  for (let i = 0; i < entries.length; i++) {
-    const { key, start } = entries[i];
-    const rest = content.slice(start);
+  const KEY_HEAD = /^\[\s*(?:"([^"]+)"|(\d+)|([@A-Za-z_][\w]*))\s*\]\s*=>/;
 
-    let value: any = undefined;
+  const result: Record<string | number, any> = {};
+  let i = skipWs(0);
+
+  while (i < body.length) {
+    if (body[i] !== "[") {
+      i = skipWs(i + 1);
+      continue;
+    }
+    const sub = body.slice(i);
+    const km = sub.match(KEY_HEAD);
+    if (!km) {
+      i++;
+      continue;
+    }
+    const key: string | number =
+      km[1] !== undefined ? km[1] : km[2] !== undefined ? parseInt(km[2], 10) : String(km[3]);
+    let pos = i + km[0].length;
+    pos = skipWs(pos);
+
+    const rest = body.slice(pos);
     const strMatch = rest.match(STRING_VALUE_RE);
     const arrayMatch = rest.match(ARRAY_VALUE_RE);
+    let value: any;
+    let endPos: number;
     if (strMatch && (!arrayMatch || (strMatch.index ?? 0) <= (arrayMatch.index ?? Infinity))) {
-      const parsed = parsePhpString(content, start);
-      if (parsed) value = parsed.value;
+      const parsed = parsePhpString(body, pos);
+      if (!parsed) {
+        i = pos + 1;
+        continue;
+      }
+      value = parsed.value;
+      endPos = parsed.endIndex;
     } else if (arrayMatch) {
-      const parsed = parsePhpArray(content, start);
-      if (parsed) value = parsed.value;
+      const parsed = parsePhpArray(body, pos);
+      if (!parsed) {
+        i = pos + 1;
+        continue;
+      }
+      value = parsed.value;
+      endPos = parsed.endIndex;
+    } else {
+      i = pos + 1;
+      continue;
     }
 
-    if (value !== undefined) result[key] = value;
+    result[key] = value;
+    i = skipWs(endPos);
   }
 
-  const allNumeric = entries.length > 0 && entries.every(e => typeof e.key === 'number');
-  if (allNumeric && entries.length > 0) {
-    const maxIdx = Math.max(...entries.map(e => e.key as number));
+  const keyList = Object.keys(result);
+  const allNumeric = keyList.length > 0 && keyList.every((k) => /^\d+$/.test(k));
+  if (allNumeric) {
+    const maxIdx = Math.max(...keyList.map((k) => Number(k)));
     const arr: any[] = [];
     for (let j = 0; j <= maxIdx; j++) arr.push(result[j] !== undefined ? result[j] : undefined);
     return arr;
   }
   return result;
+}
+
+/**
+ * Locate the root `array(n) {` for PHP dumps.
+ * Do NOT use lastIndexOf("array(", …VehAvairsdetails): the last array( before that text is often
+ * `["Success"]=> array(0) { }`, not the document root — that truncated the body to `{}` and broke Gloria import.
+ */
+function findPhpRootArrayStart(str: string): number {
+  const m = str.match(/\barray\s*\(\s*\d+\s*\)\s*\{/);
+  if (m && m.index !== undefined) return m.index;
+  return str.indexOf("array(");
 }
 
 /**
@@ -120,12 +164,12 @@ export function convertPhpVarDumpToVehAvailRS(phpText: string): any {
   if (!phpText || typeof phpText !== 'string') {
     throw new Error('Invalid input: expected string');
   }
-  const trimmed = phpText.trim();
+  const trimmed = phpText.trim().replace(/^\uFEFF/, "");
   if (!trimmed.includes('VehAvailRSCore') || !trimmed.includes('VehVendorAvails')) {
     throw new Error('PHP var_dump must contain VehAvailRSCore and VehVendorAvails');
   }
 
-  const firstArray = trimmed.indexOf('array(');
+  const firstArray = findPhpRootArrayStart(trimmed);
   if (firstArray === -1) throw new Error('Could not find root array');
   const openBrace = trimmed.indexOf('{', firstArray);
   if (openBrace === -1) throw new Error('Could not find root opening brace');
@@ -166,8 +210,8 @@ export function convertPhpVarDumpToObject(phpText: string): any {
   if (!phpText || typeof phpText !== "string") {
     throw new Error("Invalid input: expected string");
   }
-  const trimmed = phpText.trim();
-  const firstArray = trimmed.indexOf("array(");
+  const trimmed = phpText.trim().replace(/^\uFEFF/, "");
+  const firstArray = findPhpRootArrayStart(trimmed);
   if (firstArray === -1) throw new Error("Could not find root array");
   const openBrace = trimmed.indexOf("{", firstArray);
   if (openBrace === -1) throw new Error("Could not find root opening brace");
