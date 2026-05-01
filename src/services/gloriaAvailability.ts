@@ -1,8 +1,48 @@
 import type { Offer } from "../adapters/registry.js";
 
-function asArray<T>(v: T | T[] | undefined | null): T[] {
+/**
+ * Normalize XML/JSON/PHP-decoded values to a real array.
+ * - XML fast-xml-parser usually repeats sibling tags into an array.
+ * - JSON / some decoders use { "0": car, "1": car, ... } instead of [] — plain `asArray` would wrap
+ *   the whole object as one element (one bogus offer like "CAR-1").
+ */
+function asArray<T = any>(v: T | T[] | Record<string, any> | undefined | null): T[] {
   if (v == null) return [];
-  return Array.isArray(v) ? v : [v];
+  if (Array.isArray(v)) return v as T[];
+  if (typeof v === "object") {
+    const keys = Object.keys(v as object);
+    const numericKeys = keys.filter((k) => /^\d+$/.test(k));
+    if (numericKeys.length > 0) {
+      return numericKeys.sort((a, b) => Number(a) - Number(b)).map((k) => (v as any)[k]) as T[];
+    }
+  }
+  return [v] as T[];
+}
+
+/** Pull availcars[] from VehAvairsdetails (or sibling shapes). */
+function extractAvailCarsFromDetails(details: any): any[] {
+  if (!details || typeof details !== "object") return [];
+  const raw =
+    details.availcars ??
+    details.AvailCars ??
+    details.AVAILCARS ??
+    (details as any).availcar;
+  if (raw == null) return [];
+  let list = asArray(raw);
+  // One XML element <availcars> wrapping many <car> (or similar) children
+  if (list.length === 1 && list[0] && typeof list[0] === "object") {
+    const shell = list[0] as any;
+    const nested =
+      shell.car ??
+      shell.Car ??
+      shell.availcar ??
+      shell.availcars ??
+      shell.Vehicle ??
+      shell.vehicle;
+    const nestedList = nested != null ? asArray(nested) : [];
+    if (nestedList.length > 1) return nestedList;
+  }
+  return list;
 }
 
 function attrs(node: any): Record<string, any> {
@@ -38,15 +78,20 @@ export function parseGloriaAvailabilityOffers(
   sourceId: string,
   criteria: { agreement_ref?: string }
 ): Offer[] {
-  const details = root?.VehAvairsdetails || root?.VehAvaildetails || root?.vehavairsdetails;
-  const cars = asArray(details?.availcars || details?.AvailCars);
+  const details =
+    root?.VehAvairsdetails ||
+    root?.VehAvaildetails ||
+    root?.vehavairsdetails ||
+    (root?.availcars || root?.AvailCars ? root : null);
+  const cars = extractAvailCarsFromDetails(details);
   const offers: Offer[] = [];
 
   for (let i = 0; i < cars.length; i++) {
     const car = cars[i];
+    if (car == null || typeof car !== "object") continue;
     const carAttrs = attrs(car);
-    const veh = attrs(car?.vehdetails);
-    const pricing = attrs(car?.pricing);
+    const veh = attrs(car?.vehdetails || car?.Vehdetails || car?.VehDetails);
+    const pricing = attrs(car?.pricing || car?.Pricing);
     const acriss = String(carAttrs.ACRISS || carAttrs.Code || veh.ACRISS || "").trim();
     const make = String(veh.Make || "").trim();
     const model = String(veh.Model || "").trim();

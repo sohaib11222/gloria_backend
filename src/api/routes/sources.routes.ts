@@ -5062,6 +5062,11 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                 attributeNamePrefix: "",
                 parseAttributeValue: false,
                 trimValues: true,
+                // Force arrays for repeated GLORIA children so we never collapse 16 cars into one node
+                isArray: (tagName: string) => {
+                  const t = tagName.toLowerCase();
+                  return t === "availcars" || t === "item" || t === "country";
+                },
               });
               const parsedXml = xmlParser.parse(responseText);
               const rootKey = Object.keys(parsedXml).find((k) => k.includes("GLORIA_availabilityrs"));
