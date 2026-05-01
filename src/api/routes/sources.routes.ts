@@ -4832,8 +4832,10 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
       .digest("hex")
       .slice(0, 32);
 
+    // Supplier (e.g. TL Gloria av.php) can take 30–60s+ to stream a large PHP dump/XML body; short timeouts yield partial reads / poor parses.
+    const FETCH_AVAILABILITY_SUPPLIER_TIMEOUT_MS = 120_000;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_AVAILABILITY_SUPPLIER_TIMEOUT_MS);
 
     // Normalized offer array — all three adapters populate this
     let offers: any[] = [];
@@ -5237,7 +5239,10 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
     } catch (fetchError: any) {
       clearTimeout(timeoutId);
       if (fetchError.name === "AbortError" || fetchError.code === "ETIMEDOUT") {
-        return res.status(504).json({ error: "TIMEOUT", message: "Availability endpoint timeout after 15s" });
+        return res.status(504).json({
+          error: "TIMEOUT",
+          message: `Availability endpoint timeout after ${FETCH_AVAILABILITY_SUPPLIER_TIMEOUT_MS / 1000}s`,
+        });
       }
       if (fetchError.message?.includes("fetch failed") || fetchError.code === "ECONNREFUSED" || fetchError.code === "ENOTFOUND") {
         return res.status(503).json({
