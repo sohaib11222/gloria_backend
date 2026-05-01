@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { Router } from "express";
 import { z } from "zod";
 import fetch from "node-fetch";
@@ -15,6 +16,7 @@ import { validateLocationArray } from "../../services/locationValidation.js";
 import { auditLog } from "../../services/audit.js";
 import { invalidateMailerCache } from "../../infra/mailer.js";
 import { normalizeReferralSlug } from "../../services/referralSlug.js";
+import { ensureUnlocodeRowForBranch } from "../../services/ensureUnlocodeForBranch.js";
 
 export const adminRouter = Router();
 
@@ -393,6 +395,61 @@ adminRouter.get("/admin/overview", requireAuth(), requireRole("ADMIN"), async (_
   } catch (e) { next(e); }
 });
 
+/** Cross-source view of stored pricing/availability samples (Source panel “Pricing” / manual samples). */
+adminRouter.get("/admin/availability-samples", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const sourceId = typeof req.query.sourceId === "string" && req.query.sourceId ? req.query.sourceId : undefined;
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 50)));
+    const offset = Math.max(0, Number(req.query.offset || 0));
+
+    const where: Prisma.SourceAvailabilitySampleWhereInput = {};
+    if (sourceId) where.sourceId = sourceId;
+
+    const [rows, total] = await Promise.all([
+      prisma.sourceAvailabilitySample.findMany({
+        where,
+        include: {
+          source: { select: { id: true, companyName: true, companyCode: true } },
+        },
+        orderBy: { updatedAt: "desc" },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.sourceAvailabilitySample.count({ where }),
+    ]);
+
+    const items = rows.map((s) => {
+      const json = (s.sampleJson as Record<string, unknown> | null) ?? {};
+      const criteria = json.criteria as Record<string, unknown> | undefined;
+      return {
+        id: s.id,
+        sourceId: s.sourceId,
+        source: s.source,
+        criteriaHash: s.criteriaHash,
+        pickupLoc: s.pickupLoc ?? (criteria?.pickupLoc != null ? String(criteria.pickupLoc) : ""),
+        returnLoc: s.returnLoc ?? (criteria?.returnLoc != null ? String(criteria.returnLoc) : ""),
+        pickupIso: s.pickupIso ?? (criteria?.pickupIso != null ? String(criteria.pickupIso) : ""),
+        returnIso: s.returnIso ?? (criteria?.returnIso != null ? String(criteria.returnIso) : ""),
+        offersCount: s.offersCount,
+        offersSummary: json.offersSummary ?? null,
+        criteria: criteria ?? null,
+        fetchedAt: json.fetchedAt ?? s.updatedAt,
+        updatedAt: s.updatedAt,
+      };
+    });
+
+    res.json({
+      items,
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 adminRouter.get("/admin/referral-links", requireAuth(), requireRole("ADMIN"), async (_req, res, next) => {
   try {
     const links = await prisma.referralLink.findMany({
@@ -468,6 +525,33 @@ adminRouter.patch("/admin/referral-links/:id", requireAuth(), requireRole("ADMIN
     if (e?.code === "P2025") {
       return res.status(404).json({ error: "NOT_FOUND", message: "Referral link not found." });
     }
+    next(e);
+  }
+});
+
+adminRouter.get("/admin/referral-links/:id/signups", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    const link = await prisma.referralLink.findUnique({ where: { id }, select: { id: true } });
+    if (!link) {
+      return res.status(404).json({ error: "NOT_FOUND", message: "Referral link not found." });
+    }
+    const companies = await prisma.company.findMany({
+      where: { referralLinkId: id },
+      select: {
+        id: true,
+        companyName: true,
+        email: true,
+        type: true,
+        status: true,
+        approvalStatus: true,
+        companyCode: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ items: companies });
+  } catch (e) {
     next(e);
   }
 });
@@ -2867,6 +2951,12 @@ adminRouter.get("/admin/branches", requireAuth(), requireRole("ADMIN"), async (r
         { branchCode: { contains: search } },
         { name: { contains: search } },
         { city: { contains: search } },
+        { country: { contains: search } },
+        { postalCode: { contains: search } },
+        { natoLocode: { contains: search } },
+        { addressLine: { contains: search } },
+        { phone: { contains: search } },
+        { email: { contains: search } },
       ];
     }
 
@@ -3062,9 +3152,9 @@ adminRouter.get("/admin/branches/:id", requireAuth(), requireRole("ADMIN"), asyn
  */
 const updateBranchSchema = z.object({
   name: z.string().optional(),
-  status: z.string().optional(),
-  locationType: z.string().optional(),
-  collectionType: z.string().optional(),
+  status: z.string().optional().nullable(),
+  locationType: z.string().optional().nullable(),
+  collectionType: z.string().optional().nullable(),
   email: z.string().email().optional().nullable(),
   phone: z.string().optional().nullable(),
   latitude: z.number().optional().nullable(),
@@ -3075,29 +3165,84 @@ const updateBranchSchema = z.object({
   country: z.string().optional().nullable(),
   countryCode: z.string().optional().nullable(),
   natoLocode: z.string().optional().nullable(),
+  pickupTimes: z.any().optional().nullable(),
+  dropoffTimes: z.any().optional().nullable(),
+  rawJson: z.any().optional().nullable(),
 });
 
 adminRouter.patch("/admin/branches/:id", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
   try {
     const { id } = req.params;
+
+    const existing = await prisma.branch.findUnique({
+      where: { id },
+      include: {
+        source: {
+          select: {
+            id: true,
+            companyName: true,
+            companyCode: true,
+          },
+        },
+      },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: "BRANCH_NOT_FOUND", message: "Branch not found" });
+    }
+
     const body = updateBranchSchema.parse(req.body);
 
-    // Validate natoLocode if provided
-    if (body.natoLocode) {
-      const locode = await prisma.uNLocode.findUnique({
-        where: { unlocode: body.natoLocode },
-      });
-      if (!locode) {
-        return res.status(400).json({
-          error: "INVALID_UNLOCODE",
-          message: `UN/LOCODE ${body.natoLocode} not found`,
-        });
+    const data: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(body)) {
+      if (val === undefined) continue;
+      if (key === "rawJson" || key === "natoLocode") continue;
+      data[key] = val;
+    }
+
+    if (body.natoLocode !== undefined) {
+      const raw = body.natoLocode == null ? "" : String(body.natoLocode).trim();
+      if (!raw) {
+        data.natoLocode = null;
+      } else {
+        try {
+          data.natoLocode = await ensureUnlocodeRowForBranch(raw, {
+            countryCode: (body.countryCode ?? existing.countryCode) as string | null,
+            city: (body.city ?? existing.city) as string | null,
+            country: (body.country ?? existing.country) as string | null,
+          });
+        } catch (e: any) {
+          if (e?.code === "INVALID_UNLOCODE_FORMAT") {
+            return res.status(400).json({ error: e.code, message: e.message });
+          }
+          throw e;
+        }
+      }
+    }
+
+    if (body.rawJson !== undefined) {
+      if (body.rawJson === null) {
+        data.rawJson = null;
+      } else if (
+        existing.rawJson &&
+        typeof existing.rawJson === "object" &&
+        !Array.isArray(existing.rawJson) &&
+        body.rawJson &&
+        typeof body.rawJson === "object" &&
+        !Array.isArray(body.rawJson)
+      ) {
+        data.rawJson = {
+          ...(existing.rawJson as Record<string, unknown>),
+          ...(body.rawJson as Record<string, unknown>),
+        };
+      } else {
+        data.rawJson = body.rawJson;
       }
     }
 
     const branch = await prisma.branch.update({
       where: { id },
-      data: body,
+      data: data as Prisma.BranchUpdateInput,
       include: {
         source: {
           select: {

@@ -14,6 +14,7 @@ import { convertPhpVarDumpToObject, convertPhpVarDumpToVehAvailRS } from "../../
 import { buildGloriaAvailabilityRq } from "../../services/otaXmlBuilder.js";
 import { makeGrpcSourceAdapter } from "../../adapters/grpcSourceAdapter.js";
 import { parseGloriaAvailabilityOffers } from "../../services/gloriaAvailability.js";
+import { ensureUnlocodeRowForBranch } from "../../services/ensureUnlocodeForBranch.js";
 
 const SOURCE_AVAILABILITY_UPLOAD_ROOT = path.join(process.cwd(), "uploads", "source-availability");
 
@@ -103,39 +104,6 @@ function explicitNatoFromBranch(branch: Record<string, unknown>): string | null 
   const v = (branch as any).NatoLocode ?? (branch as any).natoLocode;
   if (v == null || String(v).trim() === "") return null;
   return String(v).trim().toUpperCase();
-}
-
-/**
- * If the code is missing from the UN/LOCODE reference table, create a minimal row (same pattern as location import).
- * Lets sources save a valid-format code and refine place/country later.
- */
-async function ensureUnlocodeRowForBranch(
-  unlocodeIn: string,
-  hints: { countryCode?: string | null; city?: string | null; country?: string | null }
-): Promise<string> {
-  const unlocode = unlocodeIn.toUpperCase().trim();
-  if (!unlocode || unlocode.length < 4 || unlocode.length > 5) {
-    const err = new Error("UN/LOCODE must be 4 to 5 characters (e.g. GBMAN or AEDXB)");
-    (err as any).code = "INVALID_UNLOCODE_FORMAT";
-    throw err;
-  }
-  const row = await prisma.uNLocode.findUnique({ where: { unlocode } });
-  if (row) return unlocode;
-  const cc = (hints.countryCode || "").toUpperCase().trim().slice(0, 2);
-  const country = cc.length === 2 ? cc : unlocode.slice(0, 2);
-  const placeRaw = hints.city?.trim() || hints.country?.trim() || unlocode.slice(2) || "Location";
-  const place = placeRaw.slice(0, 200) || "Location";
-  await prisma.uNLocode.create({
-    data: {
-      unlocode,
-      country,
-      place,
-      iataCode: null,
-      latitude: null,
-      longitude: null,
-    },
-  });
-  return unlocode;
 }
 
 /** Check branch quota (subscribed quantity); locations are unlimited and not counted.
