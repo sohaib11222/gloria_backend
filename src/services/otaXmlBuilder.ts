@@ -67,6 +67,49 @@ export function buildOtaVehAvailRateRQ(
 }
 
 /**
+ * GLORIA native availability request XML (supplier / TL International Postman shape).
+ * Root: GLORIA_availabilityrq — mirrored from ota.tlinternationalgroup.com/gloria/av.php style payloads.
+ */
+export function buildGloriaAvailabilityRq(
+  criteria: OtaVehAvailRateCriteria,
+  accountId: string = 'Gloria002'
+): string {
+  try {
+    const ts = new Date().toISOString().slice(0, 19); // YYYY-MM-DDTHH:mm:ss
+    const root = create({ version: '1.0', encoding: 'UTF-8' }).ele('GLORIA_availabilityrq', {
+      TimeStamp: ts,
+      Target: 'Production',
+      Version: '1.00',
+    });
+
+    const acc = root.ele('ACC');
+    const src = acc.ele('Source');
+    src.ele('AccountID', { ID: accountId });
+
+    const body = root.ele('VehAvailbody');
+    const vehmain = body.ele('Vehmain', {
+      PickUpDateTime: criteria.pickup_iso,
+      ReturnDateTime: criteria.dropoff_iso,
+    });
+    vehmain.ele('collectionbranch', { LocationCode: criteria.pickup_unlocode });
+    vehmain.ele('returnbranch', { LocationCode: criteria.dropoff_unlocode });
+
+    body.ele('DriverAge', { Age: String(criteria.driver_age ?? 30) });
+    body.ele('DriverCitizenCountry', { Code: criteria.residency_country ?? 'US' });
+
+    const xmlString = root.end({ prettyPrint: true });
+    logger.debug(
+      { pickup: criteria.pickup_unlocode, accountId },
+      'Generated GLORIA_availabilityrq XML'
+    );
+    return xmlString;
+  } catch (error: any) {
+    logger.error({ error: error.message, criteria }, 'Failed to build GLORIA_availabilityrq');
+    throw new Error(`Failed to build GLORIA_availabilityrq: ${error.message}`);
+  }
+}
+
+/**
  * Interface for booking data to be converted to OTA XML
  */
 export interface OtaBookingData {

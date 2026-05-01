@@ -19,6 +19,9 @@ yarn-error.log
 /.vscode
 /config/server_secrets.php
 
+# Uploaded vehicle images (manual availability)
+/uploads/source-availability/
+
 # --- Build (never commit; run `npm run build` on deploy)
 /dist/
 

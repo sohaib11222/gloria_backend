@@ -41,6 +41,10 @@ export interface Offer {
   priced_equips?: any[];
   pickup_location_details?: Record<string, string | undefined>;
   return_location_details?: Record<string, string | undefined>;
+  /** Flat copy of GLORIA pricing @attributes when parsed from availcars[].pricing */
+  gloria_pricing_attributes?: Record<string, string>;
+  /** Flat copy of GLORIA vehdetails @attributes */
+  gloria_vehdetails_attributes?: Record<string, string>;
 }
 
 export interface CreateBookingInput {

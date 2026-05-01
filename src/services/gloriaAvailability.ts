@@ -18,18 +18,12 @@ function toNum(v: any): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function uniqueByCode(rows: Array<{ code?: string; [k: string]: any }>) {
-  const out: Array<{ code?: string; [k: string]: any }> = [];
-  const seen = new Set<string>();
-  for (const row of rows) {
-    const code = (row.code || "").trim().toUpperCase();
-    if (!code) {
-      out.push(row);
-      continue;
-    }
-    if (seen.has(code)) continue;
-    seen.add(code);
-    out.push(row);
+function stringifyAttrRecord(a: Record<string, any>): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!a || typeof a !== "object") return out;
+  for (const [k, v] of Object.entries(a)) {
+    if (v == null || v === "") continue;
+    out[String(k)] = typeof v === "string" ? v : String(v);
   }
   return out;
 }
@@ -60,32 +54,38 @@ export function parseGloriaAvailabilityOffers(
 
     const includedRaw = asArray(car?.includedinprice?.Item || car?.includedinprice?.item).map((x: any) => {
       const a = attrs(x);
-      const header = String(a.ItemDescription || a.Description || "").trim();
+      const desc = String(a.ItemDescription || a.Description || "").trim();
+      const code = String(a.Code || "").trim();
       return {
-        code: String(a.Code || "").trim(),
-        header,
-        details: header || undefined,
-        price: a.Price || "0.00",
-        excess: a.Excess || undefined,
-        deposit: a.Deposit || undefined,
+        code,
+        header: desc || code || "",
+        details: desc || undefined,
+        price: a.Price != null ? String(a.Price) : undefined,
+        excess: a.Excess != null ? String(a.Excess) : undefined,
+        deposit: a.Deposit != null ? String(a.Deposit) : undefined,
+        currency: a.Currency != null ? String(a.Currency).trim() : undefined,
         mandatory: "Yes",
       };
     });
     const notIncludedRaw = asArray(car?.notincludedinprice?.Item || car?.notincludedinprice?.item).map((x: any) => {
       const a = attrs(x);
-      const header = String(a.ItemDescription || a.Description || "").trim();
+      const desc = String(a.ItemDescription || a.Description || "").trim();
+      const code = String(a.Code || "").trim();
+      const cover = a.CoverAmount ?? a.cover_amount;
       return {
-        code: String(a.Code || "").trim(),
-        header,
-        details: header || undefined,
-        price: a.Price || undefined,
-        excess: a.Excess || undefined,
-        deposit: a.Deposit || undefined,
+        code,
+        header: desc || code || "",
+        details: desc || undefined,
+        price: a.Price != null ? String(a.Price) : undefined,
+        excess: a.Excess != null ? String(a.Excess) : undefined,
+        deposit: a.Deposit != null ? String(a.Deposit) : undefined,
+        cover_amount: cover != null ? String(cover) : undefined,
+        currency: a.Currency != null ? String(a.Currency).trim() : undefined,
         mandatory: "No",
       };
     });
-    const included = uniqueByCode(includedRaw.filter((x) => x.header || x.code));
-    const notIncluded = uniqueByCode(notIncludedRaw.filter((x) => x.header || x.code));
+    const included = includedRaw.filter((x) => x.header || x.code);
+    const notIncluded = notIncludedRaw.filter((x) => x.header || x.code);
 
     const extraItems = asArray(
       car?.OptionalExtras?.Item ||
@@ -105,10 +105,15 @@ export function parseGloriaAvailabilityOffers(
           description,
           equip_type: a.Code || a.EquipType || undefined,
           vendor_equip_id: a.Code || undefined,
+          currency: a.Currency ? String(a.Currency).trim() : undefined,
+          long_description: a.LongDescription ? String(a.LongDescription) : undefined,
           charge: { Amount: amount },
         };
       })
       .filter(Boolean) as any[];
+
+    const gloria_pricing_attributes = stringifyAttrRecord(pricing);
+    const gloria_vehdetails_attributes = stringifyAttrRecord(veh);
 
     const totalGross = pricing.TotalGross ?? pricing.Total ?? pricing.DailyGross ?? "0";
     const currency = String(pricing.Currency || "EUR").trim();
@@ -125,17 +130,24 @@ export function parseGloriaAvailabilityOffers(
       currency,
       total_price: toNum(totalGross),
       supplier_offer_ref: offerRef || `${sourceId}-${i + 1}`,
-      availability_status: "AVAILABLE",
+      availability_status: "Available",
       veh_id: offerRef || undefined,
       picture_url: veh.ImageURL || undefined,
-      door_count: veh.Doors || undefined,
-      baggage: [veh.BagsSmall, veh.BagsMedium].filter(Boolean).join("/") || undefined,
+      door_count: veh.Doors ? String(veh.Doors) : undefined,
+      baggage:
+        veh.BagsSmall || veh.BagsMedium
+          ? [veh.BagsSmall, veh.BagsMedium].filter(Boolean).join(" / ")
+          : undefined,
       vehicle_category: acriss || undefined,
       transmission_type: veh.Transmission || undefined,
       veh_terms_included: included.length ? included : undefined,
       veh_terms_not_included: notIncluded.length ? notIncluded : undefined,
       priced_equips: pricedEquips.length ? pricedEquips : undefined,
       total_charge: { rate_total_amount: String(totalGross), currency_code: currency, tax_inclusive: "true" },
+      gloria_pricing_attributes:
+        Object.keys(gloria_pricing_attributes).length > 0 ? gloria_pricing_attributes : undefined,
+      gloria_vehdetails_attributes:
+        Object.keys(gloria_vehdetails_attributes).length > 0 ? gloria_vehdetails_attributes : undefined,
     });
   }
 

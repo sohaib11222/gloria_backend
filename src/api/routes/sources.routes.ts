@@ -2,15 +2,42 @@ import { Router } from "express";
 import { z } from "zod";
 import fetch from "node-fetch";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+import multer from "multer";
 import { requireAuth } from "../../infra/auth.js";
 import { requireCompanyType } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
 import { parseXMLToGloria, extractBranchesFromGloria, validateXMLStructure } from "../../services/xmlParser.js";
 import { isOtaVehAvailResponse, parseOtaVehAvailResponse } from "../../adapters/grpc.adapter.js";
 import { convertPhpVarDumpToObject, convertPhpVarDumpToVehAvailRS } from "../../services/phpVarDumpVehAvail.js";
-import { buildOtaVehAvailRateRQ } from "../../services/otaXmlBuilder.js";
+import { buildGloriaAvailabilityRq } from "../../services/otaXmlBuilder.js";
 import { makeGrpcSourceAdapter } from "../../adapters/grpcSourceAdapter.js";
 import { parseGloriaAvailabilityOffers } from "../../services/gloriaAvailability.js";
+
+const SOURCE_AVAILABILITY_UPLOAD_ROOT = path.join(process.cwd(), "uploads", "source-availability");
+
+const manualAvailabilityImageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req: any, _file, cb) => {
+      const sourceId = String(req.user?.companyId ?? "unknown");
+      const dest = path.join(SOURCE_AVAILABILITY_UPLOAD_ROOT, sourceId);
+      fs.mkdirSync(dest, { recursive: true });
+      cb(null, dest);
+    },
+    filename: (_req, file, cb) => {
+      const extRaw = path.extname(file.originalname || "").toLowerCase();
+      const ext = [".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(extRaw) ? extRaw : ".jpg";
+      cb(null, `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ext}`);
+    },
+  }),
+  limits: { fileSize: 3 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(file.mimetype);
+    if (ok) cb(null, true);
+    else cb(new Error("Only JPEG, PNG, GIF, or WEBP images are allowed."));
+  },
+});
 
 /** Require active subscription for source; return null if ok, or { status, body } to send as 402 */
 async function requireActiveSubscription(sourceId: string): Promise<{ status: number; body: object } | null> {
@@ -4352,6 +4379,38 @@ sourcesRouter.put("/sources/daily-pricing/bulk", requireAuth(), requireCompanyTy
 });
 
 /**
+ * POST /sources/manual-availability-image
+ * Multipart form field name: "image". Returns { url: "/uploads/source-availability/..." } for vehicle.image_url.
+ */
+sourcesRouter.post(
+  "/sources/manual-availability-image",
+  requireAuth(),
+  requireCompanyType("SOURCE"),
+  (req: any, res: any, next: any) => {
+    manualAvailabilityImageUpload.single("image")(req, res, (err: unknown) => {
+      if (err) {
+        const msg = err instanceof Error ? err.message : "Upload failed";
+        return res.status(400).json({ error: "UPLOAD_FAILED", message: msg });
+      }
+      next();
+    });
+  },
+  async (req: any, res: any) => {
+    try {
+      const f = req.file as { filename?: string } | undefined;
+      if (!f?.filename) {
+        return res.status(400).json({ error: "NO_FILE", message: 'Send multipart field "image" (JPEG, PNG, GIF, or WEBP, max ~3 MB).' });
+      }
+      const sourceId = req.user.companyId as string;
+      const relUrl = `/uploads/source-availability/${sourceId}/${f.filename}`;
+      return res.status(200).json({ url: relUrl });
+    } catch (e: any) {
+      return res.status(500).json({ error: "SERVER", message: e?.message ?? "Upload error" });
+    }
+  }
+);
+
+/**
  * POST /sources/manual-availability-sample
  * Stores a single-vehicle availability sample without calling a supplier endpoint (brokers/suppliers with no HTTP/gRPC pricing API).
  */
@@ -4517,6 +4576,18 @@ sourcesRouter.post("/sources/manual-availability-sample", requireAuth(), require
     const seatsStr = strOpt(v.seats);
     if (seatsStr) manual_business_rules.seats = seatsStr;
 
+    const gloria_vehdetails_attributes: Record<string, string> = {
+      ...(acriss ? { ACRISS: acriss } : {}),
+      Make: make,
+      Model: model,
+      ...(v.transmission?.trim() ? { Transmission: v.transmission.trim() } : {}),
+      ...(strOpt(v.doors) ? { Doors: strOpt(v.doors)! } : {}),
+      ...(seatsStr ? { Seats: seatsStr } : {}),
+      ...(bagsS ? { BagsSmall: bagsS } : {}),
+      ...(bagsM ? { BagsMedium: bagsM } : {}),
+      ...(img ? { ImageURL: img } : {}),
+    };
+
     const offer = {
       source_id: sourceId,
       agreement_ref: requestorId,
@@ -4544,6 +4615,7 @@ sourcesRouter.post("/sources/manual-availability-sample", requireAuth(), require
         currency_code: currency,
         tax_inclusive: "true",
       },
+      gloria_vehdetails_attributes,
     };
 
     const offers = [offer];
@@ -4575,6 +4647,7 @@ sourcesRouter.post("/sources/manual-availability-sample", requireAuth(), require
       priced_equips: o.priced_equips ?? undefined,
       manual_business_rules: Object.keys(manual_business_rules).length ? manual_business_rules : undefined,
       gloria_pricing_attributes: Object.keys(gloria_pricing_attributes).length ? gloria_pricing_attributes : undefined,
+      gloria_vehdetails_attributes: o.gloria_vehdetails_attributes ?? undefined,
       gloria_terms: gloria_terms ?? undefined,
       gloria_response_meta: gloria_response_meta ?? undefined,
     }));
@@ -4901,7 +4974,8 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
       // OTA XML adapter (default)
       // ══════════════════════════════════════════════════════════════════════
       } else {
-        const xmlBody = buildOtaVehAvailRateRQ(criteria, requestorId);
+        const gloriaAccountId = (requestorId && String(requestorId).trim()) || "Gloria002";
+        const xmlBody = buildGloriaAvailabilityRq(criteria, gloriaAccountId);
 
         const fetchResponse = await fetch(endpointUrl, {
           method: "POST",
@@ -5054,7 +5128,7 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                 "JSON object with OTA keys (VehAvailRSCore/VehVendorAvails) or GLORIA key (VehAvairsdetails)",
                 "PHP var_dump text containing OTA keys or GLORIA VehAvairsdetails",
               ],
-              help: "For XML adapter, Gloria sends OTA_VehAvailRateRQ. Your endpoint can respond in OTA_VehAvailRateRS or GLORIA_availabilityrs.",
+              help: "For XML adapter, Gloria sends GLORIA_availabilityrq (ACC/AccountID, VehAvailbody). Your endpoint can respond in OTA_VehAvailRateRS or GLORIA_availabilityrs.",
               dataPreview: typeof responseText === "string" ? responseText.slice(0, 500) + (responseText.length > 500 ? "…" : "") : undefined,
             },
           });
@@ -5109,6 +5183,8 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
         included: o.veh_terms_included ?? undefined,
         not_included: o.veh_terms_not_included ?? undefined,
         priced_equips: o.priced_equips ?? undefined,
+        gloria_pricing_attributes: o.gloria_pricing_attributes ?? undefined,
+        gloria_vehdetails_attributes: o.gloria_vehdetails_attributes ?? undefined,
       }));
 
       const criteriaDisplay = { pickupLoc, returnLoc, pickupIso, returnIso, requestorId, driverAge, citizenCountry, adapterType };
