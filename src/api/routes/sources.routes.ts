@@ -4033,6 +4033,124 @@ const bulkDailyPricingSchema = z.object({
   cells: z.array(patchDailyPricingCellSchema).min(1),
 });
 
+/** Deduplicate manual/imported terms by Code (same rule as GLORIA parser). */
+function uniqueTermsByCode<T extends { code?: string }>(rows: T[]): T[] {
+  const out: T[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const code = (row.code || "").trim().toUpperCase();
+    if (!code) {
+      out.push(row);
+      continue;
+    }
+    if (seen.has(code)) continue;
+    seen.add(code);
+    out.push(row);
+  }
+  return out;
+}
+
+/** GLORIA Item @attributes-style row (included / not-included). */
+const manualGloriaLineItemSchema = z.object({
+  code: z.string().optional(),
+  description: z.string().max(4000).optional(),
+  excess: z.string().optional(),
+  deposit: z.string().optional(),
+  price: z.string().optional(),
+  currency: z.string().max(8).optional(),
+  cover_amount: z.string().optional(),
+});
+
+const manualGloriaExtraItemSchema = z.object({
+  code: z.string().optional(),
+  /** ItemDescription */
+  description: z.string().max(500).optional(),
+  /** Legacy alias for description */
+  name: z.string().max(500).optional(),
+  price: z.coerce.number().nonnegative(),
+  currency: z.string().max(8).optional(),
+  /** OptionalExtras Item Description (long) */
+  long_description: z.string().max(4000).optional(),
+});
+
+const manualGloriaPricingSchema = z.object({
+  car_order_id: z.string().max(120).optional(),
+  currency: z.string().max(8).optional(),
+  duration: z.union([z.string(), z.number()]).optional(),
+  daily_net: z.union([z.string(), z.number()]).optional(),
+  daily_tax: z.union([z.string(), z.number()]).optional(),
+  daily_gross: z.union([z.string(), z.number()]).optional(),
+  total_net: z.union([z.string(), z.number()]).optional(),
+  total_tax: z.union([z.string(), z.number()]).optional(),
+  total_gross: z.union([z.string(), z.number()]).optional(),
+  tax_rate: z.union([z.string(), z.number()]).optional(),
+});
+
+const manualGloriaResponseMetaSchema = z.object({
+  timestamp: z.string().max(40).optional(),
+  target: z.string().max(40).optional(),
+  version: z.string().max(20).optional(),
+});
+
+const manualAvailabilityVehicleSchema = z.object({
+  acriss: z.string().trim().min(1).max(16),
+  make: z.string().trim().min(1).max(80),
+  model: z.string().trim().min(1).max(80),
+  currency: z.string().trim().min(1).max(8).default("EUR"),
+  /** Total gross; optional if pricing.total_gross is set */
+  total_price: z.coerce.number().nonnegative().optional(),
+  daily_gross: z.coerce.number().nonnegative().optional(),
+  transmission: z.string().max(80).optional(),
+  doors: z.union([z.string(), z.number()]).optional(),
+  seats: z.union([z.string(), z.number()]).optional(),
+  bags_small: z.union([z.string(), z.number()]).optional(),
+  bags_medium: z.union([z.string(), z.number()]).optional(),
+  image_url: z.string().max(4000).optional(),
+  car_order_id: z.string().max(120).optional(),
+  min_lead_hours: z.coerce.number().int().min(0).optional(),
+  max_lead_days: z.coerce.number().int().min(0).optional(),
+  mileage: z.coerce.number().nonnegative().optional(),
+});
+
+const manualAvailabilityBodySchema = z
+  .object({
+    pickupLoc: z.string().trim().min(1),
+    returnLoc: z.string().trim().min(1),
+    pickupIso: z.string().trim().min(1),
+    returnIso: z.string().trim().min(1),
+    /** vehavailmaindet @attributes.Duration (rental days) */
+    rental_duration: z.coerce.number().int().min(0).max(3660).optional(),
+    requestorId: z.string().optional(),
+    driverAge: z.coerce.number().int().min(18).max(99).optional(),
+    citizenCountry: z.string().max(3).optional(),
+    vehicle: manualAvailabilityVehicleSchema,
+    pricing: manualGloriaPricingSchema.optional(),
+    /** Root GLORIA response @attributes (optional) */
+    response_meta: manualGloriaResponseMetaSchema.optional(),
+    included: z.array(manualGloriaLineItemSchema).max(200).optional(),
+    not_included: z.array(manualGloriaLineItemSchema).max(200).optional(),
+    extras: z.array(manualGloriaExtraItemSchema).max(100).optional(),
+    /** Terms.Item[] — stored as JSON (nested structures preserved) */
+    terms: z.array(z.any()).max(200).optional(),
+    force: z.boolean().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const pg = data.pricing;
+    const gross = pg?.total_gross;
+    const nGross = typeof gross === "string" || typeof gross === "number" ? Number(String(gross).replace(/,/g, ".")) : NaN;
+    const tp = data.vehicle.total_price;
+    const ok =
+      (typeof tp === "number" && Number.isFinite(tp)) ||
+      (Number.isFinite(nGross) && nGross >= 0);
+    if (!ok) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Provide vehicle.total_price or pricing.total_gross",
+        path: ["vehicle", "total_price"],
+      });
+    }
+  });
+
 function enumerateDatesInclusive(start: Date, end: Date): Date[] {
   const out: Date[] = [];
   const cur = new Date(start);
@@ -4229,6 +4347,316 @@ sourcesRouter.put("/sources/daily-pricing/bulk", requireAuth(), requireCompanyTy
     }
     return res.json({ message: "Bulk pricing updated", upserted });
   } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /sources/manual-availability-sample
+ * Stores a single-vehicle availability sample without calling a supplier endpoint (brokers/suppliers with no HTTP/gRPC pricing API).
+ */
+sourcesRouter.post("/sources/manual-availability-sample", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
+  try {
+    const parsed = manualAvailabilityBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "VALIDATION_ERROR",
+        message: "Invalid manual availability payload",
+        details: parsed.error.flatten(),
+      });
+    }
+    const body = parsed.data;
+    const sourceId = req.user.companyId;
+
+    const source = await prisma.company.findUnique({
+      where: { id: sourceId },
+      select: { id: true, locationListAccountId: true },
+    });
+    if (!source) {
+      return res.status(404).json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
+    }
+
+    const pickupLoc = body.pickupLoc.trim().toUpperCase();
+    const returnLoc = body.returnLoc.trim().toUpperCase();
+    const pickupIso = body.pickupIso.trim();
+    const returnIso = body.returnIso.trim();
+    const requestorId = (body.requestorId || source.locationListAccountId || "1000097").trim();
+    const driverAge = body.driverAge ?? 30;
+    const citizenCountry = (body.citizenCountry || "US").trim().toUpperCase().slice(0, 2);
+
+    const endpointUrl = "manual-entry";
+    const adapterType = "manual" as const;
+
+    const criteriaHash = crypto
+      .createHash("sha256")
+      .update(`${sourceId}|${pickupIso}|${returnIso}|${pickupLoc}|${returnLoc}|${endpointUrl}|${adapterType}`)
+      .digest("hex")
+      .slice(0, 32);
+
+    const v = body.vehicle;
+    const acriss = v.acriss.trim().toUpperCase();
+    const make = v.make.trim();
+    const model = v.model.trim();
+    const name = `${make} ${model}`.trim();
+
+    const strOpt = (x: unknown): string | undefined => {
+      if (x === undefined || x === null) return undefined;
+      const s = String(x).trim();
+      return s.length ? s : undefined;
+    };
+    const bagsS = strOpt(v.bags_small);
+    const bagsM = strOpt(v.bags_medium);
+    const baggage = [bagsS, bagsM].filter(Boolean).join("/") || undefined;
+    const img = v.image_url?.trim();
+
+    const toNumManual = (x: unknown): number => {
+      if (typeof x === "number") return Number.isFinite(x) ? x : 0;
+      if (typeof x !== "string") return 0;
+      const n = Number(x.replace(/,/g, "."));
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const pg = body.pricing;
+    const totalFromPricing = pg != null ? toNumManual(pg.total_gross) : NaN;
+    const total_price =
+      Number.isFinite(totalFromPricing) && totalFromPricing >= 0
+        ? totalFromPricing
+        : toNumManual(v.total_price ?? 0);
+
+    const currency = (strOpt(pg?.currency) || v.currency).trim().toUpperCase();
+
+    const supplier_offer_ref =
+      strOpt(pg?.car_order_id) ||
+      v.car_order_id?.trim() ||
+      `${acriss}-${Date.now().toString(36).toUpperCase()}`;
+
+    const incFiltered = (body.included || []).filter((t) => (t.description || "").trim() || (t.code || "").trim());
+    const includedRaw = incFiltered.map((t) => {
+      const desc = (t.description || "").trim();
+      const code = (t.code || "").trim();
+      const header = desc || code || "Item";
+      return {
+        code,
+        header,
+        details: desc || header,
+        price: t.price || "0.00",
+        excess: t.excess,
+        deposit: t.deposit,
+        currency: strOpt(t.currency),
+        mandatory: "Yes" as const,
+      };
+    });
+
+    const notFiltered = (body.not_included || []).filter((t) => (t.description || "").trim() || (t.code || "").trim());
+    const notIncludedRaw = notFiltered.map((t) => {
+      const desc = (t.description || "").trim();
+      const code = (t.code || "").trim();
+      const header = desc || code || "Item";
+      return {
+        code,
+        header,
+        details: desc || header,
+        price: t.price,
+        excess: t.excess,
+        deposit: t.deposit,
+        cover_amount: strOpt(t.cover_amount),
+        currency: strOpt(t.currency),
+        mandatory: "No" as const,
+      };
+    });
+
+    const priced_equips =
+      body.extras
+        ?.map((e) => {
+          const desc = strOpt(e.description) || strOpt(e.name) || "";
+          if (!desc) return null;
+          return {
+            description: desc,
+            equip_type: strOpt(e.code),
+            vendor_equip_id: strOpt(e.code),
+            charge: { Amount: String(e.price) },
+            currency: strOpt(e.currency),
+            long_description: strOpt(e.long_description),
+          };
+        })
+        .filter(Boolean) ?? [];
+
+    const gloria_pricing_attributes: Record<string, string> = {};
+    if (pg) {
+      const mapAttr: [string, unknown][] = [
+        ["CarOrderID", pg.car_order_id],
+        ["Currency", pg.currency],
+        ["Duration", pg.duration],
+        ["DailyNet", pg.daily_net],
+        ["DailyTax", pg.daily_tax],
+        ["DailyGross", pg.daily_gross],
+        ["TotalNet", pg.total_net],
+        ["TotalTax", pg.total_tax],
+        ["TotalGross", pg.total_gross],
+        ["TaxRate", pg.tax_rate],
+      ];
+      for (const [k, val] of mapAttr) {
+        if (val === undefined || val === null || val === "") continue;
+        gloria_pricing_attributes[k] = String(val);
+      }
+    }
+
+    const calculation =
+      pg && (pg.daily_gross !== undefined && pg.daily_gross !== null && String(pg.daily_gross).trim() !== "" || body.rental_duration != null)
+        ? {
+            UnitCharge: String(pg.daily_gross ?? ""),
+            UnitName: "Day",
+            Quantity: body.rental_duration != null ? String(body.rental_duration) : "",
+          }
+        : undefined;
+
+    const manual_business_rules: Record<string, string | number | undefined> = {};
+    if (v.min_lead_hours != null) manual_business_rules.min_lead_hours = v.min_lead_hours;
+    if (v.max_lead_days != null) manual_business_rules.max_lead_days = v.max_lead_days;
+    if (v.mileage != null) manual_business_rules.mileage = v.mileage;
+    const seatsStr = strOpt(v.seats);
+    if (seatsStr) manual_business_rules.seats = seatsStr;
+
+    const offer = {
+      source_id: sourceId,
+      agreement_ref: requestorId,
+      vehicle_class: acriss,
+      vehicle_make_model: name,
+      rate_plan_code: "",
+      currency,
+      total_price,
+      supplier_offer_ref,
+      availability_status: "AVAILABLE",
+      veh_id: supplier_offer_ref,
+      picture_url: img || undefined,
+      door_count: strOpt(v.doors),
+      baggage,
+      vehicle_category: acriss,
+      transmission_type: v.transmission?.trim() || undefined,
+      veh_terms_included: includedRaw.length ? uniqueTermsByCode(includedRaw.filter((x) => x.header || x.code)) : undefined,
+      veh_terms_not_included: notIncludedRaw.length
+        ? uniqueTermsByCode(notIncludedRaw.filter((x) => x.header || x.code))
+        : undefined,
+      priced_equips: priced_equips.length ? priced_equips : undefined,
+      calculation: calculation && (calculation.UnitCharge || calculation.Quantity) ? calculation : undefined,
+      total_charge: {
+        rate_total_amount: String(total_price),
+        currency_code: currency,
+        tax_inclusive: "true",
+      },
+    };
+
+    const offers = [offer];
+
+    const gloria_terms = body.terms?.length ? body.terms : undefined;
+    const gloria_response_meta = body.response_meta
+      ? {
+          TimeStamp: body.response_meta.timestamp,
+          Target: body.response_meta.target,
+          Version: body.response_meta.version,
+        }
+      : undefined;
+
+    const offersSummary = offers.map((o: any) => ({
+      vehicle_class: o.vehicle_class ?? "",
+      vehicle_make_model: o.vehicle_make_model ?? "",
+      total_price: o.total_price,
+      currency: o.currency ?? "",
+      availability_status: o.availability_status ?? "",
+      picture_url: o.picture_url ?? undefined,
+      transmission_type: o.transmission_type ?? undefined,
+      vehicle_category: o.vehicle_category ?? undefined,
+      air_condition_ind: o.air_condition_ind ?? undefined,
+      veh_id: o.veh_id ?? undefined,
+      door_count: o.door_count ?? undefined,
+      baggage: o.baggage ?? undefined,
+      included: o.veh_terms_included ?? undefined,
+      not_included: o.veh_terms_not_included ?? undefined,
+      priced_equips: o.priced_equips ?? undefined,
+      manual_business_rules: Object.keys(manual_business_rules).length ? manual_business_rules : undefined,
+      gloria_pricing_attributes: Object.keys(gloria_pricing_attributes).length ? gloria_pricing_attributes : undefined,
+      gloria_terms: gloria_terms ?? undefined,
+      gloria_response_meta: gloria_response_meta ?? undefined,
+    }));
+
+    const offersCount = offers.length;
+    const criteriaDisplay = { pickupLoc, returnLoc, pickupIso, returnIso, requestorId, driverAge, citizenCountry, adapterType };
+
+    const manualPayloadSnapshot = {
+      pickupIso,
+      returnIso,
+      pickupLoc,
+      returnLoc,
+      vehicle: v,
+      pricing: pg ?? null,
+      rental_duration: body.rental_duration ?? null,
+      included: incFiltered,
+      not_included: notFiltered,
+      extras: body.extras ?? null,
+      terms: body.terms ?? null,
+      response_meta: body.response_meta ?? null,
+    };
+    const manualDataFingerprint = crypto.createHash("sha256").update(JSON.stringify(manualPayloadSnapshot)).digest("hex").slice(0, 48);
+
+    const sampleJson = {
+      count: offersCount,
+      adapterType,
+      firstOffer: {
+        vehicle_class: offers[0].vehicle_class,
+        vehicle_make_model: offers[0].vehicle_make_model,
+        total_price: offers[0].total_price,
+      },
+      offersSummary,
+      criteria: criteriaDisplay,
+      fetchedAt: new Date().toISOString(),
+      manualEntry: true,
+      manualDataFingerprint,
+      rental_duration: body.rental_duration ?? undefined,
+      response_meta: body.response_meta ?? undefined,
+      gloria_terms: gloria_terms ?? undefined,
+    };
+
+    const existing = await prisma.sourceAvailabilitySample.findUnique({
+      where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
+    });
+
+    const existingJson = existing?.sampleJson as any ?? {};
+    const isSameContent =
+      !body.force &&
+      existing &&
+      typeof existingJson.manualDataFingerprint === "string" &&
+      existingJson.manualDataFingerprint === manualDataFingerprint;
+
+    if (isSameContent) {
+      return res.json({
+        message: "Data unchanged (same as existing); not stored.",
+        offersCount,
+        stored: false,
+        duplicate: true,
+        isNew: false,
+        adapterType,
+        offersSummary,
+        criteria: criteriaDisplay,
+      });
+    }
+
+    await prisma.sourceAvailabilitySample.upsert({
+      where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
+      update: { pickupIso, returnIso, pickupLoc, returnLoc, offersCount, sampleJson: sampleJson as any, updatedAt: new Date() },
+      create: { sourceId, criteriaHash, pickupIso, returnIso, pickupLoc, returnLoc, offersCount, sampleJson: sampleJson as any },
+    });
+
+    return res.json({
+      message: existing ? "Manual availability sample updated" : "Manual availability sample stored",
+      offersCount,
+      stored: true,
+      isNew: !existing,
+      duplicate: false,
+      adapterType,
+      offersSummary,
+      criteria: criteriaDisplay,
+    });
+  } catch (e: any) {
     next(e);
   }
 });
