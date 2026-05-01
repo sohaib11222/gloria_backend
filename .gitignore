@@ -19,13 +19,15 @@ yarn-error.log
 /.vscode
 /config/server_secrets.php
 
-# TypeScript build output (regenerate with npm run build)
-/dist
-dist/
+# --- Build (never commit; run `npm run build` on deploy)
+/dist/
 
-# Runtime / PM2 logs (entire logs dir + common PM2 filenames anywhere)
+# --- Logs & PM2 (regenerated at runtime; never commit)
 logs/
 *.log
+pm2-error.log
+pm2-out.log
+pm2-*.log
 **/pm2-error.log
 **/pm2-out.log
 **/pm2-*.log
