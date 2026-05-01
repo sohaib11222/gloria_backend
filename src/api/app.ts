@@ -166,7 +166,11 @@ export function buildApp() {
 
   app.use(healthRouter);
   // Source-uploaded vehicle images (manual availability); path returned as /uploads/...
-  app.use("/uploads", express.static(path.join(process.cwd(), "uploads"), { maxAge: "7d", fallthrough: true }));
+  const uploadsRoot = path.join(process.cwd(), "uploads");
+  const uploadsStatic = express.static(uploadsRoot, { maxAge: "7d", fallthrough: true });
+  app.use("/uploads", uploadsStatic);
+  // Some clients prefix with /api (axios baseURL); serve same files so old links still work
+  app.use("/api/uploads", uploadsStatic);
   // Mount auth router with /api prefix to match frontend expectations
   app.use("/api", authRouter);
   app.use(authRouter); // Also mount without prefix for backward compatibility
