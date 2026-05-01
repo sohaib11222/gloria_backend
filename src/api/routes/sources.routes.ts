@@ -4971,11 +4971,18 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
 
         // ── Try OTA XML parsing (OTA_VehAvailRateRS) ──
         const trimmed = responseText.trim();
+        // GLORIA_availabilityrs must use the Gloria parser only — OTA pre-parse can mis-detect
+        // (e.g. VehAvailRSCore mentioned in prose) or build a partial tree and skip Gloria extraction.
+        const skipOtaXmlPreparse =
+          trimmed.includes("GLORIA_availability") ||
+          trimmed.includes("VehAvairsdetails") ||
+          trimmed.includes("vehavailmaindet");
         if (
-          trimmed.startsWith("<?xml") ||
-          trimmed.startsWith("<OTA_VehAvailRateRS") ||
-          trimmed.startsWith("<OTA_") ||
-          (trimmed.startsWith("<") && trimmed.includes("VehAvailRSCore"))
+          !skipOtaXmlPreparse &&
+          (trimmed.startsWith("<?xml") ||
+            trimmed.startsWith("<OTA_VehAvailRateRS") ||
+            trimmed.startsWith("<OTA_") ||
+            (trimmed.startsWith("<") && trimmed.includes("VehAvailRSCore")))
         ) {
           try {
             const { XMLParser } = await import("fast-xml-parser");
@@ -5066,7 +5073,8 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                 // Force arrays for repeated GLORIA children so we never collapse 16 cars into one node
                 isArray: (tagName: string) => {
                   const t = tagName.toLowerCase();
-                  return t === "availcars" || t === "item" || t === "country";
+                  // Only force arrays where siblings repeat; avoid "Item" (breaks some feeds + attribute handling)
+                  return t === "availcars" || t === "country";
                 },
               });
               const parsedXml = xmlParser.parse(responseText);

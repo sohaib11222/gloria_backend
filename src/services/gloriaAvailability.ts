@@ -91,14 +91,42 @@ function readElementAttrs(node: any): Record<string, string> {
   };
   const n = unwrapOne(node);
   if (!n || typeof n !== "object") return out;
+  // fast-xml-parser may expose internal attr map as ":@"
+  const internalAttrs = (n as any)[":@"];
+  if (internalAttrs && typeof internalAttrs === "object") {
+    const grouped = internalAttrs["@attributes"];
+    if (grouped && typeof grouped === "object") add(grouped as any);
+    else add(internalAttrs as any);
+  }
   add(attrs(n) as any);
   for (const [k, v] of Object.entries(n)) {
-    if (k === "@attributes" || k === "#text" || k.startsWith(":")) continue;
+    if (k === "@attributes" || k === "#text" || k === ":@" || k.startsWith(":")) continue;
     if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
       if (out[k] == null || out[k] === "") out[k] = String(v);
     }
   }
+  // Element children that are plain text leaves: { Make: "SKODA" } already handled; { Make: { "#text": "x" } } }
+  for (const [k, v] of Object.entries(n)) {
+    if (k === "@attributes" || k === "#text" || k === ":@" || k.startsWith(":")) continue;
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const t = (v as any)["#text"];
+      if (typeof t === "string" || typeof t === "number" || typeof t === "boolean") {
+        if (out[k] == null || out[k] === "") out[k] = String(t);
+      }
+    }
+  }
   return out;
+}
+
+/** Unwrap <vehdetails><vehdetails @attrs/></vehdetails> style nesting (max 4 hops). */
+function peelSameNameWrapper(node: any, ...names: string[]): any {
+  let cur = unwrapOne(node);
+  for (let hop = 0; hop < 4 && cur && typeof cur === "object"; hop++) {
+    const next = unwrapOne(pickChildCI(cur, ...names));
+    if (!next || next === cur) break;
+    cur = next;
+  }
+  return cur;
 }
 
 function bagGet(bag: Record<string, string>, ...keys: string[]): string | undefined {
@@ -116,6 +144,8 @@ const SKIP_CHILD_KEYS = new Set([
   "includedinprice",
   "notincludedinprice",
   "optionalextras",
+  "terms",
+  "item",
   "@attributes",
   "#text",
 ]);
@@ -131,6 +161,16 @@ function fallbackAttrBagFromCar(car: any): Record<string, string> {
     if (bagGet(bag, "Make", "Model", "ACRISS")) return bag;
   }
   return {};
+}
+
+/** Real availcar rows have ACRISS (or vehdetails / pricing); drops Terms.Item noise if any slip through. */
+function looksLikeAvailCar(car: any): boolean {
+  if (!car || typeof car !== "object") return false;
+  const bag = readElementAttrs(car);
+  if (bagGet(bag, "ACRISS", "VehicleClass")) return true;
+  if (pickChildCI(car, "vehdetails", "Vehdetails", "VehDetails", "vehicle", "Vehicle")) return true;
+  if (pickChildCI(car, "pricing", "Pricing")) return true;
+  return false;
 }
 
 function toNum(v: any): number {
@@ -165,16 +205,25 @@ export function parseGloriaAvailabilityOffers(
     root?.VehAvaildetails ||
     root?.vehavairsdetails ||
     (root?.availcars || root?.AvailCars ? root : null);
-  const cars = extractAvailCarsFromDetails(details);
+  const rawCars = extractAvailCarsFromDetails(details);
+  const carsFiltered = rawCars.filter(looksLikeAvailCar);
+  const cars = carsFiltered.length > 0 ? carsFiltered : rawCars;
   const offers: Offer[] = [];
 
   for (let i = 0; i < cars.length; i++) {
     const car = cars[i];
     if (car == null || typeof car !== "object") continue;
-    const vehNode = unwrapOne(
-      pickChildCI(car, "vehdetails", "Vehdetails", "VehDetails", "vehicle", "Vehicle")
+    const vehNode = peelSameNameWrapper(
+      pickChildCI(car, "vehdetails", "Vehdetails", "VehDetails", "vehicle", "Vehicle"),
+      "vehdetails",
+      "Vehdetails",
+      "VehDetails"
     );
-    const pricingNode = unwrapOne(pickChildCI(car, "pricing", "Pricing"));
+    const pricingNode = peelSameNameWrapper(
+      pickChildCI(car, "pricing", "Pricing"),
+      "pricing",
+      "Pricing"
+    );
     const carBag = readElementAttrs(car);
     let veh = readElementAttrs(vehNode);
     if (!Object.keys(veh).length) veh = fallbackAttrBagFromCar(car);
