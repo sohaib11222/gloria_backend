@@ -6,9 +6,10 @@ import { requireAuth } from "../../infra/auth.js";
 import { requireCompanyType } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
 import { isOtaVehAvailResponse, parseOtaVehAvailResponse } from "../../adapters/grpc.adapter.js";
-import { convertPhpVarDumpToVehAvailRS } from "../../services/phpVarDumpVehAvail.js";
+import { convertPhpVarDumpToObject, convertPhpVarDumpToVehAvailRS } from "../../services/phpVarDumpVehAvail.js";
 import { buildOtaVehAvailRateRQ } from "../../services/otaXmlBuilder.js";
 import { makeGrpcSourceAdapter } from "../../adapters/grpcSourceAdapter.js";
+import { parseGloriaAvailabilityOffers } from "../../services/gloriaAvailability.js";
 /** Require active subscription for source; return null if ok, or { status, body } to send as 402 */
 async function requireActiveSubscription(sourceId) {
     const sub = await prisma.sourceSubscription.findUnique({
@@ -4316,18 +4317,60 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                         console.warn("[fetch-availability] PHP var_dump parse failed:", phpErr?.message);
                     }
                 }
-                if (!raw || typeof raw !== "object" || !isOtaVehAvailResponse(raw)) {
+                // GLORIA availability fallback (XML/JSON/var_dump tree with VehAvairsdetails.availcars)
+                if ((!raw || typeof raw !== "object" || !isOtaVehAvailResponse(raw))) {
+                    let gloriaRoot = null;
+                    if (raw && typeof raw === "object") {
+                        if (raw.GLORIA_availabilityrs)
+                            gloriaRoot = raw.GLORIA_availabilityrs;
+                        else if (raw.VehAvairsdetails)
+                            gloriaRoot = raw;
+                    }
+                    if (!gloriaRoot && trimmed.startsWith("<") && responseText.includes("GLORIA_availability")) {
+                        try {
+                            const { XMLParser } = await import("fast-xml-parser");
+                            const xmlParser = new XMLParser({
+                                ignoreAttributes: false,
+                                attributesGroupName: "@attributes",
+                                attributeNamePrefix: "",
+                                parseAttributeValue: false,
+                                trimValues: true,
+                            });
+                            const parsedXml = xmlParser.parse(responseText);
+                            const rootKey = Object.keys(parsedXml).find((k) => k.includes("GLORIA_availabilityrs"));
+                            gloriaRoot = rootKey ? parsedXml[rootKey] : parsedXml;
+                        }
+                        catch { /* no-op */ }
+                    }
+                    if (!gloriaRoot && typeof responseText === "string" && responseText.includes("VehAvairsdetails")) {
+                        try {
+                            const parsedVarDump = convertPhpVarDumpToObject(responseText);
+                            gloriaRoot = parsedVarDump?.GLORIA_availabilityrs || parsedVarDump;
+                        }
+                        catch { /* no-op */ }
+                    }
+                    if (gloriaRoot) {
+                        offers = parseGloriaAvailabilityOffers(gloriaRoot, sourceId, { agreement_ref: requestorId });
+                        parsedPreview = {
+                            type: "gloria-availability",
+                            offersCount: offers.length,
+                            firstOffer: offers[0] ?? null,
+                        };
+                    }
+                }
+                if (!offers.length && (!raw || typeof raw !== "object" || !isOtaVehAvailResponse(raw))) {
                     return res.status(400).json({
                         error: "INVALID_FORMAT",
-                        message: "Response must be OTA VehAvailRateRS XML (or JSON/PHP var_dump) with VehAvailRSCore and VehVendorAvails",
+                        message: "Response must be OTA VehAvailRateRS or GLORIA_availabilityrs (VehAvairsdetails.availcars)",
                         rawResponsePreview,
                         details: {
                             expectedFormats: [
                                 "OTA XML: <?xml ...><OTA_VehAvailRateRS ...><VehAvailRSCore>...</VehAvailRSCore><VehVendorAvails>...</VehVendorAvails></OTA_VehAvailRateRS>",
-                                "JSON object with root keys VehAvailRSCore and VehVendorAvails (Content-Type: application/json)",
-                                "PHP var_dump text containing VehAvailRSCore and VehVendorAvails (parsed automatically)",
+                                "GLORIA XML: <GLORIA_availabilityrs ...><VehAvairsdetails><availcars>...</availcars></VehAvairsdetails></GLORIA_availabilityrs>",
+                                "JSON object with OTA keys (VehAvailRSCore/VehVendorAvails) or GLORIA key (VehAvairsdetails)",
+                                "PHP var_dump text containing OTA keys or GLORIA VehAvairsdetails",
                             ],
-                            help: "The endpoint should accept OTA_VehAvailRateRQ XML (Content-Type: text/xml) and return OTA_VehAvailRateRS XML.",
+                            help: "For XML adapter, Gloria sends OTA_VehAvailRateRQ. Your endpoint can respond in OTA_VehAvailRateRS or GLORIA_availabilityrs.",
                             dataPreview: typeof responseText === "string" ? responseText.slice(0, 500) + (responseText.length > 500 ? "…" : "") : undefined,
                         },
                     });
@@ -4354,7 +4397,9 @@ sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyT
                 catch (e) {
                     console.warn("[fetch-availability] parsedPreview capture failed:", e?.message);
                 }
-                offers = parseOtaVehAvailResponse(raw, sourceId, criteria);
+                if (!offers.length) {
+                    offers = parseOtaVehAvailResponse(raw, sourceId, criteria);
+                }
             } // end else (OTA XML)
             // ════════════════════════════════════════════════════════════════════
             // COMMON: build offersSummary, dedup, upsert, respond
