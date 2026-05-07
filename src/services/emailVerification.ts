@@ -116,26 +116,61 @@ export class EmailVerificationService {
       });
 
       const duration = Date.now() - startTime;
-      const responseData = await response.json() as OTPEmailApiResponse;
+      const contentType = response.headers.get("content-type") || "";
+      const rawBody = await response.text();
+      let responseData: OTPEmailApiResponse | null = null;
+      let parseError: string | null = null;
+      if (rawBody.trim()) {
+        try {
+          responseData = JSON.parse(rawBody) as OTPEmailApiResponse;
+        } catch (e: any) {
+          parseError = e?.message || "Invalid JSON";
+        }
+      }
 
       console.log(`   [${attemptId}] API Response received (${duration}ms):`);
       console.log(`      Status: ${response.status}`);
-      console.log(`      Response:`, JSON.stringify(responseData, null, 2));
+      console.log(`      Content-Type: ${contentType || "unknown"}`);
+      if (responseData) {
+        console.log(`      Response JSON:`, JSON.stringify(responseData, null, 2));
+      } else {
+        console.log(`      Response Text (first 400):`, rawBody.slice(0, 400));
+        if (parseError) {
+          console.log(`      JSON Parse Error: ${parseError}`);
+        }
+      }
 
       if (!response.ok) {
         // Handle error responses
-        const errorResponse = responseData as OTPEmailApiErrorResponse;
-        const errorMessage = errorResponse.message || `Failed to send OTP: HTTP ${response.status}`;
+        const errorResponse = responseData as OTPEmailApiErrorResponse | null;
+        const errorMessage =
+          errorResponse?.message ||
+          rawBody.slice(0, 200) ||
+          `Failed to send OTP: HTTP ${response.status}`;
         externalApiError = {
           type: 'API_ERROR',
           status: response.status,
           message: errorMessage,
-          errors: errorResponse.errors,
+          errors: errorResponse?.errors,
         };
         console.log(`   [${attemptId}] ❌ External API returned error: ${errorMessage}`);
       } else {
-        // Success response
-        const successResponse = responseData as OTPEmailApiSuccessResponse;
+        // Success response:
+        // - Prefer structured JSON when available
+        // - But also accept successful non-JSON 2xx responses from third-party providers
+        const successResponse = responseData as OTPEmailApiSuccessResponse | null;
+        const apiReportedError = responseData && (responseData as any).status === "error";
+        if (apiReportedError) {
+          externalApiError = {
+            type: "API_ERROR",
+            status: response.status,
+            message: (responseData as OTPEmailApiErrorResponse).message || "External API returned status=error",
+            errors: (responseData as OTPEmailApiErrorResponse).errors,
+          };
+          console.log(`   [${attemptId}] ❌ External API returned status=error on HTTP ${response.status}`);
+          console.log(`      Message: ${externalApiError.message}`);
+          // Fall through to SMTP fallback
+        } else {
         externalApiSuccess = true;
         console.log(`\n${'='.repeat(80)}`);
         console.log(`✅ [EmailVerification] OTP Email Sent Successfully via External API`);
@@ -144,11 +179,12 @@ export class EmailVerificationService {
         console.log(`   OTP: ${otp}`);
         console.log(`   Status: Email sent successfully via external API`);
         console.log(`   Duration: ${duration}ms`);
-        if (successResponse.data?.sent_at) {
+        if (successResponse?.data?.sent_at) {
           console.log(`   Sent at: ${successResponse.data.sent_at}`);
         }
         console.log(`${'='.repeat(80)}\n`);
         return otp;
+        }
       }
     } catch (error: any) {
       externalApiError = {
