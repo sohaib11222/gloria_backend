@@ -86,7 +86,15 @@ async function createTransporter(): Promise<nodemailer.Transporter> {
     console.log(`   Port: ${emailPort || '587'}`);
     console.log(`   User: ${emailUser}`);
     console.log(`   Secure: ${emailSecure}`);
-    
+
+    const port = parseInt(emailPort || "587", 10);
+    // Port 465 uses implicit TLS (SMTPS); 587 uses STARTTLS (secure=false + requireTLS).
+    const secureTls = port === 465 || emailSecure;
+
+    const smtpTimeoutMs = Math.min(
+      Math.max(parseInt(process.env.EMAIL_SMTP_TIMEOUT_MS || "45000", 10) || 45000, 5000),
+      120000
+    );
     // Check if we should use an HTTP-based email service (SendGrid, Mailgun, etc.)
     const useHttpService = process.env.EMAIL_SERVICE === 'sendgrid' || process.env.EMAIL_SERVICE === 'mailgun';
     
@@ -144,26 +152,24 @@ async function createTransporter(): Promise<nodemailer.Transporter> {
     
     cachedTransporter = nodemailer.createTransport({
       host: emailHost,
-      port: parseInt(emailPort || '587', 10),
-      secure: emailSecure, // true for 465, false for 587
-      requireTLS: !emailSecure, // For port 587, require TLS/STARTTLS
+      port,
+      secure: secureTls,
+      requireTLS: !secureTls && port === 587,
       auth: {
         user: emailUser,
-        pass: emailPass?.replace(/\s+/g, ''), // Remove spaces from password (Gmail app passwords shouldn't have spaces)
+        pass: emailPass?.replace(/\s+/g, ""),
       },
-      // Add connection timeout
-      connectionTimeout: 20000, // Increased for slow connections
-      greetingTimeout: 20000,
-      socketTimeout: 20000,
-      // TLS settings for Gmail
+      connectionTimeout: smtpTimeoutMs,
+      greetingTimeout: smtpTimeoutMs,
+      socketTimeout: smtpTimeoutMs,
       tls: {
-        rejectUnauthorized: true, // Verify SSL certificate (recommended)
-        minVersion: 'TLSv1.2' // Use TLS 1.2 or higher
+        rejectUnauthorized: true,
+        minVersion: "TLSv1.2" as const,
+        ...(emailHost ? { servername: emailHost } : {}),
       },
-      // Add proxy support if HTTP_PROXY or HTTPS_PROXY is set
-      ...(process.env.HTTP_PROXY || process.env.HTTPS_PROXY ? {
-        proxy: process.env.HTTP_PROXY || process.env.HTTPS_PROXY
-      } : {})
+      ...(process.env.HTTP_PROXY || process.env.HTTPS_PROXY
+        ? { proxy: process.env.HTTP_PROXY || process.env.HTTPS_PROXY }
+        : {}),
     });
     
     // Verify connection

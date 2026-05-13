@@ -1,5 +1,6 @@
 import { prisma } from "../data/prisma.js";
 import { generateCompanyCode } from "../infra/companyCode.js";
+import { sanitizeTransportError, summarizeExternalOtpApiError } from "../infra/emailDeliveryError.js";
 import crypto from "crypto";
 
 interface OTPEmailApiSuccessResponse {
@@ -22,7 +23,10 @@ type OTPEmailApiResponse = OTPEmailApiSuccessResponse | OTPEmailApiErrorResponse
 export class EmailVerificationService {
   private static readonly OTP_LENGTH = 4;
   private static readonly OTP_EXPIRY_MINUTES = 10;
-  private static readonly OTP_EMAIL_API_URL = process.env.OTP_EMAIL_API_URL || "https://troosolar.hmstech.org/api/email/send-otp";
+  /** Set `OTP_EMAIL_API_URL` in .env to use an external OTP mail API; if unset, only SMTP (`EMAIL_*`) is used. */
+  private static otpEmailApiUrl(): string {
+    return (process.env.OTP_EMAIL_API_URL || "").trim();
+  }
 
   /**
    * Generate a 4-digit OTP
@@ -47,6 +51,9 @@ export class EmailVerificationService {
     console.log(`   OTP: ${otp}`);
     console.log(`   Expires: ${expiresAt.toISOString()}`);
     console.log(`   Timestamp: ${new Date().toISOString()}`);
+
+    const otpApiUrl = this.otpEmailApiUrl();
+    console.log(`   OTP_EMAIL_API_URL: ${otpApiUrl ? "set (external API will be tried first)" : "not set (SMTP only)"}`);
 
     // Check if company exists before updating
     const existingCompany = await prisma.company.findUnique({
@@ -85,35 +92,36 @@ export class EmailVerificationService {
     const subject = "Verify Your Email - Car Hire Middleware";
     const message = `Hello ${companyName}!\n\nThank you for registering with Car Hire Middleware. To complete your registration, please verify your email address using the OTP code provided.\n\nThis code will expire in ${this.OTP_EXPIRY_MINUTES} minutes. Do not share this code with anyone.\n\nIf you have any questions, please contact our support team.`;
 
-    console.log(`   API URL: ${this.OTP_EMAIL_API_URL}`);
-    console.log(`   Attempting to send via external API...`);
-    console.log(`${'='.repeat(80)}\n`);
-    
     let externalApiSuccess = false;
     let externalApiError: any = null;
 
-    // Try external API first
-    try {
-      const requestBody = {
-        email: email,
-        otp_code: otp,
-        subject: subject,
-        message: message,
-      };
+    if (otpApiUrl) {
+      console.log(`   API URL: ${otpApiUrl}`);
+      console.log(`   Attempting to send via external API...`);
+      console.log(`${'='.repeat(80)}\n`);
 
-      console.log(`   [${attemptId}] Calling external API: ${this.OTP_EMAIL_API_URL}`);
-      const startTime = Date.now();
+      // Try external API first (only when configured)
+      try {
+        const requestBody = {
+          email: email,
+          otp_code: otp,
+          subject: subject,
+          message: message,
+        };
 
-      const response = await fetch(this.OTP_EMAIL_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-        // Add timeout
-        signal: AbortSignal.timeout(30000), // 30 second timeout
-      });
+        console.log(`   [${attemptId}] Calling external API: ${otpApiUrl}`);
+        const startTime = Date.now();
+
+        const response = await fetch(otpApiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(requestBody),
+          // Add timeout
+          signal: AbortSignal.timeout(30000), // 30 second timeout
+        });
 
       const duration = Date.now() - startTime;
       const contentType = response.headers.get("content-type") || "";
@@ -197,11 +205,18 @@ export class EmailVerificationService {
       console.log(`      Error type: ${error.name || 'Unknown'}`);
       console.log(`      Error code: ${error.code || 'N/A'}`);
     }
+    } else {
+      console.log(`   [${attemptId}] OTP_EMAIL_API_URL not set — skipping external OTP API (SMTP only).`);
+    }
 
-    // If external API failed, try SMTP fallback
+    // If external API failed or was skipped, try SMTP fallback
     if (!externalApiSuccess) {
       console.log(`\n${'='.repeat(80)}`);
-      console.log(`⚠️  [EmailVerification] External API Failed - Trying SMTP Fallback`);
+      console.log(
+        otpApiUrl
+          ? `⚠️  [EmailVerification] External API did not succeed — trying SMTP fallback`
+          : `📧 [EmailVerification] Sending OTP via SMTP`
+      );
       console.log(`${'='.repeat(80)}`);
       console.log(`   Email: ${email}`);
       console.log(`   OTP: ${otp} (still stored in database)`);
@@ -285,7 +300,7 @@ export class EmailVerificationService {
         return otp;
       } catch (smtpError: any) {
         console.log(`\n${'='.repeat(80)}`);
-        console.log(`❌ [EmailVerification] Both External API and SMTP Failed`);
+        console.log(`❌ [EmailVerification] OTP email was not sent`);
         console.log(`${'='.repeat(80)}`);
         console.log(`   Email: ${email}`);
         console.log(`   OTP: ${otp} (still stored in database)`);
@@ -294,9 +309,29 @@ export class EmailVerificationService {
         console.log(`   Note: OTP is still valid and stored. User can request resend.`);
         console.log(`   User can use resend-otp endpoint to try again.`);
         console.log(`${'='.repeat(80)}\n`);
-        
-        // Re-throw with details about both failures
-        throw new Error(`Failed to send verification email. External API: ${externalApiError?.message || 'unknown'}, SMTP: ${smtpError.message}`);
+
+        const smtpSan = sanitizeTransportError(smtpError);
+        const extSummary = externalApiError
+          ? summarizeExternalOtpApiError(externalApiError)
+          : otpApiUrl
+            ? "external API did not succeed"
+            : "external API was not configured";
+
+        const err = new Error(smtpSan.message) as Error & {
+          emailDelivery?: Record<string, unknown>;
+        };
+        err.emailDelivery = {
+          code: smtpSan.code,
+          message: smtpSan.message,
+          step: "smtp",
+          externalApiAttempted: !!otpApiUrl,
+          externalApiSummary: otpApiUrl ? extSummary : undefined,
+          ...(process.env.EXPOSE_EMAIL_DELIVERY_DETAILS === "true" && {
+            technicalSmtp: smtpError?.message,
+            technicalExternal: externalApiError,
+          }),
+        };
+        throw err;
       }
     }
 

@@ -240,27 +240,55 @@ authRouter.post("/auth/register", async (req, res, next) => {
     // Send OTP email
     let emailSent = false;
     let emailError: string | null = null;
+    let emailIssue: {
+      code: string;
+      message: string;
+      step?: string;
+      externalApiAttempted?: boolean;
+      externalApiSummary?: string;
+      technicalSmtp?: string;
+      technicalExternal?: unknown;
+    } | null = null;
     try {
       const otp = await EmailVerificationService.sendOTPEmail(body.email, body.companyName);
       emailSent = true;
       console.log(`✅ Registration successful for ${body.email}, OTP sent: ${otp}`);
     } catch (emailErr: any) {
       emailSent = false;
-      emailError = emailErr.message || "Unknown error";
+      emailIssue = emailErr?.emailDelivery || null;
+      emailError = emailIssue?.message || emailErr?.message || "Unknown error";
       console.error(`❌ Registration succeeded but failed to send OTP email to ${body.email}:`, emailErr);
       // Registration still succeeds, but user will need to resend OTP
     }
 
+    const failMessage = emailIssue
+      ? `Registration succeeded, but we could not send the verification email (${emailIssue.message}). Use "Resend code" on the sign-in page.`
+      : "Registration succeeded, but we could not send the verification email. Use \"Resend code\" on the sign-in page.";
+
     // Return response with email status
     // NEVER include OTP in API response for security reasons
     const response: any = {
-      message: emailSent 
+      message: emailSent
         ? "Registration successful! Please check your email for verification code."
-        : "Registration successful! However, we couldn't send the verification email. Please use the resend OTP feature or check the server console (development mode only).",
+        : failMessage,
       email: body.email,
       companyName: body.companyName,
       status: "PENDING_VERIFICATION",
       emailSent,
+      ...(emailIssue && {
+        emailIssue: {
+          code: emailIssue.code,
+          message: emailIssue.message,
+          ...(emailIssue.step ? { step: emailIssue.step } : {}),
+          ...(emailIssue.externalApiAttempted === true && emailIssue.externalApiSummary
+            ? { externalApiSummary: emailIssue.externalApiSummary }
+            : {}),
+          ...(process.env.EXPOSE_EMAIL_DELIVERY_DETAILS === "true" && {
+            technicalSmtp: emailIssue.technicalSmtp,
+            technicalExternal: emailIssue.technicalExternal,
+          }),
+        },
+      }),
     };
     
     // Log OTP to console in development mode only (never in API response)
