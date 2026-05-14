@@ -1,14 +1,28 @@
 import nodemailer from "nodemailer";
 import { prisma } from "../data/prisma.js";
+import { EMAIL_BRAND } from "./emailBrand.js";
 
 function trimEnvQuotes(str: string | undefined): string {
   if (!str) return "";
-  return str.replace(/^["']|["']$/g, "").trim();
+  return str.replace(/^\uFEFF/, "").replace(/^["']|["']$/g, "").trim();
 }
 
-/** True when SendGrid or Resend API keys are set. When true, `sendMail` uses HTTPS and skips SMTP. */
+/** True when SendGrid, Resend, or Brevo transactional API is configured (HTTPS / port 443). */
 export function isHttpsMailApiConfigured(): boolean {
-  return !!trimEnvQuotes(process.env.SENDGRID_API_KEY) || !!trimEnvQuotes(process.env.RESEND_API_KEY);
+  return (
+    !!trimEnvQuotes(process.env.SENDGRID_API_KEY) ||
+    !!trimEnvQuotes(process.env.RESEND_API_KEY) ||
+    !!resolveBrevoHttpApiKey()
+  );
+}
+
+/** Brevo v3 transactional API key (xkeysib-…). Not the SMTP relay password (xsmtpsib-…). */
+function resolveBrevoHttpApiKey(): string {
+  const explicit = trimEnvQuotes(process.env.BREVO_API_KEY);
+  if (explicit) return explicit;
+  const pass = trimEnvQuotes(process.env.EMAIL_PASS);
+  if (pass.startsWith("xkeysib-")) return pass;
+  return "";
 }
 
 async function sendMailViaSendGridHttp(
@@ -77,6 +91,49 @@ async function sendMailViaResendHttp(
     /* ignore */
   }
   return { messageId: id || "resend-accepted", response: raw.slice(0, 200) };
+}
+
+async function sendMailViaBrevoHttp(
+  opts: { to: string; subject: string; html: string },
+  fromEmail: string,
+  fromName: string,
+  apiKey: string
+): Promise<{ messageId?: string; response: string }> {
+  // Always prefer EMAIL_FROM for Brevo transactional API (matches curl / verified sender).
+  const envFrom = trimEnvQuotes(process.env.EMAIL_FROM);
+  const senderEmail =
+    envFrom && looksLikeEmailAddress(envFrom) ? envFrom : fromEmail;
+  console.log(`📧 Brevo transactional API sender.email: ${senderEmail}`);
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "api-key": apiKey,
+    },
+    body: JSON.stringify({
+      sender: { name: fromName, email: senderEmail },
+      to: [{ email: opts.to }],
+      subject: opts.subject,
+      htmlContent: opts.html,
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  const raw = await res.text();
+  if (!res.ok) {
+    const err = new Error(`Brevo API HTTP ${res.status}: ${raw.slice(0, 400)}`) as Error & {
+      code?: string;
+    };
+    err.code = res.status === 401 || res.status === 403 ? "EAUTH" : "EHTTP";
+    throw err;
+  }
+  let messageId: string | undefined;
+  try {
+    messageId = (JSON.parse(raw) as { messageId?: string }).messageId;
+  } catch {
+    /* ignore */
+  }
+  return { messageId: messageId || "brevo-accepted", response: raw.slice(0, 200) };
 }
 
 let cachedTransporter: nodemailer.Transporter | null = null;
@@ -276,7 +333,7 @@ async function createTransporter(): Promise<nodemailer.Transporter> {
         console.error(`      sudo ufw allow out 587/tcp`);
         console.error(`      sudo ufw allow out 25/tcp`);
         console.error(`\n   2. Use HTTPS mail API (recommended when SMTP is blocked):`);
-        console.error(`      - Set SENDGRID_API_KEY=... or RESEND_API_KEY=... (see .env.example).`);
+        console.error(`      - Set SENDGRID_API_KEY, RESEND_API_KEY, or BREVO_API_KEY (Brevo v3 xkeysib-…) — see .env.example.`);
         console.error(`      - Or legacy: EMAIL_SERVICE=sendgrid with SendGrid SMTP (still uses port 587).`);
         console.error(`\n   3. Contact your hosting provider to unblock SMTP ports.`);
         console.error(`\n   For Gmail (if ports are open):`);
@@ -322,7 +379,7 @@ async function createTransporter(): Promise<nodemailer.Transporter> {
   console.warn("        user: 'your-email@gmail.com',");
   console.warn("        password: 'your-app-password',");
   console.warn("        fromEmail: 'your-email@gmail.com',");
-  console.warn("        fromName: 'Car Hire Middleware'");
+        console.warn("        fromName: 'Gloria Connect'");
   console.warn("      }");
   console.warn("");
   console.warn("   2. Environment variables in .env file:");
@@ -371,6 +428,19 @@ export function invalidateMailerCache() {
   transporterCacheTime = 0;
 }
 
+function looksLikeEmailAddress(s: string): boolean {
+  const t = s.trim();
+  if (t.length < 5 || !t.includes("@") || !t.includes(".")) return false;
+  // Practical check (not full RFC); allows subdomains e.g. mail.gloriaconnect.com
+  return /^[^\s<>@]+@[^\s<>@]+(\.[^\s<>@]+)+$/.test(t);
+}
+
+/** Brevo default / shared send domains — never use as From for transactional mail. */
+function isBrevoSharedOrRelaySender(email: string): boolean {
+  const e = email.toLowerCase();
+  return e.includes("brevosend.com") || e.includes("mailin.fr") || e.endsWith("@smtp-brevo.com");
+}
+
 export async function sendMail(opts: { to: string; subject: string; html: string; from?: string }) {
   const startTime = Date.now();
   const emailId = `email-${Date.now()}-${Math.random().toString(36).substring(7)}`;
@@ -382,39 +452,60 @@ export async function sendMail(opts: { to: string; subject: string; html: string
   console.log(`   To: ${opts.to}`);
   console.log(`   Subject: ${opts.subject}`);
 
-  let fromEmail = opts.from || process.env.EMAIL_FROM || "no-reply@carhire.local";
-  let fromName = "Car Hire Middleware";
-
   const smtpConfig = await prisma.smtpConfig.findFirst({
     where: { enabled: true },
     orderBy: { updatedAt: "desc" },
   });
 
-  if (smtpConfig) {
-    fromEmail = smtpConfig.fromEmail || fromEmail;
-    if (smtpConfig.fromName) {
-      fromName = smtpConfig.fromName;
-    }
-  } else if (process.env.EMAIL_FROM) {
-    fromEmail = process.env.EMAIL_FROM;
-  }
-
-  const from = smtpConfig?.fromName ? `${smtpConfig.fromName} <${fromEmail}>` : fromEmail;
-
   const sendgridKey = trimEnvQuotes(process.env.SENDGRID_API_KEY);
   const resendKey = trimEnvQuotes(process.env.RESEND_API_KEY);
-  const prefersHttpsApi = !!sendgridKey || !!resendKey;
+  const brevoKey = resolveBrevoHttpApiKey();
+  const prefersHttpsApi = !!sendgridKey || !!resendKey || !!brevoKey;
+
+  const optsFromRaw = opts.from ? trimEnvQuotes(opts.from) : "";
+  const envFromRaw = trimEnvQuotes(process.env.EMAIL_FROM);
+
+  let fromName: string = EMAIL_BRAND.full;
+  if (smtpConfig?.fromName) {
+    fromName = smtpConfig.fromName;
+  }
+
+  let fromEmail: string;
+  if (optsFromRaw && looksLikeEmailAddress(optsFromRaw)) {
+    fromEmail = optsFromRaw;
+  } else if (envFromRaw && looksLikeEmailAddress(envFromRaw)) {
+    // Canonical sender for transactional mail — always wins over admin SMTP relay placeholders
+    fromEmail = envFromRaw;
+  } else if (
+    smtpConfig?.fromEmail &&
+    looksLikeEmailAddress(smtpConfig.fromEmail) &&
+    !isBrevoSharedOrRelaySender(smtpConfig.fromEmail)
+  ) {
+    fromEmail = smtpConfig.fromEmail;
+  } else {
+    fromEmail = "noreply@gloriaconnect.com";
+  }
+
+  const from = `${fromName} <${fromEmail}>`;
 
   const usingAdminConfig = !!smtpConfig;
   const usingHttpsMail = prefersHttpsApi;
   const usingEnvSmtp = !prefersHttpsApi && !smtpConfig && !!process.env.EMAIL_HOST;
   const usingStreamTransport = !prefersHttpsApi && !smtpConfig && !process.env.EMAIL_HOST;
 
+  const httpsProviderLabel = sendgridKey
+    ? "SendGrid"
+    : resendKey
+      ? "Resend"
+      : brevoKey
+        ? "Brevo"
+        : "";
+
   console.log(`   From: ${from}`);
   console.log(
     `   Configuration Source: ${
       usingHttpsMail
-        ? `HTTPS mail API (${sendgridKey ? "SendGrid" : "Resend"})${usingAdminConfig ? " — overrides SMTP; from-address from admin/env" : ""}`
+        ? `HTTPS mail API (${httpsProviderLabel})${usingAdminConfig ? " — From address uses EMAIL_FROM in .env when set" : ""}`
         : usingAdminConfig
           ? "Admin Panel (SMTP)"
           : usingEnvSmtp
@@ -424,7 +515,9 @@ export async function sendMail(opts: { to: string; subject: string; html: string
   );
 
   if (usingHttpsMail && usingAdminConfig) {
-    console.log(`   (SMTP also configured in admin but not used while SENDGRID_API_KEY / RESEND_API_KEY is set)`);
+    console.log(
+      `   (SMTP also configured in admin; From still follows EMAIL_FROM from .env when set)`
+    );
     console.log(`   Admin SMTP host (unused): ${smtpConfig.host}:${smtpConfig.port}`);
   } else if (usingAdminConfig) {
     console.log(`   SMTP Config (Admin Panel):`);
@@ -433,7 +526,7 @@ export async function sendMail(opts: { to: string; subject: string; html: string
     console.log(`      Secure: ${smtpConfig.secure}`);
     console.log(`      User: ${smtpConfig.user}`);
   } else if (usingHttpsMail) {
-    console.log(`   HTTPS mail: ${sendgridKey ? "SendGrid" : "Resend"} (port 443; no outbound SMTP required)`);
+    console.log(`   HTTPS mail: ${httpsProviderLabel} (port 443; no outbound SMTP required)`);
   } else if (usingEnvSmtp) {
     console.log(`   SMTP Config (Environment Variables):`);
     console.log(`      Host: ${process.env.EMAIL_HOST}`);
@@ -446,7 +539,7 @@ export async function sendMail(opts: { to: string; subject: string; html: string
     console.log(`   Email will only be logged to console.`);
   }
 
-  const otpMatch = opts.html.match(/<div class="otp-code">(\d{4})<\/div>/);
+  const otpMatch = opts.html.match(/<(?:div|span) class="otp-code">(\d{4})<\/(?:div|span)>/);
   if (otpMatch) {
     console.log(`   🔑 OTP Code in email: ${otpMatch[1]}`);
   }
@@ -490,6 +583,24 @@ export async function sendMail(opts: { to: string; subject: string; html: string
       return { messageId: result.messageId, response: result.response } as any;
     }
 
+    if (brevoKey) {
+      const sendStartTime = Date.now();
+      const result = await sendMailViaBrevoHttp(opts, fromEmail, fromName, brevoKey);
+      const sendDuration = Date.now() - sendStartTime;
+      const totalDuration = Date.now() - startTime;
+      console.log(`\n${'='.repeat(80)}`);
+      console.log(`✅ [${emailId}] EMAIL SENT SUCCESSFULLY (Brevo HTTPS)`);
+      console.log(`${'='.repeat(80)}`);
+      console.log(`   To: ${opts.to}`);
+      console.log(`   From: ${from}`);
+      console.log(`   Subject: ${opts.subject}`);
+      console.log(`   Message ID: ${result.messageId || "N/A"}`);
+      console.log(`   Send Duration: ${sendDuration}ms`);
+      console.log(`   Total Duration: ${totalDuration}ms`);
+      console.log(`${'='.repeat(80)}\n`);
+      return { messageId: result.messageId, response: result.response } as any;
+    }
+
     const transporter = await getMailer();
 
     // Check if we're using streamTransport (development mode)
@@ -510,7 +621,7 @@ export async function sendMail(opts: { to: string; subject: string; html: string
       console.log(`   Duration: ${sendDuration}ms`);
       console.log(`   ${'-'.repeat(78)}`);
       // Extract OTP from HTML if present
-      const otpMatch = opts.html.match(/<div class="otp-code">(\d{4})<\/div>/);
+      const otpMatch = opts.html.match(/<(?:div|span) class="otp-code">(\d{4})<\/(?:div|span)>/);
       if (otpMatch) {
         console.log(`\n   🔑 OTP CODE: ${otpMatch[1]}\n`);
       }
@@ -594,7 +705,7 @@ export async function sendMail(opts: { to: string; subject: string; html: string
       console.log(`   Solution:`);
       console.log(`     1. Run: sudo bash /var/www/gloriaconnect/backend/scripts/fix-email-firewall.sh`);
       console.log(`     2. Or use HTTPS mail on port 443 (works when SMTP is blocked):`);
-      console.log(`        Set SENDGRID_API_KEY=... or RESEND_API_KEY=... in .env (no SMTP needed).`);
+      console.log(`        Set SENDGRID_API_KEY, RESEND_API_KEY, or BREVO_API_KEY (Brevo v3 xkeysib-…) in .env (no SMTP needed).`);
       console.log(`     3. Contact hosting provider to open outbound SMTP (465/587)`);
       console.log(`   See: /var/www/gloriaconnect/backend/EMAIL_FIREWALL_FIX.md`);
     } else {

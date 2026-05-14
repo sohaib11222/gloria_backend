@@ -1,5 +1,6 @@
 import { prisma } from "../data/prisma.js";
 import { sendMail } from "../infra/mailer.js";
+import { EMAIL_BRAND } from "../infra/emailBrand.js";
 
 export async function notifyAgreementDrafted(agreementId: string) {
   const ag = await prisma.agreement.findUnique({
@@ -22,7 +23,7 @@ export async function notifyAgreementDrafted(agreementId: string) {
         <p><strong>Status:</strong> DRAFT</p>
       </div>
       <p>This agreement is currently in draft status and will be offered to you once the source finalizes it.</p>
-      <p>Best regards,<br>Car Hire Middleware Team</p>
+      <p style="margin-top:24px;font-size:14px;color:#64748b;">Best regards,<br><strong>${EMAIL_BRAND.full}</strong></p>
     </div>
   `;
   
@@ -57,7 +58,7 @@ export async function notifyAgreementOffered(agreementId: string) {
         <p><strong>Status:</strong> OFFERED</p>
       </div>
       <p>You can now review and accept this agreement through your dashboard.</p>
-      <p>Best regards,<br>Car Hire Middleware Team</p>
+      <p style="margin-top:24px;font-size:14px;color:#64748b;">Best regards,<br><strong>${EMAIL_BRAND.full}</strong></p>
     </div>
   `;
   
@@ -92,7 +93,7 @@ export async function notifyAgreementAccepted(agreementId: string) {
         <p><strong>Status:</strong> ACCEPTED</p>
       </div>
       <p>The agreement is now ready to be activated and used for bookings.</p>
-      <p>Best regards,<br>Car Hire Middleware Team</p>
+      <p style="margin-top:24px;font-size:14px;color:#64748b;">Best regards,<br><strong>${EMAIL_BRAND.full}</strong></p>
     </div>
   `;
   

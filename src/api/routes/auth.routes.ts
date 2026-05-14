@@ -626,7 +626,7 @@ authRouter.post("/auth/resend-otp", async (req, res, next) => {
     
     if (!isSmtpConfigured) {
       errorType = 'not_configured';
-      errorDetails = 'Mail is not configured. No admin SMTP, no EMAIL_* SMTP env vars, and no SENDGRID_API_KEY / RESEND_API_KEY.';
+      errorDetails = 'Mail is not configured. No admin SMTP, no EMAIL_* SMTP env vars, and no BREVO_API_KEY / SENDGRID_API_KEY / RESEND_API_KEY.';
     } else if (emailError) {
       if (emailError.includes('Authentication') || emailError.includes('BadCredentials') || emailError.includes('Username and Password not accepted')) {
         errorType = 'auth_failed';
@@ -658,16 +658,16 @@ authRouter.post("/auth/resend-otp", async (req, res, next) => {
         configureViaAdmin: "POST /admin/smtp with your SMTP credentials",
         configureViaEnv: "Set EMAIL_HOST, EMAIL_USER, EMAIL_PASS in .env file (no quotes around values)",
         configureViaHttpsApi:
-          "If outbound SMTP is blocked on this server, set SENDGRID_API_KEY or RESEND_API_KEY (HTTPS on port 443). See .env.example.",
+          "If outbound SMTP is blocked, set BREVO_API_KEY (Brevo v3 xkeysib-…), SENDGRID_API_KEY, or RESEND_API_KEY (HTTPS port 443). See .env.example.",
         gmailHelp: "For Gmail: Enable 2-Step Verification and use App Password from https://myaccount.google.com/apppasswords",
         checkConsole: "In development mode, check server console for OTP and detailed error logs",
         note: configSource === 'admin_panel' 
-          ? "⚠️ Admin panel SMTP is active (no HTTPS API key). To bypass blocked SMTP, add SENDGRID_API_KEY or RESEND_API_KEY — it overrides SMTP when set."
+          ? "⚠️ Admin panel SMTP is active (no HTTPS API key). To bypass blocked SMTP, add BREVO_API_KEY (xkeysib-…), SENDGRID_API_KEY, or RESEND_API_KEY — they override SMTP when set."
           : configSource === 'https_mail_api'
-          ? "Using SendGrid or Resend via HTTPS. If sending still fails, check the API key and verified sender domain."
+          ? "Using HTTPS mail (Brevo / SendGrid / Resend). If sending still fails, check the API key and verified sender domain in the provider dashboard."
           : configSource === 'environment_variables'
           ? "Using .env variables. Make sure values have NO quotes: EMAIL_PASS=obmfugyywnvxctez (not EMAIL_PASS=\"obmfugyywnvxctez\")"
-          : "No mail configuration found. Use admin SMTP, .env SMTP, or SENDGRID_API_KEY / RESEND_API_KEY."
+          : "No mail configuration found. Use admin SMTP, .env SMTP, or BREVO_API_KEY / SENDGRID_API_KEY / RESEND_API_KEY."
       } : undefined
     };
 

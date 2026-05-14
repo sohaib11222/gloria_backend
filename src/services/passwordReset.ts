@@ -1,5 +1,6 @@
 import { prisma } from "../data/prisma.js";
 import { sendMail } from "../infra/mailer.js";
+import { EMAIL_BRAND } from "../infra/emailBrand.js";
 
 export class PasswordResetService {
   private static readonly OTP_LENGTH = 4;
@@ -43,60 +44,68 @@ export class PasswordResetService {
       },
     });
 
+    const subject = `Reset your password — ${EMAIL_BRAND.short}`;
+
     // Send email
     const html = `
       <!DOCTYPE html>
-      <html>
+      <html lang="en">
       <head>
         <meta charset="utf-8">
-        <title>Password Reset - Car Hire Middleware</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Password reset — ${EMAIL_BRAND.full}</title>
         <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-          .header { background: #dc2626; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
-          .content { background: #f8fafc; padding: 30px; border-radius: 0 0 8px 8px; }
-          .otp-code { 
-            background: #1f2937; 
-            color: #f9fafb; 
-            font-size: 32px; 
-            font-weight: bold; 
-            text-align: center; 
-            padding: 20px; 
-            border-radius: 8px; 
-            letter-spacing: 4px;
-            margin: 20px 0;
+          body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.55; color: #1e293b; background-color: #f1f5f9; }
+          .wrap { max-width: 560px; margin: 0 auto; padding: 32px 16px; }
+          .card { background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08); }
+          .header { background: linear-gradient(135deg, #0f172a 0%, #422006 50%, #1e293b 100%); color: #f8fafc; padding: 28px 24px; text-align: center; }
+          .header .logo { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+          .header .tag { font-size: 13px; opacity: 0.9; margin: 8px 0 0; font-weight: 400; }
+          .body { padding: 28px 24px 8px; }
+          .body h2 { font-size: 18px; font-weight: 600; margin: 0 0 12px; color: #0f172a; }
+          .body p { margin: 0 0 16px; font-size: 15px; color: #475569; }
+          .otp-code {
+            background: #0f172a;
+            color: #f8fafc;
+            font-size: 28px;
+            font-weight: 700;
+            text-align: center;
+            letter-spacing: 0.35em;
+            padding: 20px 16px;
+            border-radius: 10px;
+            margin: 22px 0;
+            font-variant-numeric: tabular-nums;
           }
-          .footer { text-align: center; margin-top: 20px; color: #6b7280; font-size: 14px; }
-          .warning { background: #fef2f2; border-left: 4px solid #dc2626; padding: 12px; margin: 20px 0; }
+          .alert { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 14px 16px; margin: 20px 0; font-size: 13px; color: #9a3412; }
+          .alert ul { margin: 8px 0 0; padding-left: 18px; }
+          .footer { padding: 20px 24px 24px; text-align: center; font-size: 12px; color: #94a3b8; }
         </style>
       </head>
       <body>
-        <div class="container">
-          <div class="header">
-            <h1>Car Hire Middleware</h1>
-            <p>Password Reset Request</p>
-          </div>
-          <div class="content">
-            <h2>Hello ${user.company.companyName}!</h2>
-            <p>We received a request to reset your password. Use the OTP code below to verify your identity and reset your password:</p>
-            
-            <div class="otp-code">${otp}</div>
-            
-            <div class="warning">
-              <p><strong>Security Notice:</strong></p>
-              <ul>
-                <li>This code will expire in ${this.OTP_EXPIRY_MINUTES} minutes</li>
-                <li>Do not share this code with anyone</li>
-                <li>If you didn't request a password reset, please ignore this email</li>
-                <li>Your password will remain unchanged if you don't use this code</li>
-              </ul>
+        <div style="display:none;max-height:0;overflow:hidden;">Password reset code — expires in ${this.OTP_EXPIRY_MINUTES} minutes.</div>
+        <div class="wrap">
+          <div class="card">
+            <div class="header">
+              <p class="logo">${EMAIL_BRAND.full}</p>
+              <p class="tag">Password reset</p>
             </div>
-            
-            <p>If you have any questions or concerns, please contact our support team immediately.</p>
-          </div>
-          <div class="footer">
-            <p>This is an automated message from Car Hire Middleware</p>
-            <p>© ${new Date().getFullYear()} Car Hire Middleware. All rights reserved.</p>
+            <div class="body">
+              <h2>Hello, ${user.company.companyName}</h2>
+              <p>We received a request to reset the password for your ${EMAIL_BRAND.full} account. Use the code below to continue. If you did not request a reset, you can ignore this email — your password will stay the same.</p>
+              <div class="otp-code">${otp}</div>
+              <div class="alert">
+                <strong>Security</strong>
+                <ul>
+                  <li>This code expires in <strong>${this.OTP_EXPIRY_MINUTES} minutes</strong>.</li>
+                  <li>Never share this code with anyone. ${EMAIL_BRAND.full} will never ask for it by phone or chat.</li>
+                  <li>If you did not request this, please secure your account and contact support.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="footer">
+              <p style="margin:0 0 8px;">Automated message from <strong style="color:#64748b;">${EMAIL_BRAND.full}</strong></p>
+              <p style="margin:0;">© ${new Date().getFullYear()} ${EMAIL_BRAND.full}. All rights reserved.</p>
+            </div>
           </div>
         </div>
       </body>
@@ -106,7 +115,7 @@ export class PasswordResetService {
     try {
       await sendMail({
         to: email,
-        subject: "Password Reset Request - Car Hire Middleware",
+        subject,
         html,
       });
       console.log(`✅ Password reset OTP email sent to ${email} (OTP: ${otp})`);

@@ -15,6 +15,7 @@ import { enforceWhitelist } from "../../infra/whitelistEnforcement.js";
 import { validateLocationArray } from "../../services/locationValidation.js";
 import { auditLog } from "../../services/audit.js";
 import { invalidateMailerCache, isHttpsMailApiConfigured } from "../../infra/mailer.js";
+import { EMAIL_BRAND } from "../../infra/emailBrand.js";
 import { normalizeReferralSlug } from "../../services/referralSlug.js";
 import { ensureUnlocodeRowForBranch } from "../../services/ensureUnlocodeForBranch.js";
 
@@ -4611,8 +4612,8 @@ adminRouter.post("/admin/smtp/test", requireAuth(), requireRole("ADMIN"), async 
     if (!isConfigured) {
       return res.status(400).json({
         error: "SMTP_NOT_CONFIGURED",
-        message: "Mail is not configured. Use admin SMTP, EMAIL_* in .env, or SENDGRID_API_KEY / RESEND_API_KEY.",
-        hint: "Use POST /admin/smtp, set EMAIL_HOST/USER/PASS, or set SENDGRID_API_KEY or RESEND_API_KEY for HTTPS (port 443)."
+        message: "Mail is not configured. Use admin SMTP, EMAIL_* in .env, or BREVO_API_KEY / SENDGRID_API_KEY / RESEND_API_KEY.",
+        hint: "Use POST /admin/smtp, set EMAIL_HOST/USER/PASS, or set BREVO_API_KEY (Brevo v3 xkeysib-…), SENDGRID_API_KEY, or RESEND_API_KEY for HTTPS (port 443)."
       });
     }
     
@@ -4639,24 +4640,23 @@ adminRouter.post("/admin/smtp/test", requireAuth(), requireRole("ADMIN"), async 
     try {
       await sendMail({
         to,
-        subject: "SMTP Test Email - Car Hire Middleware",
+        subject: `Mail delivery test — ${EMAIL_BRAND.full}`,
         html: `
           <!DOCTYPE html>
-          <html>
+          <html lang="en">
           <head>
             <meta charset="utf-8">
-            <title>SMTP Test Email</title>
+            <title>Mail test</title>
           </head>
-          <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-              <h2 style="color: #2563eb;">SMTP Configuration Test</h2>
-              <p>This is a test email to verify your SMTP configuration is working correctly.</p>
-              <p><strong>Sent at:</strong> ${new Date().toISOString()}</p>
-              <p>If you received this email, your SMTP settings are configured correctly!</p>
-              <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
-              <p style="color: #6b7280; font-size: 12px;">
-                This is an automated test email from the Car Hire Middleware system.
-              </p>
+          <body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#334155;background:#f8fafc;">
+            <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
+              <div style="background:#fff;border-radius:12px;padding:28px;box-shadow:0 1px 3px rgba(15,23,42,.08);">
+                <h2 style="margin:0 0 12px;color:#0f172a;font-size:20px;">Mail delivery test</h2>
+                <p style="margin:0 0 16px;">This message confirms that outbound mail from <strong>${EMAIL_BRAND.full}</strong> is configured correctly.</p>
+                <p style="margin:0 0 8px;font-size:14px;color:#64748b;"><strong>Sent at:</strong> ${new Date().toISOString()}</p>
+                <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;">
+                <p style="margin:0;font-size:12px;color:#94a3b8;">Automated test · ${EMAIL_BRAND.full}</p>
+              </div>
             </div>
           </body>
           </html>
@@ -4756,6 +4756,7 @@ adminRouter.get("/admin/smtp/status", requireAuth(), requireRole("ADMIN"), async
         EMAIL_FROM: process.env.EMAIL_FROM || 'not set',
         SENDGRID_API_KEY: process.env.SENDGRID_API_KEY ? '✓ Set (hidden)' : '✗ Not set',
         RESEND_API_KEY: process.env.RESEND_API_KEY ? '✓ Set (hidden)' : '✗ Not set',
+        BREVO_API_KEY: process.env.BREVO_API_KEY ? '✓ Set (hidden)' : '✗ Not set',
       }
     };
 

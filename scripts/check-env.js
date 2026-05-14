@@ -82,21 +82,33 @@ if (fs.existsSync(envPath)) {
   };
   const sg = lineVal('SENDGRID_API_KEY');
   const rs = lineVal('RESEND_API_KEY');
+  const brevo = lineVal('BREVO_API_KEY');
   const host = lineVal('EMAIL_HOST');
   const user = lineVal('EMAIL_USER');
   const pass = lineVal('EMAIL_PASS');
   const from = lineVal('EMAIL_FROM');
+  const brevoHttp =
+    (brevo && brevo.startsWith('xkeysib')) ||
+    (pass && pass.startsWith('xkeysib'));
   console.log('\n📧 Mail (registration / OTP):');
-  if ((sg && sg.length > 8) || (rs && rs.length > 8)) {
-    console.log('   ✅ HTTPS mail API key is set (SendGrid or Resend) — sending should use port 443.');
+  if ((sg && sg.length > 8) || (rs && rs.length > 8) || brevoHttp) {
+    console.log('   ✅ HTTPS mail API key is set — sending should use port 443.');
     if (sg && sg.length > 8) console.log('      SENDGRID_API_KEY: set');
     if (rs && rs.length > 8) console.log('      RESEND_API_KEY: set');
+    if (brevoHttp) {
+      if (brevo && brevo.startsWith('xkeysib')) console.log('      BREVO_API_KEY: set (Brevo v3)');
+      else if (pass && pass.startsWith('xkeysib')) console.log('      Brevo v3 key: in EMAIL_PASS (prefer BREVO_API_KEY)');
+    }
   } else {
-    console.log('   ⚠️  No RESEND_API_KEY or SENDGRID_API_KEY (non-empty) — app uses SMTP only.');
+    console.log('   ⚠️  No HTTPS API key for mail (SendGrid / Resend / Brevo xkeysib).');
+    if (brevo && brevo.length > 8 && !brevo.startsWith('xkeysib')) {
+      console.log('      BREVO_API_KEY is set but does not look like a v3 API key (expected xkeysib-…).');
+      console.log('      SMTP passwords (xsmtpsib-…) do not work for the Brevo HTTPS API — create a v3 key in Brevo.');
+    }
     if (host && user && pass) {
       console.log(`   SMTP: ${user} @ ${host} (from: ${from || '(not set)'})`);
-      console.log('   If registration emails time out, your VPS likely blocks outbound 465/587.');
-      console.log('   Fix: add RESEND_API_KEY or SENDGRID_API_KEY — see comments in .env and .env.example.');
+      console.log('   If registration emails time out, this server may block outbound SMTP (587/465).');
+      console.log('   Fix: add BREVO_API_KEY=xkeysib-… from https://app.brevo.com/settings/keys/api (or Resend/SendGrid).');
     } else {
       console.log('   SMTP env vars incomplete (need EMAIL_HOST, EMAIL_USER, EMAIL_PASS).');
     }

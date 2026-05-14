@@ -7,7 +7,7 @@ export function mountSwagger(app: Express) {
     definition: {
       openapi: "3.0.0",
       info: { 
-        title: "Car Hire Middleware API", 
+        title: "Gloria Connect API", 
         version: "0.1.0",
         description: "Partner-facing middleware for car rental: Agents (OTAs) search availability and create bookings with Sources (suppliers)"
       },

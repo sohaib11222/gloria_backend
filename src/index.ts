@@ -9,24 +9,31 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// CRITICAL: Load .env file from multiple possible locations
-// This ensures DATABASE_URL is available regardless of where the code runs
-const envPaths = [
-  path.resolve(process.cwd(), '.env'),
-  path.resolve(__dirname, '../.env'),
-  path.resolve(__dirname, '../../.env'),
-];
+// CRITICAL: Load .env from the application directory first (PM2 cwd is often not the app folder).
+// `import "dotenv/config"` already loaded process.cwd()/.env — we override with the real app .env next.
+const appEnvPath = path.resolve(__dirname, "../.env");
+const cwdEnvPath = path.resolve(process.cwd(), ".env");
 
-// Try loading from each path until one succeeds
 let databaseUrl = process.env.DATABASE_URL;
-for (const envPath of envPaths) {
-  const result = dotenv.config({ path: envPath });
-  if (!result.error && result.parsed) {
-    // Update databaseUrl if it was loaded from this file
-    if (result.parsed.DATABASE_URL) {
-      databaseUrl = result.parsed.DATABASE_URL;
+
+const primary = dotenv.config({ path: appEnvPath, override: true });
+if (!primary.error && primary.parsed) {
+  if (primary.parsed.DATABASE_URL) {
+    databaseUrl = primary.parsed.DATABASE_URL;
+  }
+  // Merge cwd .env only for keys missing from app .env (dev convenience)
+  dotenv.config({ path: cwdEnvPath, override: false });
+} else {
+  const fallback = dotenv.config({ path: cwdEnvPath, override: true });
+  if (!fallback.error && fallback.parsed?.DATABASE_URL) {
+    databaseUrl = fallback.parsed.DATABASE_URL;
+  }
+  const upTwo = path.resolve(__dirname, "../../.env");
+  if (!databaseUrl) {
+    const t = dotenv.config({ path: upTwo, override: false });
+    if (!t.error && t.parsed?.DATABASE_URL) {
+      databaseUrl = t.parsed.DATABASE_URL;
     }
-    break;
   }
 }
 
@@ -37,7 +44,8 @@ if (databaseUrl) {
   console.log("✓ DATABASE_URL loaded from .env file");
 } else if (!process.env.DATABASE_URL) {
   console.error("⚠️  WARNING: DATABASE_URL not found in .env file");
-  console.error("   Tried paths:", envPaths.join(", "));
+  console.error("   Tried app .env:", appEnvPath);
+  console.error("   Tried cwd .env:", cwdEnvPath);
   console.error("   Current working directory:", process.cwd());
   console.error("   __dirname:", __dirname);
   // Don't exit - let prisma.ts handle the error

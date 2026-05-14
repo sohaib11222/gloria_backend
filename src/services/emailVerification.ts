@@ -1,5 +1,6 @@
 import { prisma } from "../data/prisma.js";
 import { generateCompanyCode } from "../infra/companyCode.js";
+import { EMAIL_BRAND } from "../infra/emailBrand.js";
 import { sanitizeTransportError, summarizeExternalOtpApiError } from "../infra/emailDeliveryError.js";
 import crypto from "crypto";
 
@@ -89,8 +90,8 @@ export class EmailVerificationService {
     }
 
     // Prepare email content
-    const subject = "Verify Your Email - Car Hire Middleware";
-    const message = `Hello ${companyName}!\n\nThank you for registering with Car Hire Middleware. To complete your registration, please verify your email address using the OTP code provided.\n\nThis code will expire in ${this.OTP_EXPIRY_MINUTES} minutes. Do not share this code with anyone.\n\nIf you have any questions, please contact our support team.`;
+    const subject = `Verify your email — ${EMAIL_BRAND.short}`;
+    const message = `Hello ${companyName},\n\nThank you for registering with ${EMAIL_BRAND.full}. To complete your registration, please verify your email address using the one-time code we sent you.\n\nThis code expires in ${this.OTP_EXPIRY_MINUTES} minutes. Do not share it with anyone.\n\nIf you did not create an account, you can ignore this message.\n\n— ${EMAIL_BRAND.full}`;
 
     let externalApiSuccess = false;
     let externalApiError: any = null;
@@ -231,53 +232,68 @@ export class EmailVerificationService {
         // Create HTML email with OTP
         const html = `
           <!DOCTYPE html>
-          <html>
+          <html lang="en">
           <head>
             <meta charset="utf-8">
-            <title>Email Verification - Car Hire Middleware</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Email verification — ${EMAIL_BRAND.full}</title>
             <style>
-              body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-              .header { background: #2563eb; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
-              .content { background: #f8fafc; padding: 30px; border-radius: 0 0 8px 8px; }
-              .otp-code { 
-                background: #1f2937; 
-                color: #f9fafb; 
-                font-size: 32px; 
-                font-weight: bold; 
-                text-align: center; 
-                padding: 20px; 
-                border-radius: 8px; 
-                letter-spacing: 4px;
-                margin: 20px 0;
+              body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; line-height: 1.55; color: #1e293b; background-color: #f1f5f9; }
+              .wrap { max-width: 560px; margin: 0 auto; padding: 32px 16px; }
+              .card { background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08); }
+              .header { background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%); color: #f8fafc; padding: 28px 24px; text-align: center; }
+              .header .logo { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+              .header .tag { font-size: 13px; opacity: 0.88; margin: 8px 0 0; font-weight: 400; }
+              .body { padding: 28px 24px 8px; }
+              .body h2 { font-size: 18px; font-weight: 600; margin: 0 0 12px; color: #0f172a; }
+              .body p { margin: 0 0 16px; font-size: 15px; color: #475569; }
+              .otp-wrap { margin: 24px 0; }
+              .otp-code {
+                display: block;
+                background: #0f172a;
+                color: #f8fafc;
+                font-size: 28px;
+                font-weight: 700;
+                text-align: center;
+                letter-spacing: 0.35em;
+                padding: 20px 16px;
+                border-radius: 10px;
+                font-variant-numeric: tabular-nums;
               }
-              .footer { text-align: center; margin-top: 20px; color: #6b7280; font-size: 14px; }
+              .note { font-size: 13px; color: #64748b; margin: 20px 0 0; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+              .note ul { margin: 8px 0 0; padding-left: 18px; }
+              .note li { margin: 4px 0; }
+              .footer { padding: 20px 24px 24px; text-align: center; font-size: 12px; color: #94a3b8; }
+              .footer a { color: #64748b; text-decoration: none; }
             </style>
           </head>
           <body>
-            <div class="container">
-              <div class="header">
-                <h1>Car Hire Middleware</h1>
-                <p>Email Verification Required</p>
-              </div>
-              <div class="content">
-                <h2>Hello ${companyName}!</h2>
-                <p>Thank you for registering with Car Hire Middleware. To complete your registration, please verify your email address using the OTP code below:</p>
-                
-                <div class="otp-code">${otp}</div>
-                
-                <p><strong>Important:</strong></p>
-                <ul>
-                  <li>This code will expire in ${this.OTP_EXPIRY_MINUTES} minutes</li>
-                  <li>Do not share this code with anyone</li>
-                  <li>If you didn't request this verification, please ignore this email</li>
-                </ul>
-                
-                <p>If you have any questions, please contact our support team.</p>
-              </div>
-              <div class="footer">
-                <p>This is an automated message from Car Hire Middleware</p>
-                <p>© ${new Date().getFullYear()} Car Hire Middleware. All rights reserved.</p>
+            <div style="display:none;max-height:0;overflow:hidden;">Your verification code is inside. Expires in ${this.OTP_EXPIRY_MINUTES} minutes.</div>
+            <div class="wrap">
+              <div class="card">
+                <div class="header">
+                  <p class="logo">${EMAIL_BRAND.full}</p>
+                  <p class="tag">Email verification</p>
+                </div>
+                <div class="body">
+                  <h2>Hello, ${companyName}</h2>
+                  <p>Thanks for signing up. Use the verification code below to confirm your email address and finish setting up your account.</p>
+                  <div class="otp-wrap">
+                    <div class="otp-code">${otp}</div>
+                  </div>
+                  <div class="note">
+                    <strong style="color:#334155;">Please note</strong>
+                    <ul>
+                      <li>This code expires in <strong>${this.OTP_EXPIRY_MINUTES} minutes</strong>.</li>
+                      <li>Do not share this code with anyone.</li>
+                      <li>If you did not request this email, you can safely ignore it.</li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="footer">
+                  <p style="margin:0 0 8px;">This is an automated message from <strong style="color:#64748b;">${EMAIL_BRAND.full}</strong>.</p>
+                  <p style="margin:0;">© ${new Date().getFullYear()} ${EMAIL_BRAND.full}. All rights reserved.</p>
+                </div>
               </div>
             </div>
           </body>
@@ -286,7 +302,7 @@ export class EmailVerificationService {
 
         await sendMail({
           to: email,
-          subject: "Verify Your Email - Car Hire Middleware",
+          subject,
           html,
         });
 

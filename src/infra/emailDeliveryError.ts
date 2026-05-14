@@ -7,11 +7,11 @@ export function sanitizeTransportError(err: unknown): { code: string; message: s
   const code = typeof e?.code === "string" ? e.code : "";
   const response = typeof e?.response === "string" ? e.response : "";
 
-  if (code === "EHTTP" || /SendGrid API HTTP|Resend API HTTP/i.test(msg)) {
+  if (code === "EHTTP" || /SendGrid API HTTP|Resend API HTTP|Brevo API HTTP/i.test(msg)) {
     return {
       code: "HTTP_MAIL_API_FAILED",
       message:
-        "The HTTPS mail provider rejected the request. Check SENDGRID_API_KEY or RESEND_API_KEY, and verify the sender domain or address is allowed for that provider.",
+        "The HTTPS mail provider rejected the request. Check SENDGRID_API_KEY, RESEND_API_KEY, or BREVO_API_KEY (Brevo needs the v3 API key xkeysib-…, not the SMTP password xsmtpsib-…), and verify the sender domain in the provider dashboard.",
     };
   }
   if (
@@ -21,7 +21,7 @@ export function sanitizeTransportError(err: unknown): { code: string; message: s
     return {
       code: "HTTP_MAIL_TIMEOUT",
       message:
-        "The HTTPS mail request timed out. Check network access to api.sendgrid.com / api.resend.com (port 443).",
+        "The HTTPS mail request timed out. Check network access to api.sendgrid.com, api.resend.com, or api.brevo.com (port 443).",
     };
   }
   if (
@@ -46,7 +46,7 @@ export function sanitizeTransportError(err: unknown): { code: string; message: s
     return {
       code: "SMTP_TIMEOUT",
       message:
-        "The connection to the mail server timed out. Many hosts block outbound SMTP (465/587). Set SENDGRID_API_KEY or RESEND_API_KEY to send over HTTPS (port 443), or ask your host to allow outbound SMTP.",
+        "The connection to the mail server timed out. Many hosts block outbound SMTP (465/587). Set BREVO_API_KEY (Brevo v3 key xkeysib-…), SENDGRID_API_KEY, or RESEND_API_KEY to send over HTTPS (port 443), or ask your host to allow outbound SMTP.",
     };
   }
   if (/554|550 5\.1\.1|mailbox unavailable|recipient rejected/i.test(msg + response)) {
