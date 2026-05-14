@@ -626,6 +626,21 @@ adminRouter.get("/admin/companies/:id", requireAuth(), requireRole("ADMIN"), asy
   } catch (e) { next(e); }
 });
 
+function escapeHtmlForEmail(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function companyStatusLabel(status: string): string {
+  if (status === "ACTIVE") return "Active";
+  if (status === "PENDING_VERIFICATION") return "Pending verification";
+  if (status === "SUSPENDED") return "Suspended";
+  return status;
+}
+
 /**
  * @openapi
  * /admin/companies/{id}/status:
@@ -649,48 +664,128 @@ adminRouter.get("/admin/companies/:id", requireAuth(), requireRole("ADMIN"), asy
  *                 type: string
  *                 enum: [ACTIVE, PENDING_VERIFICATION, SUSPENDED]
  *                 description: New company status
+ *               notifyMessage:
+ *                 type: string
+ *                 description: Optional note included in notification email
+ *               notifyByEmail:
+ *                 type: boolean
+ *                 description: When true (default), email company contacts
  */
 adminRouter.patch("/admin/companies/:id/status", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
-    
+    const { status, notifyMessage, notifyByEmail } = req.body as {
+      status?: string;
+      notifyMessage?: string;
+      notifyByEmail?: boolean;
+    };
+
     // Validate status
     const allowedStatuses = ["ACTIVE", "PENDING_VERIFICATION", "SUSPENDED"];
-    if (!allowedStatuses.includes(status)) {
+    if (!status || !allowedStatuses.includes(status)) {
       return res.status(400).json({
         error: "INVALID_STATUS",
-        message: `Status must be one of: ${allowedStatuses.join(", ")}`
+        message: `Status must be one of: ${allowedStatuses.join(", ")}`,
       });
     }
-    
+
+    const rawNote = typeof notifyMessage === "string" ? notifyMessage.trim() : "";
+    if (rawNote.length > 8000) {
+      return res.status(400).json({
+        error: "INVALID_MESSAGE",
+        message: "Message is too long (max 8000 characters).",
+      });
+    }
+
+    const sendEmail = notifyByEmail !== false;
+
     // Check if company exists
     const company = await prisma.company.findUnique({
       where: { id },
-      select: { id: true, companyName: true, type: true, status: true }
+      select: {
+        id: true,
+        companyName: true,
+        type: true,
+        status: true,
+        email: true,
+        users: { select: { email: true } },
+      },
     });
-    
+
     if (!company) {
       return res.status(404).json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
     }
-    
+
     // Update status
     const updatedCompany = await prisma.company.update({
       where: { id },
-      data: { status },
+      data: { status: status as "ACTIVE" | "PENDING_VERIFICATION" | "SUSPENDED" },
       include: {
         users: true,
         agentAgreements: true,
         sourceAgreements: true,
-        sourceLocations: true
-      }
+        sourceLocations: true,
+      },
     });
-    
+
+    let emailSent: boolean | undefined;
+    let emailError: string | null | undefined;
+
+    if (sendEmail) {
+      const recipients = new Set<string>();
+      if (company.email?.trim()) recipients.add(company.email.trim().toLowerCase());
+      for (const u of company.users) {
+        if (u.email?.trim()) recipients.add(u.email.trim().toLowerCase());
+      }
+      const toList = [...recipients].filter(Boolean);
+      if (toList.length === 0) {
+        emailSent = false;
+        emailError = "No recipient email addresses on file for this company.";
+      } else {
+        const label = companyStatusLabel(status);
+        const noteBlock =
+          rawNote.length > 0
+            ? `<p style="margin:16px 0 0;"><strong>Message from our team</strong></p><blockquote style="margin:8px 0 0;padding:12px 16px;border-left:4px solid #2563eb;background:#f8fafc;">${escapeHtmlForEmail(rawNote).replace(/\r\n|\r|\n/g, "<br/>")}</blockquote>`
+            : "";
+        const html = `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#111827;">
+<p>Hello,</p>
+<p>Your Gloria Connect account status for <strong>${escapeHtmlForEmail(company.companyName)}</strong> has been updated to <strong>${escapeHtmlForEmail(label)}</strong>.</p>
+${noteBlock}
+<p style="margin-top:20px;font-size:14px;color:#6b7280;">If you have questions, contact your administrator or Gloria Connect support.</p>
+</body></html>`;
+        const subject = `[Gloria Connect] Account status: ${label}`;
+        try {
+          const { sendMail } = await import("../../infra/mailer.js");
+          const results = await Promise.allSettled(
+            toList.map((to) => sendMail({ to, subject, html })),
+          );
+          const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
+          if (failed.length === 0) {
+            emailSent = true;
+            emailError = null;
+          } else if (failed.length === results.length) {
+            emailSent = false;
+            emailError = failed[0]?.reason?.message || "Failed to send email";
+          } else {
+            emailSent = true;
+            emailError = `Sent to ${results.length - failed.length} of ${results.length} address(es). ${failed[0]?.reason?.message || ""}`.trim();
+          }
+        } catch (mailErr: any) {
+          emailSent = false;
+          emailError = mailErr?.message || "Failed to send email";
+          console.error("Company status change email failed:", mailErr);
+        }
+      }
+    }
+
     res.json({
       message: `Company status updated to ${status}`,
-      company: updatedCompany
+      company: updatedCompany,
+      ...(sendEmail ? { emailSent, emailError: emailError ?? null } : {}),
     });
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
 });
 
 /**

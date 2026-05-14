@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
+import fs from "fs/promises";
+import path from "path";
 import { prisma } from "../../data/prisma.js";
 import { Auth } from "../../infra/auth.js";
 import { EmailVerificationService } from "../../services/emailVerification.js";
@@ -36,6 +38,8 @@ const registerSchema = z
     companyWebsiteUrl: z.string().max(500).optional(),
     /** Optional admin referral slug (same as URL ?ref=) */
     referralSlug: z.string().max(64).optional(),
+    /** Optional data URL image (SOURCE only); max length enforced before decode */
+    registrationPhotoDataUrl: z.string().max(4_000_000).optional(),
   })
   .superRefine((val, ctx) => {
     if (val.type !== "SOURCE") return;
@@ -73,6 +77,32 @@ const registerSchema = z
       });
     }
   });
+
+const MAX_REGISTRATION_PHOTO_BYTES = 2 * 1024 * 1024;
+
+function parseSourceRegistrationPhotoDataUrl(
+  dataUrl: string,
+): { buf: Buffer; ext: string } | { error: string } {
+  const m = dataUrl.trim().match(/^data:image\/(jpeg|jpg|png|webp);base64,(.+)$/i);
+  if (!m) {
+    return { error: "Invalid or unsupported image. Use JPEG, PNG, or WebP." };
+  }
+  const mimeExt = m[1].toLowerCase();
+  const ext = mimeExt === "jpeg" ? "jpg" : mimeExt;
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(m[2], "base64");
+  } catch {
+    return { error: "Could not read image data." };
+  }
+  if (buf.length > MAX_REGISTRATION_PHOTO_BYTES) {
+    return { error: "Image must be 2 MB or smaller." };
+  }
+  if (buf.length < 100) {
+    return { error: "Image file is too small or corrupted." };
+  }
+  return { buf, ext };
+}
 
 /**
  * @openapi
@@ -154,6 +184,24 @@ authRouter.post("/auth/register", async (req, res, next) => {
   try {
     const body = registerSchema.parse(req.body);
 
+    let regPhotoParsed: { buf: Buffer; ext: string } | null = null;
+    const photoRaw = body.registrationPhotoDataUrl?.trim();
+    if (photoRaw) {
+      if (body.type !== "SOURCE") {
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        return res.status(400).json({
+          error: "INVALID_INPUT",
+          message: "Registration photos are only accepted for supplier (SOURCE) accounts.",
+        });
+      }
+      const parsed = parseSourceRegistrationPhotoDataUrl(photoRaw);
+      if ("error" in parsed) {
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        return res.status(400).json({ error: "INVALID_PHOTO", message: parsed.error });
+      }
+      regPhotoParsed = parsed;
+    }
+
     let referralLinkId: string | null = null;
     const rawRef = body.referralSlug?.trim();
     if (rawRef) {
@@ -228,7 +276,24 @@ authRouter.post("/auth/register", async (req, res, next) => {
           : {}),
       },
     });
-    
+
+    if (regPhotoParsed) {
+      try {
+        const dir = path.join(process.cwd(), "uploads", "registration-photos");
+        await fs.mkdir(dir, { recursive: true });
+        const ext = regPhotoParsed.ext === "jpeg" ? "jpg" : regPhotoParsed.ext;
+        const filename = `${company.id}.${ext}`;
+        await fs.writeFile(path.join(dir, filename), regPhotoParsed.buf);
+        const registrationPhotoUrl = `/api/uploads/registration-photos/${filename}`;
+        await prisma.company.update({
+          where: { id: company.id },
+          data: { registrationPhotoUrl },
+        });
+      } catch (photoErr) {
+        console.error("registration photo persist failed", photoErr);
+      }
+    }
+
     const user = await prisma.user.create({
       data: {
         companyId: company.id,
@@ -764,6 +829,22 @@ authRouter.post("/auth/login", async (req, res, next) => {
           message: "Your account is not active. Please contact support for assistance.",
           email: user.email,
           status: user.company.status
+        });
+      }
+
+      // Admin SPA only: reject agent/source accounts (same /auth/login as portals; header set only by admin app)
+      const adminPortalFlag = String(
+        req.headers["x-gloria-admin-login"] ||
+          req.headers["X-Gloria-Admin-Login"] ||
+          ""
+      ).trim();
+      const isAdminPortalLogin =
+        adminPortalFlag === "1" || adminPortalFlag.toLowerCase() === "true";
+      if (isAdminPortalLogin && user.role !== "ADMIN") {
+        return sendError(403, {
+          error: "ADMIN_PORTAL_ONLY",
+          message:
+            "This sign-in is for the administrator dashboard only. Use the Agent or Source portal for your account.",
         });
       }
 

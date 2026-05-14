@@ -57,6 +57,7 @@ export function buildApp() {
       'X-Agent-Email', 
       'X-Api-Key',
       'X-Request-ID',
+      'X-Gloria-Admin-Login',
       'Access-Control-Request-Method',
       'Access-Control-Request-Headers'
     ],
@@ -73,7 +74,7 @@ export function buildApp() {
     const origin = req.headers.origin || '*';
     res.setHeader('Access-Control-Allow-Origin', origin === '*' ? '*' : origin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key, X-Request-ID, Access-Control-Request-Method, Access-Control-Request-Headers');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key, X-Request-ID, X-Gloria-Admin-Login, Access-Control-Request-Method, Access-Control-Request-Headers');
     res.setHeader('Access-Control-Allow-Credentials', 'false');
     res.setHeader('Access-Control-Expose-Headers', '*');
     res.setHeader('Access-Control-Max-Age', '86400');
@@ -95,7 +96,7 @@ export function buildApp() {
       res.setHeader('Access-Control-Allow-Origin', '*');
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key, X-Request-ID, Access-Control-Request-Method, Access-Control-Request-Headers');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Idempotency-Key, X-Agent-Email, X-Api-Key, X-Request-ID, X-Gloria-Admin-Login, Access-Control-Request-Method, Access-Control-Request-Headers');
     res.setHeader('Access-Control-Allow-Credentials', 'false');
     res.setHeader('Access-Control-Expose-Headers', '*');
     res.setHeader('Access-Control-Max-Age', '86400');
