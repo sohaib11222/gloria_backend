@@ -23,7 +23,7 @@ type OTPEmailApiResponse = OTPEmailApiSuccessResponse | OTPEmailApiErrorResponse
 export class EmailVerificationService {
   private static readonly OTP_LENGTH = 4;
   private static readonly OTP_EXPIRY_MINUTES = 10;
-  /** Set `OTP_EMAIL_API_URL` in .env to use an external OTP mail API; if unset, only SMTP (`EMAIL_*`) is used. */
+  /** Set `OTP_EMAIL_API_URL` in .env to use an external OTP mail API; if unset, `sendMail` is used (SendGrid/Resend HTTPS if keys set, else SMTP). */
   private static otpEmailApiUrl(): string {
     return (process.env.OTP_EMAIL_API_URL || "").trim();
   }
@@ -214,14 +214,14 @@ export class EmailVerificationService {
       console.log(`\n${'='.repeat(80)}`);
       console.log(
         otpApiUrl
-          ? `⚠️  [EmailVerification] External API did not succeed — trying SMTP fallback`
-          : `📧 [EmailVerification] Sending OTP via SMTP`
+          ? `⚠️  [EmailVerification] External API did not succeed — trying built-in mail (HTTPS API or SMTP)`
+          : `📧 [EmailVerification] Sending OTP via built-in mail (HTTPS API or SMTP)`
       );
       console.log(`${'='.repeat(80)}`);
       console.log(`   Email: ${email}`);
       console.log(`   OTP: ${otp} (still stored in database)`);
       console.log(`   External API Error:`, externalApiError);
-      console.log(`   Attempting SMTP fallback...`);
+      console.log(`   Attempting sendMail...`);
       console.log(`${'='.repeat(80)}\n`);
 
       try {
@@ -291,11 +291,11 @@ export class EmailVerificationService {
         });
 
         console.log(`\n${'='.repeat(80)}`);
-        console.log(`✅ [EmailVerification] OTP Email Sent Successfully via SMTP Fallback`);
+        console.log(`✅ [EmailVerification] OTP email sent successfully (built-in mail)`);
         console.log(`${'='.repeat(80)}`);
         console.log(`   Email: ${email}`);
         console.log(`   OTP: ${otp}`);
-        console.log(`   Method: SMTP (fallback after external API failed)`);
+        console.log(`   Method: sendMail (HTTPS API if configured, else SMTP)`);
         console.log(`${'='.repeat(80)}\n`);
         return otp;
       } catch (smtpError: any) {
@@ -305,12 +305,16 @@ export class EmailVerificationService {
         console.log(`   Email: ${email}`);
         console.log(`   OTP: ${otp} (still stored in database)`);
         console.log(`   External API Error:`, externalApiError);
-        console.log(`   SMTP Error: ${smtpError.message}`);
+        console.log(`   Mail error: ${smtpError.message}`);
         console.log(`   Note: OTP is still valid and stored. User can request resend.`);
         console.log(`   User can use resend-otp endpoint to try again.`);
         console.log(`${'='.repeat(80)}\n`);
 
         const smtpSan = sanitizeTransportError(smtpError);
+        const mailStep =
+          smtpSan.code === "HTTP_MAIL_API_FAILED" || smtpSan.code === "HTTP_MAIL_TIMEOUT"
+            ? "https_mail_api"
+            : "smtp";
         const extSummary = externalApiError
           ? summarizeExternalOtpApiError(externalApiError)
           : otpApiUrl
@@ -323,7 +327,7 @@ export class EmailVerificationService {
         err.emailDelivery = {
           code: smtpSan.code,
           message: smtpSan.message,
-          step: "smtp",
+          step: mailStep,
           externalApiAttempted: !!otpApiUrl,
           externalApiSummary: otpApiUrl ? extSummary : undefined,
           ...(process.env.EXPOSE_EMAIL_DELIVERY_DETAILS === "true" && {

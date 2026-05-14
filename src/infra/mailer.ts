@@ -1,6 +1,84 @@
 import nodemailer from "nodemailer";
 import { prisma } from "../data/prisma.js";
 
+function trimEnvQuotes(str: string | undefined): string {
+  if (!str) return "";
+  return str.replace(/^["']|["']$/g, "").trim();
+}
+
+/** True when SendGrid or Resend API keys are set. When true, `sendMail` uses HTTPS and skips SMTP. */
+export function isHttpsMailApiConfigured(): boolean {
+  return !!trimEnvQuotes(process.env.SENDGRID_API_KEY) || !!trimEnvQuotes(process.env.RESEND_API_KEY);
+}
+
+async function sendMailViaSendGridHttp(
+  opts: { to: string; subject: string; html: string },
+  fromEmail: string,
+  fromName: string,
+  apiKey: string
+): Promise<{ messageId?: string; response: string }> {
+  const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      personalizations: [{ to: [{ email: opts.to }] }],
+      from: { email: fromEmail, name: fromName },
+      subject: opts.subject,
+      content: [{ type: "text/html", value: opts.html }],
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  const raw = await res.text();
+  if (!res.ok) {
+    const err = new Error(`SendGrid API HTTP ${res.status}: ${raw.slice(0, 400)}`) as Error & {
+      code?: string;
+    };
+    err.code = res.status === 401 || res.status === 403 ? "EAUTH" : "EHTTP";
+    throw err;
+  }
+  const messageId = res.headers.get("x-message-id") || "sendgrid-accepted";
+  return { messageId, response: raw.slice(0, 200) };
+}
+
+async function sendMailViaResendHttp(
+  opts: { to: string; subject: string; html: string },
+  fromEmail: string,
+  apiKey: string
+): Promise<{ messageId?: string; response: string }> {
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: fromEmail,
+      to: [opts.to],
+      subject: opts.subject,
+      html: opts.html,
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  const raw = await res.text();
+  if (!res.ok) {
+    const err = new Error(`Resend API HTTP ${res.status}: ${raw.slice(0, 400)}`) as Error & {
+      code?: string;
+    };
+    err.code = "EHTTP";
+    throw err;
+  }
+  let id: string | undefined;
+  try {
+    id = (JSON.parse(raw) as { id?: string }).id;
+  } catch {
+    /* ignore */
+  }
+  return { messageId: id || "resend-accepted", response: raw.slice(0, 200) };
+}
+
 let cachedTransporter: nodemailer.Transporter | null = null;
 let transporterCacheTime: number = 0;
 const CACHE_TTL = 60000; // 1 minute cache
@@ -197,10 +275,9 @@ async function createTransporter(): Promise<nodemailer.Transporter> {
         console.error(`      sudo ufw allow out 465/tcp`);
         console.error(`      sudo ufw allow out 587/tcp`);
         console.error(`      sudo ufw allow out 25/tcp`);
-        console.error(`\n   2. Use an HTTP-based email service (recommended):`);
-        console.error(`      - SendGrid: Set EMAIL_SERVICE=sendgrid and EMAIL_PASS=your_sendgrid_api_key`);
-        console.error(`      - Mailgun: Set EMAIL_SERVICE=mailgun and EMAIL_PASS=your_mailgun_api_key`);
-        console.error(`      These services use HTTPS (port 443) which is usually open.`);
+        console.error(`\n   2. Use HTTPS mail API (recommended when SMTP is blocked):`);
+        console.error(`      - Set SENDGRID_API_KEY=... or RESEND_API_KEY=... (see .env.example).`);
+        console.error(`      - Or legacy: EMAIL_SERVICE=sendgrid with SendGrid SMTP (still uses port 587).`);
         console.error(`\n   3. Contact your hosting provider to unblock SMTP ports.`);
         console.error(`\n   For Gmail (if ports are open):`);
         console.error(`     1. Enable 2-Step Verification`);
@@ -294,36 +371,25 @@ export function invalidateMailerCache() {
   transporterCacheTime = 0;
 }
 
-// Legacy export for backward compatibility
-export const mailer = {
-  sendMail: async (opts: any) => {
-    const transporter = await getMailer();
-    return transporter.sendMail(opts);
-  }
-};
-
 export async function sendMail(opts: { to: string; subject: string; html: string; from?: string }) {
   const startTime = Date.now();
   const emailId = `email-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-  
+
   console.log(`\n${'='.repeat(80)}`);
   console.log(`📧 [${emailId}] EMAIL SEND ATTEMPT STARTED`);
   console.log(`${'='.repeat(80)}`);
   console.log(`   Timestamp: ${new Date().toISOString()}`);
   console.log(`   To: ${opts.to}`);
   console.log(`   Subject: ${opts.subject}`);
-  
-  const transporter = await getMailer();
-  
-  // Get from email from admin config or env
+
   let fromEmail = opts.from || process.env.EMAIL_FROM || "no-reply@carhire.local";
   let fromName = "Car Hire Middleware";
-  
+
   const smtpConfig = await prisma.smtpConfig.findFirst({
     where: { enabled: true },
-    orderBy: { updatedAt: 'desc' },
+    orderBy: { updatedAt: "desc" },
   });
-  
+
   if (smtpConfig) {
     fromEmail = smtpConfig.fromEmail || fromEmail;
     if (smtpConfig.fromName) {
@@ -332,50 +398,103 @@ export async function sendMail(opts: { to: string; subject: string; html: string
   } else if (process.env.EMAIL_FROM) {
     fromEmail = process.env.EMAIL_FROM;
   }
-  
-  const from = smtpConfig?.fromName 
-    ? `${smtpConfig.fromName} <${fromEmail}>`
-    : fromEmail;
-  
-  // Log email attempt with configuration info
-  const usingEnvVars = !smtpConfig && !!process.env.EMAIL_HOST;
+
+  const from = smtpConfig?.fromName ? `${smtpConfig.fromName} <${fromEmail}>` : fromEmail;
+
+  const sendgridKey = trimEnvQuotes(process.env.SENDGRID_API_KEY);
+  const resendKey = trimEnvQuotes(process.env.RESEND_API_KEY);
+  const prefersHttpsApi = !!sendgridKey || !!resendKey;
+
   const usingAdminConfig = !!smtpConfig;
-  const usingStreamTransport = !smtpConfig && !process.env.EMAIL_HOST;
-  
+  const usingHttpsMail = prefersHttpsApi;
+  const usingEnvSmtp = !prefersHttpsApi && !smtpConfig && !!process.env.EMAIL_HOST;
+  const usingStreamTransport = !prefersHttpsApi && !smtpConfig && !process.env.EMAIL_HOST;
+
   console.log(`   From: ${from}`);
-  console.log(`   Configuration Source: ${usingAdminConfig ? 'Admin Panel' : usingEnvVars ? 'Environment Variables (.env)' : 'Console Mode (NOT actually sent)'}`);
-  
-  // Log SMTP configuration details
-  if (usingAdminConfig) {
+  console.log(
+    `   Configuration Source: ${
+      usingHttpsMail
+        ? `HTTPS mail API (${sendgridKey ? "SendGrid" : "Resend"})${usingAdminConfig ? " — overrides SMTP; from-address from admin/env" : ""}`
+        : usingAdminConfig
+          ? "Admin Panel (SMTP)"
+          : usingEnvSmtp
+            ? "Environment Variables (.env SMTP)"
+            : "Console Mode (NOT actually sent)"
+    }`
+  );
+
+  if (usingHttpsMail && usingAdminConfig) {
+    console.log(`   (SMTP also configured in admin but not used while SENDGRID_API_KEY / RESEND_API_KEY is set)`);
+    console.log(`   Admin SMTP host (unused): ${smtpConfig.host}:${smtpConfig.port}`);
+  } else if (usingAdminConfig) {
     console.log(`   SMTP Config (Admin Panel):`);
     console.log(`      Host: ${smtpConfig.host}`);
     console.log(`      Port: ${smtpConfig.port}`);
     console.log(`      Secure: ${smtpConfig.secure}`);
     console.log(`      User: ${smtpConfig.user}`);
-  } else if (usingEnvVars) {
+  } else if (usingHttpsMail) {
+    console.log(`   HTTPS mail: ${sendgridKey ? "SendGrid" : "Resend"} (port 443; no outbound SMTP required)`);
+  } else if (usingEnvSmtp) {
     console.log(`   SMTP Config (Environment Variables):`);
     console.log(`      Host: ${process.env.EMAIL_HOST}`);
-    console.log(`      Port: ${process.env.EMAIL_PORT || '587'}`);
-    console.log(`      Secure: ${process.env.EMAIL_SECURE === 'true'}`);
+    console.log(`      Port: ${process.env.EMAIL_PORT || "587"}`);
+    console.log(`      Secure: ${process.env.EMAIL_SECURE === "true"}`);
     console.log(`      User: ${process.env.EMAIL_USER}`);
-    console.log(`      From: ${process.env.EMAIL_FROM || 'not set'}`);
+    console.log(`      From: ${process.env.EMAIL_FROM || "not set"}`);
   } else {
-    console.log(`   ⚠️  WARNING: No SMTP configuration found - email will NOT be sent!`);
+    console.log(`   ⚠️  WARNING: No SMTP / HTTPS mail configuration found - email will NOT be sent!`);
     console.log(`   Email will only be logged to console.`);
   }
-  
-  // Extract OTP from HTML if present (for logging)
+
   const otpMatch = opts.html.match(/<div class="otp-code">(\d{4})<\/div>/);
   if (otpMatch) {
     console.log(`   🔑 OTP Code in email: ${otpMatch[1]}`);
   }
-  
+
   console.log(`   Attempting to send...`);
-  
+
   try {
+    if (sendgridKey) {
+      const sendStartTime = Date.now();
+      const result = await sendMailViaSendGridHttp(opts, fromEmail, fromName, sendgridKey);
+      const sendDuration = Date.now() - sendStartTime;
+      const totalDuration = Date.now() - startTime;
+      console.log(`\n${'='.repeat(80)}`);
+      console.log(`✅ [${emailId}] EMAIL SENT SUCCESSFULLY (SendGrid HTTPS)`);
+      console.log(`${'='.repeat(80)}`);
+      console.log(`   To: ${opts.to}`);
+      console.log(`   From: ${from}`);
+      console.log(`   Subject: ${opts.subject}`);
+      console.log(`   Message ID: ${result.messageId || "N/A"}`);
+      console.log(`   Send Duration: ${sendDuration}ms`);
+      console.log(`   Total Duration: ${totalDuration}ms`);
+      console.log(`${'='.repeat(80)}\n`);
+      return { messageId: result.messageId, response: result.response } as any;
+    }
+
+    if (resendKey) {
+      const sendStartTime = Date.now();
+      const result = await sendMailViaResendHttp(opts, fromEmail, resendKey);
+      const sendDuration = Date.now() - sendStartTime;
+      const totalDuration = Date.now() - startTime;
+      console.log(`\n${'='.repeat(80)}`);
+      console.log(`✅ [${emailId}] EMAIL SENT SUCCESSFULLY (Resend HTTPS)`);
+      console.log(`${'='.repeat(80)}`);
+      console.log(`   To: ${opts.to}`);
+      console.log(`   From: ${from}`);
+      console.log(`   Subject: ${opts.subject}`);
+      console.log(`   Message ID: ${result.messageId || "N/A"}`);
+      console.log(`   Send Duration: ${sendDuration}ms`);
+      console.log(`   Total Duration: ${totalDuration}ms`);
+      console.log(`${'='.repeat(80)}\n`);
+      return { messageId: result.messageId, response: result.response } as any;
+    }
+
+    const transporter = await getMailer();
+
     // Check if we're using streamTransport (development mode)
     const isStreamTransport = usingStreamTransport;
-    
+
     const sendStartTime = Date.now();
     const result = await transporter.sendMail({ ...opts, from });
     const sendDuration = Date.now() - sendStartTime;
@@ -474,9 +593,9 @@ export async function sendMail(opts: { to: string; subject: string; html: string
       console.log(`   This usually means SMTP ports (465, 587, 25) are blocked by firewall.`);
       console.log(`   Solution:`);
       console.log(`     1. Run: sudo bash /var/www/gloriaconnect/backend/scripts/fix-email-firewall.sh`);
-      console.log(`     2. Or use SendGrid/Mailgun (HTTP API, port 443):`);
-      console.log(`        Set EMAIL_SERVICE=sendgrid in .env`);
-      console.log(`     3. Contact hosting provider to open SMTP ports`);
+      console.log(`     2. Or use HTTPS mail on port 443 (works when SMTP is blocked):`);
+      console.log(`        Set SENDGRID_API_KEY=... or RESEND_API_KEY=... in .env (no SMTP needed).`);
+      console.log(`     3. Contact hosting provider to open outbound SMTP (465/587)`);
       console.log(`   See: /var/www/gloriaconnect/backend/EMAIL_FIREWALL_FIX.md`);
     } else {
       console.log(`   ${'-'.repeat(78)}`);
@@ -497,3 +616,8 @@ export async function sendMail(opts: { to: string; subject: string; html: string
     throw error;
   }
 }
+
+// Legacy export for backward compatibility (delegates to sendMail: HTTPS API or SMTP)
+export const mailer = {
+  sendMail: async (opts: any) => sendMail(opts),
+};

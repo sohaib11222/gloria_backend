@@ -7,6 +7,23 @@ export function sanitizeTransportError(err: unknown): { code: string; message: s
   const code = typeof e?.code === "string" ? e.code : "";
   const response = typeof e?.response === "string" ? e.response : "";
 
+  if (code === "EHTTP" || /SendGrid API HTTP|Resend API HTTP/i.test(msg)) {
+    return {
+      code: "HTTP_MAIL_API_FAILED",
+      message:
+        "The HTTPS mail provider rejected the request. Check SENDGRID_API_KEY or RESEND_API_KEY, and verify the sender domain or address is allowed for that provider.",
+    };
+  }
+  if (
+    (typeof e?.name === "string" && e.name === "AbortError") ||
+    /AbortSignal\.timeout|The operation was aborted/i.test(msg)
+  ) {
+    return {
+      code: "HTTP_MAIL_TIMEOUT",
+      message:
+        "The HTTPS mail request timed out. Check network access to api.sendgrid.com / api.resend.com (port 443).",
+    };
+  }
   if (
     code === "EAUTH" ||
     /535|authentication failed|invalid login|5\.7\.3|535 5\.7\.139/i.test(msg) ||
@@ -29,7 +46,7 @@ export function sanitizeTransportError(err: unknown): { code: string; message: s
     return {
       code: "SMTP_TIMEOUT",
       message:
-        "The connection to the mail server timed out. Many hosts use outgoing mail on port 465 (implicit TLS) at your domain, e.g. EMAIL_HOST=gloriaconnect.com EMAIL_PORT=465 EMAIL_SECURE=true. Outbound 587 can be blocked on some VPS networks.",
+        "The connection to the mail server timed out. Many hosts block outbound SMTP (465/587). Set SENDGRID_API_KEY or RESEND_API_KEY to send over HTTPS (port 443), or ask your host to allow outbound SMTP.",
     };
   }
   if (/554|550 5\.1\.1|mailbox unavailable|recipient rejected/i.test(msg + response)) {

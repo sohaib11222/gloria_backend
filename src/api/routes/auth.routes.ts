@@ -6,6 +6,7 @@ import { EmailVerificationService } from "../../services/emailVerification.js";
 import { PasswordResetService } from "../../services/passwordReset.js";
 import { requireAuth } from "../../infra/auth.js";
 import { normalizeReferralSlug } from "../../services/referralSlug.js";
+import { isHttpsMailApiConfigured } from "../../infra/mailer.js";
 
 export const authRouter = Router();
 
@@ -544,8 +545,15 @@ authRouter.post("/auth/resend-otp", async (req, res, next) => {
       orderBy: { updatedAt: 'desc' },
     });
     const hasEnvVars = !!(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
-    const isSmtpConfigured = !!smtpConfig || hasEnvVars;
-    const configSource = smtpConfig ? 'admin_panel' : (hasEnvVars ? 'environment_variables' : 'none');
+    const httpsApi = isHttpsMailApiConfigured();
+    const isSmtpConfigured = !!smtpConfig || hasEnvVars || httpsApi;
+    const configSource = httpsApi
+      ? "https_mail_api"
+      : smtpConfig
+        ? "admin_panel"
+        : hasEnvVars
+          ? "environment_variables"
+          : "none";
     
     // Determine the specific issue
     let errorType = 'unknown';
@@ -553,7 +561,7 @@ authRouter.post("/auth/resend-otp", async (req, res, next) => {
     
     if (!isSmtpConfigured) {
       errorType = 'not_configured';
-      errorDetails = 'SMTP is not configured. No admin config found and environment variables are missing.';
+      errorDetails = 'Mail is not configured. No admin SMTP, no EMAIL_* SMTP env vars, and no SENDGRID_API_KEY / RESEND_API_KEY.';
     } else if (emailError) {
       if (emailError.includes('Authentication') || emailError.includes('BadCredentials') || emailError.includes('Username and Password not accepted')) {
         errorType = 'auth_failed';
@@ -573,8 +581,8 @@ authRouter.post("/auth/resend-otp", async (req, res, next) => {
       message: emailSent 
         ? "OTP email sent successfully! Please check your email."
         : errorType === 'not_configured'
-          ? "OTP was generated but email sending failed. SMTP is not configured. Please configure SMTP to receive emails."
-          : "OTP was generated but email sending failed. Please check your SMTP configuration.",
+          ? "OTP was generated but email sending failed. No mail delivery is configured (SMTP or HTTPS API). Configure mail to receive emails."
+          : "OTP was generated but email sending failed. Please check your mail configuration.",
       email,
       emailSent,
       smtpConfigured: isSmtpConfigured,
@@ -584,13 +592,17 @@ authRouter.post("/auth/resend-otp", async (req, res, next) => {
       help: !emailSent ? {
         configureViaAdmin: "POST /admin/smtp with your SMTP credentials",
         configureViaEnv: "Set EMAIL_HOST, EMAIL_USER, EMAIL_PASS in .env file (no quotes around values)",
+        configureViaHttpsApi:
+          "If outbound SMTP is blocked on this server, set SENDGRID_API_KEY or RESEND_API_KEY (HTTPS on port 443). See .env.example.",
         gmailHelp: "For Gmail: Enable 2-Step Verification and use App Password from https://myaccount.google.com/apppasswords",
         checkConsole: "In development mode, check server console for OTP and detailed error logs",
         note: configSource === 'admin_panel' 
-          ? "⚠️ Admin panel config is active and overrides .env variables. To use .env, disable admin config."
+          ? "⚠️ Admin panel SMTP is active (no HTTPS API key). To bypass blocked SMTP, add SENDGRID_API_KEY or RESEND_API_KEY — it overrides SMTP when set."
+          : configSource === 'https_mail_api'
+          ? "Using SendGrid or Resend via HTTPS. If sending still fails, check the API key and verified sender domain."
           : configSource === 'environment_variables'
           ? "Using .env variables. Make sure values have NO quotes: EMAIL_PASS=obmfugyywnvxctez (not EMAIL_PASS=\"obmfugyywnvxctez\")"
-          : "No SMTP configuration found. Configure via admin panel or .env file."
+          : "No mail configuration found. Use admin SMTP, .env SMTP, or SENDGRID_API_KEY / RESEND_API_KEY."
       } : undefined
     };
 
@@ -1080,8 +1092,15 @@ authRouter.post("/auth/forgot-password", async (req, res, next) => {
       orderBy: { updatedAt: 'desc' },
     });
     const hasEnvVars = !!(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
-    const isSmtpConfigured = !!smtpConfig || hasEnvVars;
-    const configSource = smtpConfig ? 'admin_panel' : (hasEnvVars ? 'environment_variables' : 'none');
+    const httpsApi = isHttpsMailApiConfigured();
+    const isSmtpConfigured = !!smtpConfig || hasEnvVars || httpsApi;
+    const configSource = httpsApi
+      ? "https_mail_api"
+      : smtpConfig
+        ? "admin_panel"
+        : hasEnvVars
+          ? "environment_variables"
+          : "none";
     
     // Log OTP to console in development mode only
     if (!emailSent && otp && process.env.NODE_ENV !== 'production') {

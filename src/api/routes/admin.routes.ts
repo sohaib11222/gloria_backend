@@ -14,7 +14,7 @@ import { notifyAgreementDrafted } from "../../services/notifications.js";
 import { enforceWhitelist } from "../../infra/whitelistEnforcement.js";
 import { validateLocationArray } from "../../services/locationValidation.js";
 import { auditLog } from "../../services/audit.js";
-import { invalidateMailerCache } from "../../infra/mailer.js";
+import { invalidateMailerCache, isHttpsMailApiConfigured } from "../../infra/mailer.js";
 import { normalizeReferralSlug } from "../../services/referralSlug.js";
 import { ensureUnlocodeRowForBranch } from "../../services/ensureUnlocodeForBranch.js";
 
@@ -4509,25 +4509,32 @@ adminRouter.post("/admin/smtp/test", requireAuth(), requireRole("ADMIN"), async 
     });
     
     const hasEnvVars = !!(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
-    const isConfigured = !!smtpConfig || hasEnvVars;
+    const httpsApi = isHttpsMailApiConfigured();
+    const isConfigured = !!smtpConfig || hasEnvVars || httpsApi;
+    const useSmtpVerify = !httpsApi && (!!smtpConfig || hasEnvVars);
     
     if (!isConfigured) {
       return res.status(400).json({
         error: "SMTP_NOT_CONFIGURED",
-        message: "SMTP is not configured. Please configure SMTP via admin panel or environment variables.",
-        hint: "Use POST /admin/smtp to configure SMTP, or set EMAIL_HOST, EMAIL_USER, EMAIL_PASS in .env file"
+        message: "Mail is not configured. Use admin SMTP, EMAIL_* in .env, or SENDGRID_API_KEY / RESEND_API_KEY.",
+        hint: "Use POST /admin/smtp, set EMAIL_HOST/USER/PASS, or set SENDGRID_API_KEY or RESEND_API_KEY for HTTPS (port 443)."
       });
     }
     
-    // Try to verify connection first
+    // Try to verify SMTP connection only when sendMail would use SMTP (not HTTPS API)
     let connectionVerified = false;
     let connectionError = null;
-    try {
-      const transporter = await getMailer();
-      await transporter.verify();
+    if (useSmtpVerify) {
+      try {
+        const transporter = await getMailer();
+        await transporter.verify();
+        connectionVerified = true;
+      } catch (verifyError: any) {
+        connectionError = verifyError.message;
+      }
+    } else {
       connectionVerified = true;
-    } catch (verifyError: any) {
-      connectionError = verifyError.message;
+      connectionError = null;
     }
     
     // Attempt to send email
@@ -4616,12 +4623,13 @@ adminRouter.get("/admin/smtp/status", requireAuth(), requireRole("ADMIN"), async
     });
 
     const hasEnvVars = !!(process.env.EMAIL_HOST && process.env.EMAIL_USER && process.env.EMAIL_PASS);
+    const httpsApi = isHttpsMailApiConfigured();
+    const useSmtpVerify = !httpsApi && (!!smtpConfig || hasEnvVars);
     
     let connectionStatus = 'unknown';
     let connectionError = null;
     
-    // Try to verify connection if we have config
-    if (smtpConfig || hasEnvVars) {
+    if (useSmtpVerify) {
       try {
         const { getMailer } = await import("../../infra/mailer.js");
         const transporter = await getMailer();
@@ -4631,6 +4639,8 @@ adminRouter.get("/admin/smtp/status", requireAuth(), requireRole("ADMIN"), async
         connectionStatus = 'failed';
         connectionError = error.message;
       }
+    } else if (httpsApi) {
+      connectionStatus = 'https_api';
     } else {
       connectionStatus = 'not_configured';
     }
@@ -4639,6 +4649,7 @@ adminRouter.get("/admin/smtp/status", requireAuth(), requireRole("ADMIN"), async
       configured: !!smtpConfig,
       usingEnvVars: hasEnvVars && !smtpConfig,
       usingAdminConfig: !!smtpConfig,
+      usingHttpsMailApi: httpsApi && !smtpConfig,
       connectionStatus,
       config: null,
       envVars: {
@@ -4648,6 +4659,8 @@ adminRouter.get("/admin/smtp/status", requireAuth(), requireRole("ADMIN"), async
         EMAIL_PORT: process.env.EMAIL_PORT || '587 (default)',
         EMAIL_SECURE: process.env.EMAIL_SECURE || 'false (default)',
         EMAIL_FROM: process.env.EMAIL_FROM || 'not set',
+        SENDGRID_API_KEY: process.env.SENDGRID_API_KEY ? '✓ Set (hidden)' : '✗ Not set',
+        RESEND_API_KEY: process.env.RESEND_API_KEY ? '✓ Set (hidden)' : '✗ Not set',
       }
     };
 

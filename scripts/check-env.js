@@ -72,3 +72,34 @@ console.log('2. If MySQL root has password, use: DATABASE_URL="mysql://root:YOUR
 console.log('3. Or create a new MySQL user (see scripts/setup-mysql.sql)');
 console.log('4. Then run: npm run test:db');
 
+// Mail (OTP / verification) — read .env without printing secrets
+if (fs.existsSync(envPath)) {
+  const raw = fs.readFileSync(envPath, 'utf8');
+  const lineVal = (name) => {
+    const m = raw.match(new RegExp(`^${name}=(.*)$`, 'm'));
+    if (!m) return null;
+    return m[1].replace(/^["']|["']$/g, '').trim();
+  };
+  const sg = lineVal('SENDGRID_API_KEY');
+  const rs = lineVal('RESEND_API_KEY');
+  const host = lineVal('EMAIL_HOST');
+  const user = lineVal('EMAIL_USER');
+  const pass = lineVal('EMAIL_PASS');
+  const from = lineVal('EMAIL_FROM');
+  console.log('\n📧 Mail (registration / OTP):');
+  if ((sg && sg.length > 8) || (rs && rs.length > 8)) {
+    console.log('   ✅ HTTPS mail API key is set (SendGrid or Resend) — sending should use port 443.');
+    if (sg && sg.length > 8) console.log('      SENDGRID_API_KEY: set');
+    if (rs && rs.length > 8) console.log('      RESEND_API_KEY: set');
+  } else {
+    console.log('   ⚠️  No RESEND_API_KEY or SENDGRID_API_KEY (non-empty) — app uses SMTP only.');
+    if (host && user && pass) {
+      console.log(`   SMTP: ${user} @ ${host} (from: ${from || '(not set)'})`);
+      console.log('   If registration emails time out, your VPS likely blocks outbound 465/587.');
+      console.log('   Fix: add RESEND_API_KEY or SENDGRID_API_KEY — see comments in .env and .env.example.');
+    } else {
+      console.log('   SMTP env vars incomplete (need EMAIL_HOST, EMAIL_USER, EMAIL_PASS).');
+    }
+  }
+}
+
