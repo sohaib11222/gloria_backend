@@ -5,137 +5,176 @@ import { z } from "zod";
 import { bookingClient } from "../../grpc/clients/core.js";
 import { metaFromReq } from "../../grpc/meta.js";
 import { prisma } from "../../data/prisma.js";
-import { hasActiveSubscription, sourceIdsWithActiveSubscription } from "../../services/subscriptionCheck.js";
+import {
+	hasActiveSubscription,
+	sourceIdsWithActiveSubscription,
+} from "../../services/subscriptionCheck.js";
 import { auditLog, logBooking } from "../../services/audit.js";
-import { 
-  recordBookingCreated, 
-  recordBookingModified, 
-  recordBookingCancelled,
-  getBookingHistory 
-} from "../../services/bookingHistory.js";
+import { getBookingHistory } from "../../services/bookingHistory.js";
 
 export const bookingsRouter = Router();
 
 // List bookings for current agent (or all for admin)
 bookingsRouter.get("/", requireAuth(), async (req: any, res, next) => {
-  try {
-    const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
-    const companyId = String(req.query.company_id || "").trim();
-    const requestId = String(req.query.request_id || "").trim();
-    const isAdmin = req.user?.role === "ADMIN";
-    const where: any = {};
-    if (!isAdmin) where.agentId = req.user.companyId;
-    if (isAdmin && companyId) where.agentId = companyId;
-    if (requestId) where.id = requestId; // best-effort filter
-    const rows = await prisma.booking.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      take: limit,
-    });
-    // Return format expected by frontend Dashboard
-    res.json({ data: rows, items: rows });
-  } catch (e) { next(e); }
+	try {
+		const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
+		const companyId = String(req.query.company_id || "").trim();
+		const requestId = String(req.query.request_id || "").trim();
+		const isAdmin = req.user?.role === "ADMIN";
+		const where: any = {};
+		if (!isAdmin) where.agentId = req.user.companyId;
+		if (isAdmin && companyId) where.agentId = companyId;
+		if (requestId) where.id = requestId; // best-effort filter
+		const rows = await prisma.booking.findMany({
+			where,
+			orderBy: { createdAt: "desc" },
+			take: limit,
+		});
+		const items = rows.map((b) => ({
+			...b,
+			agreementRef: b.agreementRef,
+			supplierBookingRef: b.supplierBookingRef,
+			agentBookingRef: b.agentBookingRef,
+			pickupLocation: b.pickupUnlocode,
+			dropoffLocation: b.dropoffUnlocode,
+			pickupDate: b.pickupDateTime?.toISOString?.() ?? b.pickupDateTime,
+			dropoffDate: b.dropoffDateTime?.toISOString?.() ?? b.dropoffDateTime,
+			createdAt: b.createdAt?.toISOString?.() ?? b.createdAt,
+			updatedAt: b.updatedAt?.toISOString?.() ?? b.updatedAt,
+			vehicleInfo: {
+				vehicle_class: b.vehicleClass,
+				vehicle_make_model: b.vehicleMakeModel,
+				rate_plan_code: b.ratePlanCode,
+			},
+		}));
+		// Return format expected by frontend Dashboard
+		res.json({ data: items, items });
+	} catch (e) {
+		next(e);
+	}
 });
 
 // Helper function to get valid booking data for an agent
 async function getValidBookingData(agentId: string) {
-  try {
-    // Get active agreements for this agent
-    const agreementsRaw = await prisma.agreement.findMany({
-      where: {
-        agentId: agentId,
-        status: 'ACTIVE'
-      },
-      include: {
-        source: {
-          select: {
-            id: true,
-            companyName: true,
-            status: true
-          }
-        }
-      },
-      take: 5 // Limit to 5 most recent
-    });
-    const sourceIds = agreementsRaw.map((a) => a.sourceId);
-    const activeSourceIds = await sourceIdsWithActiveSubscription(sourceIds);
-    const agreements = agreementsRaw.filter((a) => activeSourceIds.has(a.sourceId));
+	try {
+		// Get active agreements for this agent
+		const agreementsRaw = await prisma.agreement.findMany({
+			where: {
+				agentId: agentId,
+				status: "ACTIVE",
+			},
+			include: {
+				source: {
+					select: {
+						id: true,
+						companyName: true,
+						status: true,
+					},
+				},
+			},
+			take: 5, // Limit to 5 most recent
+		});
+		const sourceIds = agreementsRaw.map((a) => a.sourceId);
+		const activeSourceIds = await sourceIdsWithActiveSubscription(sourceIds);
+		const agreements = agreementsRaw.filter((a) =>
+			activeSourceIds.has(a.sourceId),
+		);
 
-    // Get all active sources
-    const sources = await prisma.company.findMany({
-      where: {
-        type: 'SOURCE',
-        status: 'ACTIVE'
-      },
-      select: {
-        id: true,
-        companyName: true,
-        status: true
-      },
-      take: 5 // Limit to 5
-    });
+		// Get all active sources
+		const sources = await prisma.company.findMany({
+			where: {
+				type: "SOURCE",
+				status: "ACTIVE",
+			},
+			select: {
+				id: true,
+				companyName: true,
+				status: true,
+			},
+			take: 5, // Limit to 5
+		});
 
-    return {
-      validAgreements: agreements.map(agreement => ({
-        agreementRef: agreement.agreementRef,
-        status: agreement.status,
-        source: {
-          id: agreement.source.id,
-          companyName: agreement.source.companyName,
-          status: agreement.source.status
-        }
-      })),
-      validSources: sources.map(source => ({
-        id: source.id,
-        companyName: source.companyName,
-        status: source.status
-      })),
-      sampleRequest: {
-        source_id: agreements[0]?.source?.id || sources[0]?.id || "REQUIRED",
-        agreement_ref: agreements[0]?.agreementRef || "REQUIRED",
-        agent_booking_ref: "YOUR-BOOKING-REF-123"
-      }
-    };
-  } catch (error) {
-    return {
-      error: "Failed to fetch valid data",
-      suggestion: "Check if you have active agreements and sources"
-    };
-  }
+		return {
+			validAgreements: agreements.map((agreement) => ({
+				agreementRef: agreement.agreementRef,
+				status: agreement.status,
+				source: {
+					id: agreement.source.id,
+					companyName: agreement.source.companyName,
+					status: agreement.source.status,
+				},
+			})),
+			validSources: sources.map((source) => ({
+				id: source.id,
+				companyName: source.companyName,
+				status: source.status,
+			})),
+			sampleRequest: {
+				source_id: agreements[0]?.source?.id || sources[0]?.id || "REQUIRED",
+				agreement_ref: agreements[0]?.agreementRef || "OPTIONAL_WITH_SOURCE_ID",
+				agent_booking_ref: "YOUR-BOOKING-REF-123",
+			},
+		};
+	} catch (error) {
+		return {
+			error: "Failed to fetch valid data",
+			suggestion: "Check if you have active agreements and sources",
+		};
+	}
+}
+
+function buildDirectAgreementRef(source: {
+	id: string;
+	companyCode?: string | null;
+}) {
+	const fallback = source.id.slice(0, 8).toUpperCase();
+	const token = String(source.companyCode || fallback)
+		.trim()
+		.replace(/[^a-z0-9-]/gi, "")
+		.toUpperCase();
+	return `DIRECT-${token || fallback}`;
+}
+
+function isDirectAgreementRef(ref?: string | null) {
+	return String(ref || "")
+		.trim()
+		.toUpperCase()
+		.startsWith("DIRECT-");
 }
 
 const createSchema = z.object({
-  agreement_ref: z.string(),
-  supplier_offer_ref: z.string().optional(),
-  agent_booking_ref: z.string().optional(),
-  
-  // Availability context (optional - if provided, will retrieve context from availability search)
-  availability_request_id: z.string().optional(),
-  
-  // Location details (from availability search) - OTA: PickupLocation, DropOffLocation
-  pickup_unlocode: z.string().optional(),     // PickupLocation (UN/LOCODE)
-  dropoff_unlocode: z.string().optional(),    // DropOffLocation (UN/LOCODE)
-  pickup_iso: z.string().optional(),          // PickupDateTime (ISO-8601)
-  dropoff_iso: z.string().optional(),         // DropOffDateTime (ISO-8601)
-  
-  // Vehicle and driver details (from availability search/offer)
-  vehicle_class: z.string().optional(),       // VehicleClass (OTA codes: ECMN, CDMR, etc.)
-  vehicle_make_model: z.string().optional(),  // VehicleMakeModel
-  rate_plan_code: z.string().optional(),      // RatePlanCode (BAR, MEMBER, PREPAY, etc.)
-  driver_age: z.number().int().min(18).optional(), // DriverAge
-  residency_country: z.string().length(2).optional(), // ResidencyCountry (ISO 3166-1 alpha-2)
-  
-  // Customer and payment information (JSON objects)
-  customer_info: z.record(z.any()).optional(), // Customer name, contact details, etc.
-  payment_info: z.record(z.any()).optional(),  // Payment details, card info, etc.
-  // OTA-style aliases accepted for compatibility
-  pickupDateTime: z.string().optional(),
-  returnDateTime: z.string().optional(),
-  pickup_location_code: z.string().optional(),
-  return_location_code: z.string().optional(),
-  veh_pref_code: z.string().optional(),
-  customer: z.record(z.any()).optional(),
-  rental_payment_pref: z.record(z.any()).optional(),
+	agreement_ref: z.string().trim().optional(),
+	source_id: z.string().trim().optional(),
+	supplier_offer_ref: z.string().optional(),
+	agent_booking_ref: z.string().optional(),
+
+	// Availability context (optional - if provided, will retrieve context from availability search)
+	availability_request_id: z.string().optional(),
+
+	// Location details (from availability search) - OTA: PickupLocation, DropOffLocation
+	pickup_unlocode: z.string().optional(), // PickupLocation (UN/LOCODE)
+	dropoff_unlocode: z.string().optional(), // DropOffLocation (UN/LOCODE)
+	pickup_iso: z.string().optional(), // PickupDateTime (ISO-8601)
+	dropoff_iso: z.string().optional(), // DropOffDateTime (ISO-8601)
+
+	// Vehicle and driver details (from availability search/offer)
+	vehicle_class: z.string().optional(), // VehicleClass (OTA codes: ECMN, CDMR, etc.)
+	vehicle_make_model: z.string().optional(), // VehicleMakeModel
+	rate_plan_code: z.string().optional(), // RatePlanCode (BAR, MEMBER, PREPAY, etc.)
+	driver_age: z.number().int().min(18).optional(), // DriverAge
+	residency_country: z.string().length(2).optional(), // ResidencyCountry (ISO 3166-1 alpha-2)
+
+	// Customer and payment information (JSON objects)
+	customer_info: z.record(z.any()).optional(), // Customer name, contact details, etc.
+	payment_info: z.record(z.any()).optional(), // Payment details, card info, etc.
+	// OTA-style aliases accepted for compatibility
+	pickupDateTime: z.string().optional(),
+	returnDateTime: z.string().optional(),
+	pickup_location_code: z.string().optional(),
+	return_location_code: z.string().optional(),
+	veh_pref_code: z.string().optional(),
+	customer: z.record(z.any()).optional(),
+	rental_payment_pref: z.record(z.any()).optional(),
 });
 
 /**
@@ -153,445 +192,694 @@ const createSchema = z.object({
  *       - Idempotency-Key header: Required for safety
  */
 bookingsRouter.post("/", requireAuth(), async (req: any, res, next) => {
-  const startTime = Date.now();
-  const requestId = req.requestId;
-  
-  try {
-    const bodyRaw = createSchema.parse(req.body);
-    const body: any = { ...bodyRaw };
-    // Normalize OTA-style aliases into current snake_case schema keys
-    if (!body.pickup_iso && body.pickupDateTime) body.pickup_iso = body.pickupDateTime;
-    if (!body.dropoff_iso && body.returnDateTime) body.dropoff_iso = body.returnDateTime;
-    if (!body.pickup_unlocode && body.pickup_location_code) body.pickup_unlocode = body.pickup_location_code;
-    if (!body.dropoff_unlocode && body.return_location_code) body.dropoff_unlocode = body.return_location_code;
-    if (!body.supplier_offer_ref && body.veh_pref_code) body.supplier_offer_ref = body.veh_pref_code;
-    if (!body.customer_info && body.customer) body.customer_info = body.customer;
-    if (!body.payment_info && body.rental_payment_pref) body.payment_info = body.rental_payment_pref;
-    // Check for idempotency key in various header formats (case-insensitive)
-    // Express lowercases headers, so check lowercase version first
-    // Also check rawHeaders which preserves original case
-    const rawHeaders = (req as any).rawHeaders || [];
-    const idempotencyKey = req.headers["idempotency-key"] || 
-                          req.headers["Idempotency-Key"] || 
-                          req.headers["IDEMPOTENCY-KEY"] ||
-                          // Check rawHeaders for original case
-                          (rawHeaders.findIndex((h: string) => h.toLowerCase() === 'idempotency-key') >= 0 
-                            ? rawHeaders[rawHeaders.findIndex((h: string) => h.toLowerCase() === 'idempotency-key') + 1]
-                            : undefined);
-    
-    console.log('[Booking.Create] 🔍 Checking idempotency key:', {
-      headers: Object.keys(req.headers).filter(k => k.toLowerCase().includes('idempotency')),
-      rawHeaders: rawHeaders.filter((h: string, i: number) => 
-        i % 2 === 0 && h.toLowerCase().includes('idempotency')
-      ),
-      idempotencyKey: idempotencyKey ? `${String(idempotencyKey).substring(0, 20)}...` : 'MISSING',
-      idempotencyKeyType: typeof idempotencyKey,
-      idempotencyKeyValue: idempotencyKey
-    });
-    
-    if (!idempotencyKey) {
-      const errorResponse = { 
-        error: "SCHEMA_ERROR", 
-        message: "Missing Idempotency-Key header",
-        details: "The Idempotency-Key header is required for all booking operations to ensure request safety and prevent duplicate bookings.",
-        hint: "Include the header in your request: 'Idempotency-Key: <unique-value>'",
-        example: "Idempotency-Key: booking-1234567890-abc123"
-      };
-      
-      // Log the error
-      await auditLog({
-        direction: "IN",
-        endpoint: "booking.create",
-        requestId,
-        companyId: req.user.companyId,
-        sourceId: (body as any).source_id,
-        httpStatus: 400,
-        request: body,
-        response: errorResponse,
-        durationMs: Date.now() - startTime,
-      });
-      
-      return res.status(400).json(errorResponse);
-    }
-    
-    // Enforce single-supplier dispatch via agreement_ref -> resolve agreement -> source
-    const agreementRow = await prisma.agreement.findFirst({
-      where: {
-        agentId: req.user.companyId,
-        agreementRef: body.agreement_ref,
-        status: 'ACTIVE'
-      },
-      select: { id: true, sourceId: true }
-    });
-    if (!agreementRow) {
-      const errorResponse = { error: "AGREEMENT_INACTIVE", message: "Agreement not active or not found for this agent/source" };
-      await auditLog({
-        direction: "IN",
-        endpoint: "booking.create",
-        requestId,
-        companyId: req.user.companyId,
-        sourceId: undefined,
-        agreementRef: body.agreement_ref,
-        httpStatus: 409,
-        request: body,
-        response: errorResponse,
-        durationMs: Date.now() - startTime,
-      });
-      return res.status(409).json(errorResponse);
-    }
-    const hasSub = await hasActiveSubscription(agreementRow.sourceId);
-    if (!hasSub) {
-      return res.status(402).json({ error: "SOURCE_SUBSCRIPTION_EXPIRED", message: "Source subscription has expired. This source is not available for bookings." });
-    }
+	const startTime = Date.now();
+	const requestId = req.requestId;
 
-    const client = bookingClient();
-    
-    // Create a custom error handler to catch AGREEMENT_INACTIVE
-    const customErrorHandler = async (err: any, resp: any) => {
-      const duration = Date.now() - startTime;
-      
-      if (err && err.message && err.message.includes("AGREEMENT_INACTIVE")) {
-        try {
-          const validData = await getValidBookingData(req.user.companyId);
-          const errorResponse = {
-            error: "AGREEMENT_INACTIVE",
-            message: "Agreement not found or inactive",
-            validData: validData,
-            suggestion: "Use one of the valid agreements and sources listed above"
-          };
-          
-          await logBooking({
-            requestId,
-            agentId: req.user.companyId,
-            sourceId: agreementRow?.sourceId,
-            agreementRef: body.agreement_ref,
-            operation: "create",
-            requestPayload: body,
-            responsePayload: errorResponse,
-            statusCode: 400,
-            durationMs: duration,
-          });
-          
-          return res.status(400).json(errorResponse);
-        } catch (error) {
-          const errorResponse = {
-            error: "AGREEMENT_INACTIVE", 
-            message: "Agreement not found or inactive",
-            suggestion: "Create an agreement first using POST /admin/agreements"
-          };
-          
-          await logBooking({
-            requestId,
-            agentId: req.user.companyId,
-            sourceId: agreementRow?.sourceId,
-            agreementRef: body.agreement_ref,
-            operation: "create",
-            requestPayload: body,
-            responsePayload: errorResponse,
-            statusCode: 400,
-            durationMs: duration,
-          });
-          
-          return res.status(400).json(errorResponse);
-        }
-      } else if (err) {
-        // Map upstream adapter failures/timeouts to 502
-        const status = 502;
-        await logBooking({
-          requestId,
-          agentId: req.user.companyId,
-          sourceId: agreementRow?.sourceId,
-          agreementRef: body.agreement_ref,
-          operation: "create",
-          requestPayload: body,
-          responsePayload: { error: err.message },
-          statusCode: status,
-          grpcStatus: err.code || 13,
-          durationMs: duration,
-        });
-        return res.status(status).json({ error: "UPSTREAM_ERROR", message: err.message });
-      } else {
-        await logBooking({
-          requestId,
-          agentId: req.user.companyId,
-          sourceId: agreementRow?.sourceId,
-          agreementRef: body.agreement_ref,
-          operation: "create",
-          requestPayload: body,
-          responsePayload: resp,
-          statusCode: 200,
-          durationMs: duration,
-        });
-        
-        res.json(resp);
-      }
-    };
-    
-    // If availability_request_id is provided, retrieve the original search criteria
-    let availabilityContext: any = null;
-    if (body.availability_request_id) {
-      try {
-        const availabilityJob = await prisma.availabilityJob.findUnique({
-          where: { id: body.availability_request_id },
-          select: { 
-            criteriaJson: true, 
-            agentId: true 
-          },
-        });
-        
-        if (availabilityJob && availabilityJob.agentId === req.user.companyId) {
-          availabilityContext = availabilityJob.criteriaJson as any;
-        } else if (availabilityJob && availabilityJob.agentId !== req.user.companyId) {
-          return res.status(403).json({ 
-            error: "FORBIDDEN", 
-            message: "Availability request does not belong to this agent" 
-          });
-        }
-      } catch (e) {
-        // If lookup fails, continue without context
-        console.error('Failed to retrieve availability context:', e);
-      }
-    }
-    
-    // Build full booking payload with all OTA fields
-    // Merge availability context with explicit booking fields (explicit fields take precedence)
-    const bookingPayload: any = {
-      agent_id: req.user.companyId,
-      source_id: agreementRow.sourceId,
-      agreement_ref: body.agreement_ref,
-      supplier_offer_ref: body.supplier_offer_ref || "",
-      idempotency_key: String(idempotencyKey),
-      agent_booking_ref: body.agent_booking_ref || "",
-      // Append trace fields for the adapter/supplier
-      middleware_request_id: requestId,
-      agent_company_id: req.user.companyId,
-    };
-    
-    console.log('[Booking.Create] 📋 Booking payload prepared for gRPC:', {
-      agent_id: bookingPayload.agent_id,
-      source_id: bookingPayload.source_id,
-      agreement_ref: bookingPayload.agreement_ref,
-      supplier_offer_ref: bookingPayload.supplier_offer_ref,
-      idempotency_key: bookingPayload.idempotency_key ? `${bookingPayload.idempotency_key.substring(0, 20)}...` : 'MISSING',
-      hasIdempotencyKey: !!bookingPayload.idempotency_key,
-      payloadKeys: Object.keys(bookingPayload)
-    });
-    
-    // Add availability context if provided
-    if (body.availability_request_id) {
-      bookingPayload.availability_request_id = body.availability_request_id;
-    }
-    
-    // Merge availability context with explicit fields (explicit takes precedence)
-    if (availabilityContext) {
-      // Extract location details from availability search
-      if (!bookingPayload.pickup_unlocode && availabilityContext.pickup_unlocode) {
-        bookingPayload.pickup_unlocode = availabilityContext.pickup_unlocode;
-      }
-      if (!bookingPayload.dropoff_unlocode && availabilityContext.dropoff_unlocode) {
-        bookingPayload.dropoff_unlocode = availabilityContext.dropoff_unlocode;
-      }
-      if (!bookingPayload.pickup_iso && availabilityContext.pickup_iso) {
-        bookingPayload.pickup_iso = availabilityContext.pickup_iso;
-      }
-      if (!bookingPayload.dropoff_iso && availabilityContext.dropoff_iso) {
-        bookingPayload.dropoff_iso = availabilityContext.dropoff_iso;
-      }
-      if (!bookingPayload.driver_age && availabilityContext.driver_age) {
-        bookingPayload.driver_age = availabilityContext.driver_age;
-      }
-      if (!bookingPayload.residency_country && availabilityContext.residency_country) {
-        bookingPayload.residency_country = availabilityContext.residency_country;
-      }
-    }
-    
-    // If supplier_offer_ref is provided and we have availability context,
-    // try to extract vehicle details from the selected offer
-    if (body.supplier_offer_ref && body.availability_request_id) {
-      try {
-        // Find the offer in availability results
-        const availabilityResults = await prisma.availabilityResult.findMany({
-          where: {
-            jobId: body.availability_request_id,
-          },
-          select: {
-            offerJson: true,
-            sourceId: true,
-          },
-        });
-        
-        // Find the matching offer by supplier_offer_ref
-        for (const result of availabilityResults) {
-          const offer = result.offerJson as any;
-          if (offer && 
-              (offer.supplier_offer_ref === body.supplier_offer_ref || 
-               offer.SupplierOfferRef === body.supplier_offer_ref)) {
-            // Extract vehicle details from the offer
-            if (!bookingPayload.vehicle_class && (offer.vehicle_class || offer.VehicleClass)) {
-              bookingPayload.vehicle_class = offer.vehicle_class || offer.VehicleClass;
-            }
-            if (!bookingPayload.vehicle_make_model && (offer.vehicle_make_model || offer.VehicleMakeModel)) {
-              bookingPayload.vehicle_make_model = offer.vehicle_make_model || offer.VehicleMakeModel;
-            }
-            if (!bookingPayload.rate_plan_code && (offer.rate_plan_code || offer.RatePlanCode)) {
-              bookingPayload.rate_plan_code = offer.rate_plan_code || offer.RatePlanCode;
-            }
-            break; // Found the matching offer, no need to continue
-          }
-        }
-      } catch (e) {
-        // If lookup fails, continue without offer details
-        console.error('Failed to retrieve offer details from availability results:', e);
-      }
-    }
-    
-    // Add location details if provided
-    if (body.pickup_unlocode) bookingPayload.pickup_unlocode = body.pickup_unlocode;
-    if (body.dropoff_unlocode) bookingPayload.dropoff_unlocode = body.dropoff_unlocode;
-    if (body.pickup_iso) bookingPayload.pickup_iso = body.pickup_iso;
-    if (body.dropoff_iso) bookingPayload.dropoff_iso = body.dropoff_iso;
-    
-    // Add vehicle and driver details if provided
-    if (body.vehicle_class) bookingPayload.vehicle_class = body.vehicle_class;
-    if (body.vehicle_make_model) bookingPayload.vehicle_make_model = body.vehicle_make_model;
-    if (body.rate_plan_code) bookingPayload.rate_plan_code = body.rate_plan_code;
-    if (body.driver_age !== undefined) bookingPayload.driver_age = body.driver_age;
-    if (body.residency_country) bookingPayload.residency_country = body.residency_country;
-    
-    // Add customer and payment info if provided (convert to JSON strings for proto)
-    if (body.customer_info) {
-      bookingPayload.customer_info_json = JSON.stringify(body.customer_info);
-    }
-    if (body.payment_info) {
-      bookingPayload.payment_info_json = JSON.stringify(body.payment_info);
-    }
-    
-    client.Create(
-      bookingPayload,
-      metaFromReq(req),
-      customErrorHandler
-    );
-  } catch (e) { 
-    // Log validation errors
-    await auditLog({
-      direction: "IN",
-      endpoint: "booking.create",
-      requestId,
-      companyId: req.user?.companyId,
-      httpStatus: 400,
-      request: req.body,
-      response: { error: e instanceof Error ? e.message : String(e) },
-      durationMs: Date.now() - startTime,
-    });
-    
-    next(e); 
-  }
+	try {
+		const bodyRaw = createSchema.parse(req.body);
+		const body: any = { ...bodyRaw };
+		// Normalize OTA-style aliases into current snake_case schema keys
+		if (!body.pickup_iso && body.pickupDateTime)
+			body.pickup_iso = body.pickupDateTime;
+		if (!body.dropoff_iso && body.returnDateTime)
+			body.dropoff_iso = body.returnDateTime;
+		if (!body.pickup_unlocode && body.pickup_location_code)
+			body.pickup_unlocode = body.pickup_location_code;
+		if (!body.dropoff_unlocode && body.return_location_code)
+			body.dropoff_unlocode = body.return_location_code;
+		if (!body.supplier_offer_ref && body.veh_pref_code)
+			body.supplier_offer_ref = body.veh_pref_code;
+		if (!body.customer_info && body.customer)
+			body.customer_info = body.customer;
+		if (!body.payment_info && body.rental_payment_pref)
+			body.payment_info = body.rental_payment_pref;
+		// Check for idempotency key in various header formats (case-insensitive)
+		// Express lowercases headers, so check lowercase version first
+		// Also check rawHeaders which preserves original case
+		const rawHeaders = (req as any).rawHeaders || [];
+		const idempotencyKey =
+			req.headers["idempotency-key"] ||
+			req.headers["Idempotency-Key"] ||
+			req.headers["IDEMPOTENCY-KEY"] ||
+			// Check rawHeaders for original case
+			(rawHeaders.findIndex(
+				(h: string) => h.toLowerCase() === "idempotency-key",
+			) >= 0
+				? rawHeaders[
+						rawHeaders.findIndex(
+							(h: string) => h.toLowerCase() === "idempotency-key",
+						) + 1
+					]
+				: undefined);
+
+		console.log("[Booking.Create] 🔍 Checking idempotency key:", {
+			headers: Object.keys(req.headers).filter((k) =>
+				k.toLowerCase().includes("idempotency"),
+			),
+			rawHeaders: rawHeaders.filter(
+				(h: string, i: number) =>
+					i % 2 === 0 && h.toLowerCase().includes("idempotency"),
+			),
+			idempotencyKey: idempotencyKey
+				? `${String(idempotencyKey).substring(0, 20)}...`
+				: "MISSING",
+			idempotencyKeyType: typeof idempotencyKey,
+			idempotencyKeyValue: idempotencyKey,
+		});
+
+		if (!idempotencyKey) {
+			const errorResponse = {
+				error: "SCHEMA_ERROR",
+				message: "Missing Idempotency-Key header",
+				details:
+					"The Idempotency-Key header is required for all booking operations to ensure request safety and prevent duplicate bookings.",
+				hint: "Include the header in your request: 'Idempotency-Key: <unique-value>'",
+				example: "Idempotency-Key: booking-1234567890-abc123",
+			};
+
+			// Log the error
+			await auditLog({
+				direction: "IN",
+				endpoint: "booking.create",
+				requestId,
+				companyId: req.user.companyId,
+				sourceId: (body as any).source_id,
+				httpStatus: 400,
+				request: body,
+				response: errorResponse,
+				durationMs: Date.now() - startTime,
+			});
+
+			return res.status(400).json(errorResponse);
+		}
+
+		const suppliedAgreementRef = String(body.agreement_ref || "").trim();
+		const suppliedSourceId = String(body.source_id || "").trim();
+		let bookingTarget: {
+			sourceId: string;
+			agreementRef: string;
+			direct: boolean;
+		} | null = null;
+
+		if (suppliedAgreementRef) {
+			// Agreement-backed booking: keep existing routing and validation.
+			const agreementRow = await prisma.agreement.findFirst({
+				where: {
+					agentId: req.user.companyId,
+					agreementRef: suppliedAgreementRef,
+					status: "ACTIVE",
+				},
+				select: { id: true, sourceId: true },
+			});
+			if (!agreementRow) {
+				const errorResponse = {
+					error: "AGREEMENT_INACTIVE",
+					message: "Agreement not active or not found for this agent/source",
+				};
+				await auditLog({
+					direction: "IN",
+					endpoint: "booking.create",
+					requestId,
+					companyId: req.user.companyId,
+					sourceId: undefined,
+					agreementRef: suppliedAgreementRef,
+					httpStatus: 409,
+					request: body,
+					response: errorResponse,
+					durationMs: Date.now() - startTime,
+				});
+				return res.status(409).json(errorResponse);
+			}
+			bookingTarget = {
+				sourceId: agreementRow.sourceId,
+				agreementRef: suppliedAgreementRef,
+				direct: false,
+			};
+			body.agreement_ref = suppliedAgreementRef;
+		} else {
+			// Direct source booking: /bookings can route by source_id without requiring a formal agreement row.
+			if (!suppliedSourceId) {
+				const errorResponse = {
+					error: "SOURCE_REQUIRED",
+					message:
+						"Select a Source when creating a booking without an agreement.",
+				};
+				await auditLog({
+					direction: "IN",
+					endpoint: "booking.create",
+					requestId,
+					companyId: req.user.companyId,
+					sourceId: undefined,
+					httpStatus: 400,
+					request: body,
+					response: errorResponse,
+					durationMs: Date.now() - startTime,
+				});
+				return res.status(400).json(errorResponse);
+			}
+
+			const source = await prisma.company.findFirst({
+				where: { id: suppliedSourceId, type: "SOURCE", status: "ACTIVE" },
+				select: {
+					id: true,
+					companyName: true,
+					companyCode: true,
+					status: true,
+				},
+			});
+			if (!source) {
+				const errorResponse = {
+					error: "SOURCE_NOT_AVAILABLE",
+					message:
+						"Selected Source is not active or is not available for bookings.",
+				};
+				await auditLog({
+					direction: "IN",
+					endpoint: "booking.create",
+					requestId,
+					companyId: req.user.companyId,
+					sourceId: suppliedSourceId,
+					httpStatus: 404,
+					request: body,
+					response: errorResponse,
+					durationMs: Date.now() - startTime,
+				});
+				return res.status(404).json(errorResponse);
+			}
+
+			bookingTarget = {
+				sourceId: source.id,
+				agreementRef: buildDirectAgreementRef(source),
+				direct: true,
+			};
+			body.agreement_ref = bookingTarget.agreementRef;
+		}
+
+		if (!bookingTarget) {
+			return res
+				.status(400)
+				.json({
+					error: "BOOKING_TARGET_REQUIRED",
+					message: "Select an agreement or Source for booking.",
+				});
+		}
+
+		const hasSub = await hasActiveSubscription(bookingTarget.sourceId);
+		if (!hasSub) {
+			return res
+				.status(402)
+				.json({
+					error: "SOURCE_SUBSCRIPTION_EXPIRED",
+					message:
+						"Source subscription has expired. This source is not available for bookings.",
+				});
+		}
+
+		const client = bookingClient();
+
+		// Create a custom error handler to catch AGREEMENT_INACTIVE
+		const customErrorHandler = async (err: any, resp: any) => {
+			const duration = Date.now() - startTime;
+
+			if (err && err.message && err.message.includes("AGREEMENT_INACTIVE")) {
+				try {
+					const validData = await getValidBookingData(req.user.companyId);
+					const errorResponse = {
+						error: "AGREEMENT_INACTIVE",
+						message: "Agreement not found or inactive",
+						validData: validData,
+						suggestion:
+							"Use one of the valid agreements and sources listed above",
+					};
+
+					await logBooking({
+						requestId,
+						agentId: req.user.companyId,
+						sourceId: bookingTarget?.sourceId,
+						agreementRef: body.agreement_ref,
+						operation: "create",
+						requestPayload: body,
+						responsePayload: errorResponse,
+						statusCode: 400,
+						durationMs: duration,
+					});
+
+					return res.status(400).json(errorResponse);
+				} catch (error) {
+					const errorResponse = {
+						error: "AGREEMENT_INACTIVE",
+						message: "Agreement not found or inactive",
+						suggestion:
+							"Create an agreement first using POST /admin/agreements",
+					};
+
+					await logBooking({
+						requestId,
+						agentId: req.user.companyId,
+						sourceId: bookingTarget?.sourceId,
+						agreementRef: body.agreement_ref,
+						operation: "create",
+						requestPayload: body,
+						responsePayload: errorResponse,
+						statusCode: 400,
+						durationMs: duration,
+					});
+
+					return res.status(400).json(errorResponse);
+				}
+			} else if (err) {
+				// Map upstream adapter failures/timeouts to 502
+				const status = 502;
+				await logBooking({
+					requestId,
+					agentId: req.user.companyId,
+					sourceId: bookingTarget?.sourceId,
+					agreementRef: body.agreement_ref,
+					operation: "create",
+					requestPayload: body,
+					responsePayload: { error: err.message },
+					statusCode: status,
+					grpcStatus: err.code || 13,
+					durationMs: duration,
+				});
+				return res
+					.status(status)
+					.json({ error: "UPSTREAM_ERROR", message: err.message });
+			} else {
+				await logBooking({
+					requestId,
+					agentId: req.user.companyId,
+					sourceId: bookingTarget?.sourceId,
+					agreementRef: body.agreement_ref,
+					operation: "create",
+					requestPayload: body,
+					responsePayload: resp,
+					statusCode: 200,
+					durationMs: duration,
+				});
+
+				res.json(resp);
+			}
+		};
+
+		// If availability_request_id is provided, retrieve the original search criteria
+		let availabilityContext: any = null;
+		if (body.availability_request_id) {
+			try {
+				const availabilityJob = await prisma.availabilityJob.findUnique({
+					where: { id: body.availability_request_id },
+					select: {
+						criteriaJson: true,
+						agentId: true,
+					},
+				});
+
+				if (availabilityJob && availabilityJob.agentId === req.user.companyId) {
+					availabilityContext = availabilityJob.criteriaJson as any;
+				} else if (
+					availabilityJob &&
+					availabilityJob.agentId !== req.user.companyId
+				) {
+					return res.status(403).json({
+						error: "FORBIDDEN",
+						message: "Availability request does not belong to this agent",
+					});
+				}
+			} catch (e) {
+				// If lookup fails, continue without context
+				console.error("Failed to retrieve availability context:", e);
+			}
+		}
+
+		// Build full booking payload with all OTA fields
+		// Merge availability context with explicit booking fields (explicit fields take precedence)
+		const bookingPayload: any = {
+			agent_id: req.user.companyId,
+			source_id: bookingTarget.sourceId,
+			agreement_ref: body.agreement_ref,
+			supplier_offer_ref: body.supplier_offer_ref || "",
+			idempotency_key: String(idempotencyKey),
+			agent_booking_ref: body.agent_booking_ref || "",
+			// Append trace fields for the adapter/supplier
+			middleware_request_id: requestId,
+			agent_company_id: req.user.companyId,
+		};
+
+		console.log("[Booking.Create] 📋 Booking payload prepared for gRPC:", {
+			agent_id: bookingPayload.agent_id,
+			source_id: bookingPayload.source_id,
+			agreement_ref: bookingPayload.agreement_ref,
+			supplier_offer_ref: bookingPayload.supplier_offer_ref,
+			idempotency_key: bookingPayload.idempotency_key
+				? `${bookingPayload.idempotency_key.substring(0, 20)}...`
+				: "MISSING",
+			hasIdempotencyKey: !!bookingPayload.idempotency_key,
+			payloadKeys: Object.keys(bookingPayload),
+		});
+
+		// Add availability context if provided
+		if (body.availability_request_id) {
+			bookingPayload.availability_request_id = body.availability_request_id;
+		}
+
+		// Merge availability context with explicit fields (explicit takes precedence)
+		if (availabilityContext) {
+			// Extract location details from availability search
+			if (
+				!bookingPayload.pickup_unlocode &&
+				availabilityContext.pickup_unlocode
+			) {
+				bookingPayload.pickup_unlocode = availabilityContext.pickup_unlocode;
+			}
+			if (
+				!bookingPayload.dropoff_unlocode &&
+				availabilityContext.dropoff_unlocode
+			) {
+				bookingPayload.dropoff_unlocode = availabilityContext.dropoff_unlocode;
+			}
+			if (!bookingPayload.pickup_iso && availabilityContext.pickup_iso) {
+				bookingPayload.pickup_iso = availabilityContext.pickup_iso;
+			}
+			if (!bookingPayload.dropoff_iso && availabilityContext.dropoff_iso) {
+				bookingPayload.dropoff_iso = availabilityContext.dropoff_iso;
+			}
+			if (!bookingPayload.driver_age && availabilityContext.driver_age) {
+				bookingPayload.driver_age = availabilityContext.driver_age;
+			}
+			if (
+				!bookingPayload.residency_country &&
+				availabilityContext.residency_country
+			) {
+				bookingPayload.residency_country =
+					availabilityContext.residency_country;
+			}
+		}
+
+		// If supplier_offer_ref is provided and we have availability context,
+		// try to extract vehicle details from the selected offer
+		if (body.supplier_offer_ref && body.availability_request_id) {
+			try {
+				// Find the offer in availability results
+				const availabilityResults = await prisma.availabilityResult.findMany({
+					where: {
+						jobId: body.availability_request_id,
+					},
+					select: {
+						offerJson: true,
+						sourceId: true,
+					},
+				});
+
+				// Find the matching offer by supplier_offer_ref for the resolved target Source.
+				for (const result of availabilityResults) {
+					if (result.sourceId !== bookingTarget.sourceId) continue;
+					const offer = result.offerJson as any;
+					if (
+						offer &&
+						(offer.supplier_offer_ref === body.supplier_offer_ref ||
+							offer.SupplierOfferRef === body.supplier_offer_ref)
+					) {
+						// Extract vehicle details from the offer
+						if (
+							!bookingPayload.vehicle_class &&
+							(offer.vehicle_class || offer.VehicleClass)
+						) {
+							bookingPayload.vehicle_class =
+								offer.vehicle_class || offer.VehicleClass;
+						}
+						if (
+							!bookingPayload.vehicle_make_model &&
+							(offer.vehicle_make_model || offer.VehicleMakeModel)
+						) {
+							bookingPayload.vehicle_make_model =
+								offer.vehicle_make_model || offer.VehicleMakeModel;
+						}
+						if (
+							!bookingPayload.rate_plan_code &&
+							(offer.rate_plan_code || offer.RatePlanCode)
+						) {
+							bookingPayload.rate_plan_code =
+								offer.rate_plan_code || offer.RatePlanCode;
+						}
+						break; // Found the matching offer, no need to continue
+					}
+				}
+			} catch (e) {
+				// If lookup fails, continue without offer details
+				console.error(
+					"Failed to retrieve offer details from availability results:",
+					e,
+				);
+			}
+		}
+
+		// Add location details if provided
+		if (body.pickup_unlocode)
+			bookingPayload.pickup_unlocode = body.pickup_unlocode;
+		if (body.dropoff_unlocode)
+			bookingPayload.dropoff_unlocode = body.dropoff_unlocode;
+		if (body.pickup_iso) bookingPayload.pickup_iso = body.pickup_iso;
+		if (body.dropoff_iso) bookingPayload.dropoff_iso = body.dropoff_iso;
+
+		// Add vehicle and driver details if provided
+		if (body.vehicle_class) bookingPayload.vehicle_class = body.vehicle_class;
+		if (body.vehicle_make_model)
+			bookingPayload.vehicle_make_model = body.vehicle_make_model;
+		if (body.rate_plan_code)
+			bookingPayload.rate_plan_code = body.rate_plan_code;
+		if (body.driver_age !== undefined)
+			bookingPayload.driver_age = body.driver_age;
+		if (body.residency_country)
+			bookingPayload.residency_country = body.residency_country;
+
+		// Add customer and payment info if provided (convert to JSON strings for proto)
+		if (body.customer_info) {
+			bookingPayload.customer_info_json = JSON.stringify(body.customer_info);
+		}
+		if (body.payment_info) {
+			bookingPayload.payment_info_json = JSON.stringify(body.payment_info);
+		}
+
+		client.Create(bookingPayload, metaFromReq(req), customErrorHandler);
+	} catch (e) {
+		// Log validation errors
+		await auditLog({
+			direction: "IN",
+			endpoint: "booking.create",
+			requestId,
+			companyId: req.user?.companyId,
+			httpStatus: 400,
+			request: req.body,
+			response: { error: e instanceof Error ? e.message : String(e) },
+			durationMs: Date.now() - startTime,
+		});
+
+		next(e);
+	}
 });
 
-// [AUTO-AUDIT] Require agreement_ref for modify/cancel/check to enforce agreements
-const idSchema = z.object({ supplier_booking_ref: z.string(), agreement_ref: z.string() });
+// [AUTO-AUDIT] Modify/check still require agreement_ref. Cancel can infer routing from an existing booking.
+const idSchema = z.object({
+	supplier_booking_ref: z.string(),
+	agreement_ref: z.string(),
+});
+const cancelIdSchema = z.object({
+	supplier_booking_ref: z.string().min(1),
+	agreement_ref: z.string().trim().optional(),
+	source_id: z.string().trim().optional(),
+});
 const cancelMetaSchema = z.object({
-  requestor_id: z.string().optional(),
-  requestor_type: z.string().optional(),
-  cancellation_reason: z.string().optional(),
+	requestor_id: z.string().optional(),
+	requestor_type: z.string().optional(),
+	cancellation_reason: z.string().optional(),
+	agreement_ref: z.string().trim().optional(),
+	source_id: z.string().trim().optional(),
 });
+
+async function resolveCancelTarget(
+	agentId: string,
+	qp: z.infer<typeof cancelIdSchema>,
+) {
+	const agreementRef = String(qp.agreement_ref || "").trim();
+	const sourceId = String(qp.source_id || "").trim();
+
+	if (agreementRef && !isDirectAgreementRef(agreementRef)) {
+		const activeAgreement = await prisma.agreement.findFirst({
+			where: {
+				agentId,
+				agreementRef,
+				status: "ACTIVE",
+				...(sourceId ? { sourceId } : {}),
+			},
+			select: { id: true, sourceId: true, agreementRef: true },
+		});
+		if (activeAgreement) {
+			return {
+				sourceId: activeAgreement.sourceId,
+				agreementRef: activeAgreement.agreementRef,
+				direct: false,
+			};
+		}
+	}
+
+	const bookingWhere: any = {
+		agentId,
+		supplierBookingRef: qp.supplier_booking_ref,
+	};
+	if (agreementRef) bookingWhere.agreementRef = agreementRef;
+	if (sourceId) bookingWhere.sourceId = sourceId;
+
+	const matches = await prisma.booking.findMany({
+		where: bookingWhere,
+		select: {
+			id: true,
+			sourceId: true,
+			agreementRef: true,
+			status: true,
+			createdAt: true,
+		},
+		orderBy: { createdAt: "desc" },
+		take: 2,
+	});
+
+	if (matches.length === 1) {
+		return {
+			sourceId: matches[0].sourceId,
+			agreementRef: matches[0].agreementRef,
+			direct: isDirectAgreementRef(matches[0].agreementRef),
+			bookingId: matches[0].id,
+			status: matches[0].status,
+		};
+	}
+
+	if (matches.length > 1) {
+		return {
+			error: {
+				status: 400,
+				body: {
+					error: "SOURCE_REQUIRED",
+					message:
+						"Multiple bookings match that supplier reference. Select the Source or Agreement used to create the booking.",
+				},
+			},
+		} as const;
+	}
+
+	return null;
+}
 
 function mapCancelUpstreamError(err: any): { status: number; body: any } {
-  const msg = String(err?.message || err?.details || "Cancel request failed");
-  const upper = msg.toUpperCase();
+	const msg = String(err?.message || err?.details || "Cancel request failed");
+	const upper = msg.toUpperCase();
 
-  if (upper.includes("AGREEMENT_INACTIVE")) {
-    return {
-      status: 409,
-      body: {
-        error: "AGREEMENT_INACTIVE",
-        message: "Agreement not active or not found for this agent/source",
-      },
-    };
-  }
+	if (upper.includes("AGREEMENT_INACTIVE")) {
+		return {
+			status: 409,
+			body: {
+				error: "AGREEMENT_INACTIVE",
+				message: "Agreement not active or not found for this agent/source",
+			},
+		};
+	}
 
-  if (upper.includes("BOOKING_NOT_FOUND") || upper.includes("RESERVATION NOT FOUND")) {
-    return {
-      status: 404,
-      body: {
-        error: "BOOKING_NOT_FOUND",
-        errorCode: "50",
-        message: "Reservation Not Found",
-      },
-    };
-  }
+	if (
+		upper.includes("BOOKING_NOT_FOUND") ||
+		upper.includes("RESERVATION NOT FOUND")
+	) {
+		return {
+			status: 404,
+			body: {
+				error: "BOOKING_NOT_FOUND",
+				errorCode: "50",
+				message: "Reservation Not Found",
+			},
+		};
+	}
 
-  if (upper.includes("ALREADY BEEN CANCELLED") || upper.includes("ALREADY CANCELLED")) {
-    return {
-      status: 409,
-      body: {
-        error: "CANCELLATION_NOT_ALLOWED",
-        errorCode: "50",
-        message: "This booking has already been cancelled",
-      },
-    };
-  }
+	if (
+		upper.includes("ALREADY BEEN CANCELLED") ||
+		upper.includes("ALREADY CANCELLED")
+	) {
+		return {
+			status: 409,
+			body: {
+				error: "CANCELLATION_NOT_ALLOWED",
+				errorCode: "50",
+				message: "This booking has already been cancelled",
+			},
+		};
+	}
 
-  if (upper.includes("ALREADY BEEN COLLECTED") || upper.includes("ALREADY COLLECTED")) {
-    return {
-      status: 409,
-      body: {
-        error: "CANCELLATION_NOT_ALLOWED",
-        errorCode: "51",
-        message: "This booking has already been collected and cannot be cancelled",
-      },
-    };
-  }
+	if (
+		upper.includes("ALREADY BEEN COLLECTED") ||
+		upper.includes("ALREADY COLLECTED")
+	) {
+		return {
+			status: 409,
+			body: {
+				error: "CANCELLATION_NOT_ALLOWED",
+				errorCode: "51",
+				message:
+					"This booking has already been collected and cannot be cancelled",
+			},
+		};
+	}
 
-  if (upper.includes("DRIVING LICENCE")) {
-    return {
-      status: 409,
-      body: {
-        error: "CANCELLATION_NOT_ALLOWED",
-        errorCode: "52",
-        message: "Customer could not produce a valid driving licence",
-      },
-    };
-  }
+	if (upper.includes("DRIVING LICENCE")) {
+		return {
+			status: 409,
+			body: {
+				error: "CANCELLATION_NOT_ALLOWED",
+				errorCode: "52",
+				message: "Customer could not produce a valid driving licence",
+			},
+		};
+	}
 
-  if (upper.includes("UNABLE TO LEAVE A DEPOSIT") || upper.includes("NO DEPOSIT")) {
-    return {
-      status: 409,
-      body: {
-        error: "CANCELLATION_NOT_ALLOWED",
-        errorCode: "53",
-        message: "Customer could not leave a deposit",
-      },
-    };
-  }
+	if (
+		upper.includes("UNABLE TO LEAVE A DEPOSIT") ||
+		upper.includes("NO DEPOSIT")
+	) {
+		return {
+			status: 409,
+			body: {
+				error: "CANCELLATION_NOT_ALLOWED",
+				errorCode: "53",
+				message: "Customer could not leave a deposit",
+			},
+		};
+	}
 
-  if (upper.includes("REFUSED TO TAKE THE VEHICLE")) {
-    return {
-      status: 409,
-      body: {
-        error: "CANCELLATION_NOT_ALLOWED",
-        errorCode: "54",
-        message: "Customer refused to take the vehicle",
-      },
-    };
-  }
+	if (upper.includes("REFUSED TO TAKE THE VEHICLE")) {
+		return {
+			status: 409,
+			body: {
+				error: "CANCELLATION_NOT_ALLOWED",
+				errorCode: "54",
+				message: "Customer refused to take the vehicle",
+			},
+		};
+	}
 
-  if (upper.includes("CREDIT CARD WAS DECLINED") || upper.includes("CARD DECLINED")) {
-    return {
-      status: 409,
-      body: {
-        error: "CANCELLATION_NOT_ALLOWED",
-        errorCode: "55",
-        message: "Customer credit card was declined",
-      },
-    };
-  }
+	if (
+		upper.includes("CREDIT CARD WAS DECLINED") ||
+		upper.includes("CARD DECLINED")
+	) {
+		return {
+			status: 409,
+			body: {
+				error: "CANCELLATION_NOT_ALLOWED",
+				errorCode: "55",
+				message: "Customer credit card was declined",
+			},
+		};
+	}
 
-  if (err?.code === 5) {
-    return { status: 404, body: { error: "BOOKING_NOT_FOUND", message: msg } };
-  }
+	if (err?.code === 5) {
+		return { status: 404, body: { error: "BOOKING_NOT_FOUND", message: msg } };
+	}
 
-  return { status: 502, body: { error: "UPSTREAM_ERROR", message: msg } };
+	return { status: 502, body: { error: "UPSTREAM_ERROR", message: msg } };
 }
 
 /**
@@ -601,91 +889,129 @@ function mapCancelUpstreamError(err: any): { status: number; body: any } {
  *     tags: [Bookings]
  *     summary: Modify booking (single supplier)
  */
-bookingsRouter.patch("/:ref", requireAuth(), requireCompanyStatus("ACTIVE"), async (req: any, res, next) => {
-  const startTime = Date.now();
-  const requestId = req.requestId;
-  
-  try {
-    const qp = idSchema.parse({ supplier_booking_ref: String(req.params.ref), agreement_ref: String(req.query.agreement_ref || "") });
-    const cancelMeta = cancelMetaSchema.parse(req.body || {});
-    const requestPayload = { ...qp, ...cancelMeta };
+bookingsRouter.patch(
+	"/:ref",
+	requireAuth(),
+	requireCompanyStatus("ACTIVE"),
+	async (req: any, res, next) => {
+		const startTime = Date.now();
+		const requestId = req.requestId;
 
-    // resolve agreement -> source
-    const activeAgreement = await prisma.agreement.findFirst({
-      where: { agentId: req.user.companyId, agreementRef: qp.agreement_ref, status: 'ACTIVE' },
-      select: { id: true, sourceId: true }
-    });
-    if (!activeAgreement) {
-      const errorResponse = { error: "AGREEMENT_INACTIVE", message: "Agreement not active or not found for this agent/source" };
-      await auditLog({
-        direction: "IN",
-        endpoint: "booking.modify",
-        requestId,
-        companyId: req.user.companyId,
-        sourceId: undefined,
-        agreementRef: qp.agreement_ref,
-        httpStatus: 409,
-        request: requestPayload,
-        response: errorResponse,
-        durationMs: Date.now() - startTime,
-      });
-      return res.status(409).json(errorResponse);
-    }
-    const hasSubModify = await hasActiveSubscription(activeAgreement.sourceId);
-    if (!hasSubModify) {
-      return res.status(402).json({ error: "SOURCE_SUBSCRIPTION_EXPIRED", message: "Source subscription has expired. This source is not available for bookings." });
-    }
-    const client = bookingClient();
-    
-    client.Modify({ ...qp, source_id: activeAgreement.sourceId, middleware_request_id: requestId, agent_company_id: req.user.companyId }, metaFromReq(req), async (err: any, resp: any) => {
-      const duration = Date.now() - startTime;
-      
-      if (err) {
-        await logBooking({
-          requestId,
-          agentId: req.user.companyId,
-          sourceId: activeAgreement.sourceId,
-          agreementRef: qp.agreement_ref,
-          operation: "modify",
-          requestPayload: qp,
-          responsePayload: { error: err.message },
-          statusCode: 502,
-          grpcStatus: err.code || 13,
-          durationMs: duration,
-        });
-        return res.status(502).json({ error: "UPSTREAM_ERROR", message: err.message });
-      } else {
-        await logBooking({
-          requestId,
-          agentId: req.user.companyId,
-          sourceId: activeAgreement.sourceId,
-          agreementRef: qp.agreement_ref,
-          operation: "modify",
-          requestPayload: qp,
-          responsePayload: resp,
-          statusCode: 200,
-          durationMs: duration,
-        });
-        
-        res.json(resp);
-      }
-    });
-  } catch (e) { 
-    // Log validation errors
-    await auditLog({
-      direction: "IN",
-      endpoint: "booking.modify",
-      requestId,
-      companyId: req.user?.companyId,
-      httpStatus: 400,
-      request: { supplier_booking_ref: req.params.ref, source_id: req.query.source_id, agreement_ref: req.query.agreement_ref },
-      response: { error: e instanceof Error ? e.message : String(e) },
-      durationMs: Date.now() - startTime,
-    });
-    
-    next(e); 
-  }
-});
+		try {
+			const qp = idSchema.parse({
+				supplier_booking_ref: String(req.params.ref),
+				agreement_ref: String(req.query.agreement_ref || ""),
+			});
+			const cancelMeta = cancelMetaSchema.parse(req.body || {});
+			const requestPayload = { ...qp, ...cancelMeta };
+
+			// resolve agreement -> source
+			const activeAgreement = await prisma.agreement.findFirst({
+				where: {
+					agentId: req.user.companyId,
+					agreementRef: qp.agreement_ref,
+					status: "ACTIVE",
+				},
+				select: { id: true, sourceId: true },
+			});
+			if (!activeAgreement) {
+				const errorResponse = {
+					error: "AGREEMENT_INACTIVE",
+					message: "Agreement not active or not found for this agent/source",
+				};
+				await auditLog({
+					direction: "IN",
+					endpoint: "booking.modify",
+					requestId,
+					companyId: req.user.companyId,
+					sourceId: undefined,
+					agreementRef: qp.agreement_ref,
+					httpStatus: 409,
+					request: requestPayload,
+					response: errorResponse,
+					durationMs: Date.now() - startTime,
+				});
+				return res.status(409).json(errorResponse);
+			}
+			const hasSubModify = await hasActiveSubscription(
+				activeAgreement.sourceId,
+			);
+			if (!hasSubModify) {
+				return res
+					.status(402)
+					.json({
+						error: "SOURCE_SUBSCRIPTION_EXPIRED",
+						message:
+							"Source subscription has expired. This source is not available for bookings.",
+					});
+			}
+			const client = bookingClient();
+
+			client.Modify(
+				{
+					...qp,
+					source_id: activeAgreement.sourceId,
+					middleware_request_id: requestId,
+					agent_company_id: req.user.companyId,
+				},
+				metaFromReq(req),
+				async (err: any, resp: any) => {
+					const duration = Date.now() - startTime;
+
+					if (err) {
+						await logBooking({
+							requestId,
+							agentId: req.user.companyId,
+							sourceId: activeAgreement.sourceId,
+							agreementRef: qp.agreement_ref,
+							operation: "modify",
+							requestPayload: qp,
+							responsePayload: { error: err.message },
+							statusCode: 502,
+							grpcStatus: err.code || 13,
+							durationMs: duration,
+						});
+						return res
+							.status(502)
+							.json({ error: "UPSTREAM_ERROR", message: err.message });
+					} else {
+						await logBooking({
+							requestId,
+							agentId: req.user.companyId,
+							sourceId: activeAgreement.sourceId,
+							agreementRef: qp.agreement_ref,
+							operation: "modify",
+							requestPayload: qp,
+							responsePayload: resp,
+							statusCode: 200,
+							durationMs: duration,
+						});
+
+						res.json(resp);
+					}
+				},
+			);
+		} catch (e) {
+			// Log validation errors
+			await auditLog({
+				direction: "IN",
+				endpoint: "booking.modify",
+				requestId,
+				companyId: req.user?.companyId,
+				httpStatus: 400,
+				request: {
+					supplier_booking_ref: req.params.ref,
+					source_id: req.query.source_id,
+					agreement_ref: req.query.agreement_ref,
+				},
+				response: { error: e instanceof Error ? e.message : String(e) },
+				durationMs: Date.now() - startTime,
+			});
+
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -694,91 +1020,162 @@ bookingsRouter.patch("/:ref", requireAuth(), requireCompanyStatus("ACTIVE"), asy
  *     tags: [Bookings]
  *     summary: Cancel booking (single supplier)
  */
-bookingsRouter.post("/:ref/cancel", requireAuth(), requireCompanyStatus("ACTIVE"), async (req: any, res, next) => {
-  const startTime = Date.now();
-  const requestId = req.requestId;
-  
-  try {
-    const qp = idSchema.parse({ supplier_booking_ref: String(req.params.ref), agreement_ref: String(req.query.agreement_ref || "") });
-    const cancelMeta = cancelMetaSchema.parse(req.body || {});
-    const requestPayload = { ...qp, ...cancelMeta };
+bookingsRouter.post(
+	"/:ref/cancel",
+	requireAuth(),
+	requireCompanyStatus("ACTIVE"),
+	async (req: any, res, next) => {
+		const startTime = Date.now();
+		const requestId = req.requestId;
 
-    const activeAgreement = await prisma.agreement.findFirst({
-      where: { agentId: req.user.companyId, agreementRef: qp.agreement_ref, status: 'ACTIVE' },
-      select: { id: true, sourceId: true }
-    });
-    if (!activeAgreement) {
-      const errorResponse = { error: "AGREEMENT_INACTIVE", message: "Agreement not active or not found for this agent/source" };
-      await auditLog({
-        direction: "IN",
-        endpoint: "booking.cancel",
-        requestId,
-        companyId: req.user.companyId,
-        sourceId: undefined,
-        agreementRef: qp.agreement_ref,
-        httpStatus: 409,
-        request: requestPayload,
-        response: errorResponse,
-        durationMs: Date.now() - startTime,
-      });
-      return res.status(409).json(errorResponse);
-    }
-    const hasSubCancel = await hasActiveSubscription(activeAgreement.sourceId);
-    if (!hasSubCancel) {
-      return res.status(402).json({ error: "SOURCE_SUBSCRIPTION_EXPIRED", message: "Source subscription has expired. This source is not available for bookings." });
-    }
-    const client = bookingClient();
-    
-    client.Cancel({ ...qp, source_id: activeAgreement.sourceId, middleware_request_id: requestId, agent_company_id: req.user.companyId }, metaFromReq(req), async (err: any, resp: any) => {
-      const duration = Date.now() - startTime;
-      
-      if (err) {
-        const mapped = mapCancelUpstreamError(err);
-        await logBooking({
-          requestId,
-          agentId: req.user.companyId,
-          sourceId: activeAgreement.sourceId,
-          agreementRef: qp.agreement_ref,
-          operation: "cancel",
-          requestPayload,
-          responsePayload: mapped.body,
-          statusCode: mapped.status,
-          grpcStatus: err.code || 13,
-          durationMs: duration,
-        });
-        return res.status(mapped.status).json(mapped.body);
-      } else {
-        await logBooking({
-          requestId,
-          agentId: req.user.companyId,
-          sourceId: activeAgreement.sourceId,
-          agreementRef: qp.agreement_ref,
-          operation: "cancel",
-          requestPayload,
-          responsePayload: resp,
-          statusCode: 200,
-          durationMs: duration,
-        });
-        
-        res.json(resp);
-      }
-    });
-  } catch (e) { 
-    // Log validation errors
-    await auditLog({
-      direction: "IN",
-      endpoint: "booking.cancel",
-      requestId,
-      companyId: req.user?.companyId,
-      httpStatus: 400,
-      request: { supplier_booking_ref: req.params.ref, source_id: req.query.source_id, agreement_ref: req.query.agreement_ref },
-      response: { error: e instanceof Error ? e.message : String(e) },
-      durationMs: Date.now() - startTime,
-    });
-    
-    next(e); 
-  }
-});
+		try {
+			const cancelMeta = cancelMetaSchema.parse(req.body || {});
+			const qp = cancelIdSchema.parse({
+				supplier_booking_ref: String(req.params.ref),
+				agreement_ref:
+					String(
+						req.query.agreement_ref || cancelMeta.agreement_ref || "",
+					).trim() || undefined,
+				source_id:
+					String(req.query.source_id || cancelMeta.source_id || "").trim() ||
+					undefined,
+			});
+			const requestPayload = { ...qp, ...cancelMeta };
+
+			const target = await resolveCancelTarget(req.user.companyId, qp);
+			if ((target as any)?.error) {
+				const errTarget = (target as any).error;
+				await auditLog({
+					direction: "IN",
+					endpoint: "booking.cancel",
+					requestId,
+					companyId: req.user.companyId,
+					sourceId: qp.source_id,
+					agreementRef: qp.agreement_ref,
+					httpStatus: errTarget.status,
+					request: requestPayload,
+					response: errTarget.body,
+					durationMs: Date.now() - startTime,
+				});
+				return res.status(errTarget.status).json(errTarget.body);
+			}
+
+			if (!target) {
+				const formalAgreementMiss = Boolean(
+					qp.agreement_ref && !isDirectAgreementRef(qp.agreement_ref),
+				);
+				const errorResponse = formalAgreementMiss
+					? {
+							error: "AGREEMENT_INACTIVE",
+							message:
+								"Agreement not active or booking not found for this agent/source",
+						}
+					: {
+							error: "BOOKING_NOT_FOUND",
+							message:
+								"Booking not found for this agent. Select the Source if the supplier reference is shared.",
+						};
+				await auditLog({
+					direction: "IN",
+					endpoint: "booking.cancel",
+					requestId,
+					companyId: req.user.companyId,
+					sourceId: qp.source_id,
+					agreementRef: qp.agreement_ref,
+					httpStatus: formalAgreementMiss ? 409 : 404,
+					request: requestPayload,
+					response: errorResponse,
+					durationMs: Date.now() - startTime,
+				});
+				return res.status(formalAgreementMiss ? 409 : 404).json(errorResponse);
+			}
+
+			const cancelTarget = target as {
+				sourceId: string;
+				agreementRef: string;
+				direct?: boolean;
+				bookingId?: string;
+				status?: string;
+			};
+			const hasSubCancel = await hasActiveSubscription(cancelTarget.sourceId);
+			if (!hasSubCancel) {
+				return res
+					.status(402)
+					.json({
+						error: "SOURCE_SUBSCRIPTION_EXPIRED",
+						message:
+							"Source subscription has expired. This source is not available for bookings.",
+					});
+			}
+			const client = bookingClient();
+			const cancelRequest = {
+				supplier_booking_ref: qp.supplier_booking_ref,
+				agreement_ref: cancelTarget.agreementRef,
+				source_id: cancelTarget.sourceId,
+				middleware_request_id: requestId,
+				agent_company_id: req.user.companyId,
+				cancellation_reason: cancelMeta.cancellation_reason,
+			};
+
+			client.Cancel(
+				cancelRequest,
+				metaFromReq(req),
+				async (err: any, resp: any) => {
+					const duration = Date.now() - startTime;
+
+					if (err) {
+						const mapped = mapCancelUpstreamError(err);
+						await logBooking({
+							requestId,
+							agentId: req.user.companyId,
+							sourceId: cancelTarget.sourceId,
+							agreementRef: cancelTarget.agreementRef,
+							operation: "cancel",
+							requestPayload,
+							responsePayload: mapped.body,
+							statusCode: mapped.status,
+							grpcStatus: err.code || 13,
+							durationMs: duration,
+						});
+						return res.status(mapped.status).json(mapped.body);
+					} else {
+						await logBooking({
+							requestId,
+							agentId: req.user.companyId,
+							sourceId: cancelTarget.sourceId,
+							agreementRef: cancelTarget.agreementRef,
+							operation: "cancel",
+							requestPayload,
+							responsePayload: resp,
+							statusCode: 200,
+							durationMs: duration,
+						});
+
+						res.json(resp);
+					}
+				},
+			);
+		} catch (e) {
+			// Log validation errors
+			await auditLog({
+				direction: "IN",
+				endpoint: "booking.cancel",
+				requestId,
+				companyId: req.user?.companyId,
+				httpStatus: 400,
+				request: {
+					supplier_booking_ref: req.params.ref,
+					source_id: req.query.source_id,
+					agreement_ref: req.query.agreement_ref,
+				},
+				response: { error: e instanceof Error ? e.message : String(e) },
+				durationMs: Date.now() - startTime,
+			});
+
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -787,96 +1184,132 @@ bookingsRouter.post("/:ref/cancel", requireAuth(), requireCompanyStatus("ACTIVE"
  *     tags: [Bookings]
  *     summary: Check booking status (single supplier)
  */
-bookingsRouter.get("/:ref", requireAuth(), requireCompanyStatus("ACTIVE"), async (req: any, res, next) => {
-  const startTime = Date.now();
-  const requestId = req.requestId;
-  
-  try {
-    const qp = idSchema.parse({ supplier_booking_ref: String(req.params.ref), agreement_ref: String(req.query.agreement_ref || "") });
+bookingsRouter.get(
+	"/:ref",
+	requireAuth(),
+	requireCompanyStatus("ACTIVE"),
+	async (req: any, res, next) => {
+		const startTime = Date.now();
+		const requestId = req.requestId;
 
-    const activeAgreement = await prisma.agreement.findFirst({
-      where: { agentId: req.user.companyId, agreementRef: qp.agreement_ref, status: 'ACTIVE' },
-      select: { id: true, sourceId: true }
-    });
-    if (!activeAgreement) {
-      const errorResponse = { error: "AGREEMENT_INACTIVE", message: "Agreement not active or not found for this agent/source" };
-      await auditLog({
-        direction: "IN",
-        endpoint: "booking.check",
-        requestId,
-        companyId: req.user.companyId,
-        sourceId: undefined,
-        agreementRef: qp.agreement_ref,
-        httpStatus: 409,
-        request: qp,
-        response: errorResponse,
-        durationMs: Date.now() - startTime,
-      });
-      return res.status(409).json(errorResponse);
-    }
-    const hasSubCheck = await hasActiveSubscription(activeAgreement.sourceId);
-    if (!hasSubCheck) {
-      return res.status(402).json({ error: "SOURCE_SUBSCRIPTION_EXPIRED", message: "Source subscription has expired. This source is not available for bookings." });
-    }
-    const client = bookingClient();
-    
-    client.Check({ ...qp, source_id: activeAgreement.sourceId, middleware_request_id: requestId, agent_company_id: req.user.companyId }, metaFromReq(req), async (err: any, resp: any) => {
-      const duration = Date.now() - startTime;
-      
-      if (err) {
-        await logBooking({
-          requestId,
-          agentId: req.user.companyId,
-          sourceId: activeAgreement.sourceId,
-          agreementRef: qp.agreement_ref,
-          operation: "check",
-          requestPayload: qp,
-          responsePayload: { error: err.message },
-          statusCode: 502,
-          grpcStatus: err.code || 13,
-          durationMs: duration,
-        });
-        return res.status(502).json({ error: "UPSTREAM_ERROR", message: err.message });
-      } else {
-        await logBooking({
-          requestId,
-          agentId: req.user.companyId,
-          sourceId: activeAgreement.sourceId,
-          agreementRef: qp.agreement_ref,
-          operation: "check",
-          requestPayload: qp,
-          responsePayload: resp,
-          statusCode: 200,
-          durationMs: duration,
-        });
-        
-        res.json(resp);
-      }
-    });
-  } catch (e) { 
-    // Log validation errors
-    await auditLog({
-      direction: "IN",
-      endpoint: "booking.check",
-      requestId,
-      companyId: req.user?.companyId,
-      httpStatus: 400,
-      request: { supplier_booking_ref: req.params.ref, source_id: req.query.source_id, agreement_ref: req.query.agreement_ref },
-      response: { error: e instanceof Error ? e.message : String(e) },
-      durationMs: Date.now() - startTime,
-    });
-    
-    next(e); 
-  }
-});
+		try {
+			const qp = idSchema.parse({
+				supplier_booking_ref: String(req.params.ref),
+				agreement_ref: String(req.query.agreement_ref || ""),
+			});
+
+			const activeAgreement = await prisma.agreement.findFirst({
+				where: {
+					agentId: req.user.companyId,
+					agreementRef: qp.agreement_ref,
+					status: "ACTIVE",
+				},
+				select: { id: true, sourceId: true },
+			});
+			if (!activeAgreement) {
+				const errorResponse = {
+					error: "AGREEMENT_INACTIVE",
+					message: "Agreement not active or not found for this agent/source",
+				};
+				await auditLog({
+					direction: "IN",
+					endpoint: "booking.check",
+					requestId,
+					companyId: req.user.companyId,
+					sourceId: undefined,
+					agreementRef: qp.agreement_ref,
+					httpStatus: 409,
+					request: qp,
+					response: errorResponse,
+					durationMs: Date.now() - startTime,
+				});
+				return res.status(409).json(errorResponse);
+			}
+			const hasSubCheck = await hasActiveSubscription(activeAgreement.sourceId);
+			if (!hasSubCheck) {
+				return res
+					.status(402)
+					.json({
+						error: "SOURCE_SUBSCRIPTION_EXPIRED",
+						message:
+							"Source subscription has expired. This source is not available for bookings.",
+					});
+			}
+			const client = bookingClient();
+
+			client.Check(
+				{
+					...qp,
+					source_id: activeAgreement.sourceId,
+					middleware_request_id: requestId,
+					agent_company_id: req.user.companyId,
+				},
+				metaFromReq(req),
+				async (err: any, resp: any) => {
+					const duration = Date.now() - startTime;
+
+					if (err) {
+						await logBooking({
+							requestId,
+							agentId: req.user.companyId,
+							sourceId: activeAgreement.sourceId,
+							agreementRef: qp.agreement_ref,
+							operation: "check",
+							requestPayload: qp,
+							responsePayload: { error: err.message },
+							statusCode: 502,
+							grpcStatus: err.code || 13,
+							durationMs: duration,
+						});
+						return res
+							.status(502)
+							.json({ error: "UPSTREAM_ERROR", message: err.message });
+					} else {
+						await logBooking({
+							requestId,
+							agentId: req.user.companyId,
+							sourceId: activeAgreement.sourceId,
+							agreementRef: qp.agreement_ref,
+							operation: "check",
+							requestPayload: qp,
+							responsePayload: resp,
+							statusCode: 200,
+							durationMs: duration,
+						});
+
+						res.json(resp);
+					}
+				},
+			);
+		} catch (e) {
+			// Log validation errors
+			await auditLog({
+				direction: "IN",
+				endpoint: "booking.check",
+				requestId,
+				companyId: req.user?.companyId,
+				httpStatus: 400,
+				request: {
+					supplier_booking_ref: req.params.ref,
+					source_id: req.query.source_id,
+					agreement_ref: req.query.agreement_ref,
+				},
+				response: { error: e instanceof Error ? e.message : String(e) },
+				durationMs: Date.now() - startTime,
+			});
+
+			next(e);
+		}
+	},
+);
 
 // Test verification endpoints for agents
 const testCreateSchema = z.object({
-  test_mode: z.boolean().default(true),
-  source_id: z.string().optional(),
-  agreement_ref: z.string().optional(),
-  supplier_offer_ref: z.string().optional(),
-  agent_booking_ref: z.string().optional()
+	test_mode: z.boolean().default(true),
+	source_id: z.string().optional(),
+	agreement_ref: z.string().optional(),
+	supplier_offer_ref: z.string().optional(),
+	agent_booking_ref: z.string().optional(),
 });
 
 /**
@@ -890,67 +1323,77 @@ const testCreateSchema = z.object({
  *       Uses test data and doesn't require real agreements or sources.
  *       This ensures agents can create, modify, and cancel bookings before accessing live data.
  */
-bookingsRouter.post("/test/create", requireAuth(), async (req: any, res, next) => {
-  try {
-    // Only allow test endpoints in non-production environments
-    const isProduction = process.env.NODE_ENV === "production";
-    const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
-    
-    if (isProduction && !allowTestEndpoints) {
-      return res.status(403).json({
-        error: "TEST_ENDPOINT_DISABLED",
-        message: "Test endpoints are disabled in production environment",
-        test_mode: false,
-      });
-    }
-    
-    const body = testCreateSchema.parse(req.body);
-    // Check for idempotency key in various header formats (case-insensitive)
-    const idempotencyKey = req.headers["idempotency-key"] || 
-                          req.headers["Idempotency-Key"] || 
-                          req.headers["IDEMPOTENCY-KEY"];
-    if (!idempotencyKey) {
-      return res.status(400).json({ 
-        error: "SCHEMA_ERROR", 
-        message: "Missing Idempotency-Key header",
-        details: "The Idempotency-Key header is required for all booking operations to ensure request safety and prevent duplicate bookings.",
-        hint: "Include the header in your request: 'Idempotency-Key: <unique-value>'",
-        example: "Idempotency-Key: test-create-1234567890-abc123"
-      });
-    }
-    
-    // Use test data for verification
-    const testData = {
-      agent_id: req.user.companyId,
-      source_id: body.source_id || "TEST_SOURCE_001",
-      agreement_ref: body.agreement_ref || "TEST_AGREEMENT_001", 
-      supplier_offer_ref: body.supplier_offer_ref || "TEST_OFFER_001",
-      idempotency_key: String(idempotencyKey),
-      agent_booking_ref: body.agent_booking_ref || `TEST_BOOKING_${Date.now()}`
-    };
-    
-    // Simulate successful test booking creation
-    // WARNING: This is a TEST endpoint - responses are simulated and do not represent real bookings
-    const testResponse = {
-      test_mode: true,
-      warning: "This is a TEST endpoint. Responses are simulated and do not create real bookings.",
-      booking_id: `TEST_BOOKING_${Date.now()}`,
-      status: "TEST_CREATED",
-      agent_booking_ref: testData.agent_booking_ref,
-      source_id: testData.source_id,
-      agreement_ref: testData.agreement_ref,
-      message: "Test booking created successfully - integration verified",
-      verification: {
-        create: true,
-        modify: true,
-        cancel: true,
-        check: true
-      }
-    };
-    
-    res.json(testResponse);
-  } catch (e) { next(e); }
-});
+bookingsRouter.post(
+	"/test/create",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			// Only allow test endpoints in non-production environments
+			const isProduction = process.env.NODE_ENV === "production";
+			const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
+
+			if (isProduction && !allowTestEndpoints) {
+				return res.status(403).json({
+					error: "TEST_ENDPOINT_DISABLED",
+					message: "Test endpoints are disabled in production environment",
+					test_mode: false,
+				});
+			}
+
+			const body = testCreateSchema.parse(req.body);
+			// Check for idempotency key in various header formats (case-insensitive)
+			const idempotencyKey =
+				req.headers["idempotency-key"] ||
+				req.headers["Idempotency-Key"] ||
+				req.headers["IDEMPOTENCY-KEY"];
+			if (!idempotencyKey) {
+				return res.status(400).json({
+					error: "SCHEMA_ERROR",
+					message: "Missing Idempotency-Key header",
+					details:
+						"The Idempotency-Key header is required for all booking operations to ensure request safety and prevent duplicate bookings.",
+					hint: "Include the header in your request: 'Idempotency-Key: <unique-value>'",
+					example: "Idempotency-Key: test-create-1234567890-abc123",
+				});
+			}
+
+			// Use test data for verification
+			const testData = {
+				agent_id: req.user.companyId,
+				source_id: body.source_id || "TEST_SOURCE_001",
+				agreement_ref: body.agreement_ref || "TEST_AGREEMENT_001",
+				supplier_offer_ref: body.supplier_offer_ref || "TEST_OFFER_001",
+				idempotency_key: String(idempotencyKey),
+				agent_booking_ref:
+					body.agent_booking_ref || `TEST_BOOKING_${Date.now()}`,
+			};
+
+			// Simulate successful test booking creation
+			// WARNING: This is a TEST endpoint - responses are simulated and do not represent real bookings
+			const testResponse = {
+				test_mode: true,
+				warning:
+					"This is a TEST endpoint. Responses are simulated and do not create real bookings.",
+				booking_id: `TEST_BOOKING_${Date.now()}`,
+				status: "TEST_CREATED",
+				agent_booking_ref: testData.agent_booking_ref,
+				source_id: testData.source_id,
+				agreement_ref: testData.agreement_ref,
+				message: "Test booking created successfully - integration verified",
+				verification: {
+					create: true,
+					modify: true,
+					cancel: true,
+					check: true,
+				},
+			};
+
+			res.json(testResponse);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -962,43 +1405,50 @@ bookingsRouter.post("/test/create", requireAuth(), async (req: any, res, next) =
  *       Test endpoint for agents to verify booking modification works correctly.
  *       Uses test data and simulates successful modification.
  */
-bookingsRouter.patch("/test/modify/:ref", requireAuth(), async (req: any, res, next) => {
-  try {
-    // Only allow test endpoints in non-production environments
-    const isProduction = process.env.NODE_ENV === "production";
-    const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
-    
-    if (isProduction && !allowTestEndpoints) {
-      return res.status(403).json({
-        error: "TEST_ENDPOINT_DISABLED",
-        message: "Test endpoints are disabled in production environment",
-        test_mode: false,
-      });
-    }
-    
-    const bookingRef = String(req.params.ref);
-    const sourceId = String(req.query.source_id || "TEST_SOURCE_001");
-    
-    // Simulate successful test booking modification
-    // WARNING: This is a TEST endpoint - responses are simulated
-    const testResponse = {
-      test_mode: true,
-      warning: "This is a TEST endpoint. Responses are simulated and do not modify real bookings.",
-      booking_id: bookingRef,
-      status: "TEST_MODIFIED",
-      source_id: sourceId,
-      message: "Test booking modified successfully - integration verified",
-      verification: {
-        create: true,
-        modify: true,
-        cancel: true,
-        check: true
-      }
-    };
-    
-    res.json(testResponse);
-  } catch (e) { next(e); }
-});
+bookingsRouter.patch(
+	"/test/modify/:ref",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			// Only allow test endpoints in non-production environments
+			const isProduction = process.env.NODE_ENV === "production";
+			const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
+
+			if (isProduction && !allowTestEndpoints) {
+				return res.status(403).json({
+					error: "TEST_ENDPOINT_DISABLED",
+					message: "Test endpoints are disabled in production environment",
+					test_mode: false,
+				});
+			}
+
+			const bookingRef = String(req.params.ref);
+			const sourceId = String(req.query.source_id || "TEST_SOURCE_001");
+
+			// Simulate successful test booking modification
+			// WARNING: This is a TEST endpoint - responses are simulated
+			const testResponse = {
+				test_mode: true,
+				warning:
+					"This is a TEST endpoint. Responses are simulated and do not modify real bookings.",
+				booking_id: bookingRef,
+				status: "TEST_MODIFIED",
+				source_id: sourceId,
+				message: "Test booking modified successfully - integration verified",
+				verification: {
+					create: true,
+					modify: true,
+					cancel: true,
+					check: true,
+				},
+			};
+
+			res.json(testResponse);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -1010,43 +1460,50 @@ bookingsRouter.patch("/test/modify/:ref", requireAuth(), async (req: any, res, n
  *       Test endpoint for agents to verify booking cancellation works correctly.
  *       Uses test data and simulates successful cancellation.
  */
-bookingsRouter.post("/test/cancel/:ref", requireAuth(), async (req: any, res, next) => {
-  try {
-    // Only allow test endpoints in non-production environments
-    const isProduction = process.env.NODE_ENV === "production";
-    const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
-    
-    if (isProduction && !allowTestEndpoints) {
-      return res.status(403).json({
-        error: "TEST_ENDPOINT_DISABLED",
-        message: "Test endpoints are disabled in production environment",
-        test_mode: false,
-      });
-    }
-    
-    const bookingRef = String(req.params.ref);
-    const sourceId = String(req.query.source_id || "TEST_SOURCE_001");
-    
-    // Simulate successful test booking cancellation
-    // WARNING: This is a TEST endpoint - responses are simulated
-    const testResponse = {
-      test_mode: true,
-      warning: "This is a TEST endpoint. Responses are simulated and do not cancel real bookings.",
-      booking_id: bookingRef,
-      status: "TEST_CANCELLED",
-      source_id: sourceId,
-      message: "Test booking cancelled successfully - integration verified",
-      verification: {
-        create: true,
-        modify: true,
-        cancel: true,
-        check: true
-      }
-    };
-    
-    res.json(testResponse);
-  } catch (e) { next(e); }
-});
+bookingsRouter.post(
+	"/test/cancel/:ref",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			// Only allow test endpoints in non-production environments
+			const isProduction = process.env.NODE_ENV === "production";
+			const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
+
+			if (isProduction && !allowTestEndpoints) {
+				return res.status(403).json({
+					error: "TEST_ENDPOINT_DISABLED",
+					message: "Test endpoints are disabled in production environment",
+					test_mode: false,
+				});
+			}
+
+			const bookingRef = String(req.params.ref);
+			const sourceId = String(req.query.source_id || "TEST_SOURCE_001");
+
+			// Simulate successful test booking cancellation
+			// WARNING: This is a TEST endpoint - responses are simulated
+			const testResponse = {
+				test_mode: true,
+				warning:
+					"This is a TEST endpoint. Responses are simulated and do not cancel real bookings.",
+				booking_id: bookingRef,
+				status: "TEST_CANCELLED",
+				source_id: sourceId,
+				message: "Test booking cancelled successfully - integration verified",
+				verification: {
+					create: true,
+					modify: true,
+					cancel: true,
+					check: true,
+				},
+			};
+
+			res.json(testResponse);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -1058,43 +1515,51 @@ bookingsRouter.post("/test/cancel/:ref", requireAuth(), async (req: any, res, ne
  *       Test endpoint for agents to verify booking status checking works correctly.
  *       Uses test data and simulates successful status check.
  */
-bookingsRouter.get("/test/check/:ref", requireAuth(), async (req: any, res, next) => {
-  try {
-    // Only allow test endpoints in non-production environments
-    const isProduction = process.env.NODE_ENV === "production";
-    const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
-    
-    if (isProduction && !allowTestEndpoints) {
-      return res.status(403).json({
-        error: "TEST_ENDPOINT_DISABLED",
-        message: "Test endpoints are disabled in production environment",
-        test_mode: false,
-      });
-    }
-    
-    const bookingRef = String(req.params.ref);
-    const sourceId = String(req.query.source_id || "TEST_SOURCE_001");
-    
-    // Simulate successful test booking status check
-    // WARNING: This is a TEST endpoint - responses are simulated
-    const testResponse = {
-      test_mode: true,
-      warning: "This is a TEST endpoint. Responses are simulated and do not check real bookings.",
-      booking_id: bookingRef,
-      status: "TEST_CONFIRMED",
-      source_id: sourceId,
-      message: "Test booking status checked successfully - integration verified",
-      verification: {
-        create: true,
-        modify: true,
-        cancel: true,
-        check: true
-      }
-    };
-    
-    res.json(testResponse);
-  } catch (e) { next(e); }
-});
+bookingsRouter.get(
+	"/test/check/:ref",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			// Only allow test endpoints in non-production environments
+			const isProduction = process.env.NODE_ENV === "production";
+			const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
+
+			if (isProduction && !allowTestEndpoints) {
+				return res.status(403).json({
+					error: "TEST_ENDPOINT_DISABLED",
+					message: "Test endpoints are disabled in production environment",
+					test_mode: false,
+				});
+			}
+
+			const bookingRef = String(req.params.ref);
+			const sourceId = String(req.query.source_id || "TEST_SOURCE_001");
+
+			// Simulate successful test booking status check
+			// WARNING: This is a TEST endpoint - responses are simulated
+			const testResponse = {
+				test_mode: true,
+				warning:
+					"This is a TEST endpoint. Responses are simulated and do not check real bookings.",
+				booking_id: bookingRef,
+				status: "TEST_CONFIRMED",
+				source_id: sourceId,
+				message:
+					"Test booking status checked successfully - integration verified",
+				verification: {
+					create: true,
+					modify: true,
+					cancel: true,
+					check: true,
+				},
+			};
+
+			res.json(testResponse);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -1106,68 +1571,61 @@ bookingsRouter.get("/test/check/:ref", requireAuth(), async (req: any, res, next
  *       Check if agent has completed all required test verifications.
  *       Agents must pass all tests before accessing live agreements.
  */
-bookingsRouter.get("/test/verification", requireAuth(), async (req: any, res, next) => {
-  try {
-    // Only allow test endpoints in non-production environments
-    const isProduction = process.env.NODE_ENV === "production";
-    const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
-    
-    if (isProduction && !allowTestEndpoints) {
-      return res.status(403).json({
-        error: "TEST_ENDPOINT_DISABLED",
-        message: "Test endpoints are disabled in production environment",
-        test_mode: false,
-      });
-    }
-    
-    // Check database for actual verification status
-    const verificationReports = await prisma.verificationReport.findMany({
-      where: {
-        companyId: req.user.companyId,
-        kind: "AGENT",
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      take: 1,
-    });
-    
-    const latestReport = verificationReports[0];
-    const verificationStatus = {
-      agent_id: req.user.companyId,
-      verification_complete: false,
-      tests_required: [
-        {
-          test: "create_booking",
-          endpoint: "POST /bookings/test/create",
-          status: "pending",
-          description: "Test booking creation"
-        },
-        {
-          test: "modify_booking", 
-          endpoint: "PATCH /bookings/test/modify/{ref}",
-          status: "pending",
-          description: "Test booking modification"
-        },
-        {
-          test: "cancel_booking",
-          endpoint: "POST /bookings/test/cancel/{ref}",
-          status: "pending", 
-          description: "Test booking cancellation"
-        },
-        {
-          test: "check_booking",
-          endpoint: "GET /bookings/test/check/{ref}",
-          status: "pending",
-          description: "Test booking status check"
-        }
-      ],
-      message: "Complete all test verifications to access live agreements"
-    };
-    
-    res.json(verificationStatus);
-  } catch (e) { next(e); }
-});
+bookingsRouter.get(
+	"/test/verification",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			// Only allow test endpoints in non-production environments
+			const isProduction = process.env.NODE_ENV === "production";
+			const allowTestEndpoints = process.env.ALLOW_TEST_ENDPOINTS === "true";
+
+			if (isProduction && !allowTestEndpoints) {
+				return res.status(403).json({
+					error: "TEST_ENDPOINT_DISABLED",
+					message: "Test endpoints are disabled in production environment",
+					test_mode: false,
+				});
+			}
+
+			const verificationStatus = {
+				agent_id: req.user.companyId,
+				verification_complete: false,
+				tests_required: [
+					{
+						test: "create_booking",
+						endpoint: "POST /bookings/test/create",
+						status: "pending",
+						description: "Test booking creation",
+					},
+					{
+						test: "modify_booking",
+						endpoint: "PATCH /bookings/test/modify/{ref}",
+						status: "pending",
+						description: "Test booking modification",
+					},
+					{
+						test: "cancel_booking",
+						endpoint: "POST /bookings/test/cancel/{ref}",
+						status: "pending",
+						description: "Test booking cancellation",
+					},
+					{
+						test: "check_booking",
+						endpoint: "GET /bookings/test/check/{ref}",
+						status: "pending",
+						description: "Test booking status check",
+					},
+				],
+				message: "Complete all test verifications to access live agreements",
+			};
+
+			res.json(verificationStatus);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -1202,42 +1660,43 @@ bookingsRouter.get("/test/verification", requireAuth(), async (req: any, res, ne
  *           default: 0
  *         description: Number of entries to skip
  */
-bookingsRouter.get("/:ref/history", requireAuth(), requireCompanyStatus("ACTIVE"), async (req: any, res, next) => {
-  try {
-    const { ref } = req.params;
-    const eventType = req.query.eventType as string | undefined;
-    const limit = Math.max(1, Math.min(1000, Number(req.query.limit || 100)));
-    const offset = Math.max(0, Number(req.query.offset || 0));
+bookingsRouter.get(
+	"/:ref/history",
+	requireAuth(),
+	requireCompanyStatus("ACTIVE"),
+	async (req: any, res, next) => {
+		try {
+			const { ref } = req.params;
+			const eventType = req.query.eventType as string | undefined;
+			const limit = Math.max(1, Math.min(1000, Number(req.query.limit || 100)));
+			const offset = Math.max(0, Number(req.query.offset || 0));
 
-    // Find booking by supplier_booking_ref
-    const booking = await prisma.booking.findFirst({
-      where: {
-        supplierBookingRef: ref,
-        agentId: req.user.companyId, // Ensure booking belongs to agent
-      },
-      select: { id: true },
-    });
+			// Find booking by supplier_booking_ref
+			const booking = await prisma.booking.findFirst({
+				where: {
+					supplierBookingRef: ref,
+					agentId: req.user.companyId, // Ensure booking belongs to agent
+				},
+				select: { id: true },
+			});
 
-    if (!booking) {
-      return res.status(404).json({
-        error: "BOOKING_NOT_FOUND",
-        message: "Booking not found or does not belong to this agent",
-      });
-    }
+			if (!booking) {
+				return res.status(404).json({
+					error: "BOOKING_NOT_FOUND",
+					message: "Booking not found or does not belong to this agent",
+				});
+			}
 
-    // Get history
-    const history = await getBookingHistory(booking.id, {
-      eventType: eventType as any,
-      limit,
-      offset,
-    });
+			// Get history
+			const history = await getBookingHistory(booking.id, {
+				eventType: eventType as any,
+				limit,
+				offset,
+			});
 
-    res.json(history);
-  } catch (e) {
-    next(e);
-  }
-});
-
-
-
-
+			res.json(history);
+		} catch (e) {
+			next(e);
+		}
+	},
+);

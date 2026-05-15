@@ -8,35 +8,56 @@ import { prisma } from "../../data/prisma.js";
 import { LocationsService } from "../../services/locations.js";
 import { auditLog } from "../../services/audit.js";
 import {
-  syncSourceCoverage,
-  type SyncSourceCoverageResult,
+	syncSourceCoverage,
+	type SyncSourceCoverageResult,
 } from "../../services/sourceCoverageSync.service.js";
 import { buildCoverageListItems } from "../../services/coverageListEnrichment.js";
 
 export const locationsRouter = Router();
 // Alias to support UI requirement: /locations/by-agreement/:agreementId
-locationsRouter.get("/locations/by-agreement/:agreementId", requireAuth(), async (req, res, next) => {
-  try {
-    const client = locationClient();
-    client.ListCoverageByAgreement(
-      { agreement_id: String(req.params.agreementId) },
-      metaFromReq(req),
-      (err: any, resp: any) => (err ? next(err) : res.json(resp))
-    );
-  } catch (e) { next(e); }
-});
+locationsRouter.get(
+	"/locations/by-agreement/:agreementId",
+	requireAuth(),
+	async (req, res, next) => {
+		try {
+			const client = locationClient();
+			client.ListCoverageByAgreement(
+				{ agreement_id: String(req.params.agreementId) },
+				metaFromReq(req),
+				(err: any, resp: any) => (err ? next(err) : res.json(resp)),
+			);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 // Per-spec: GET /agreements/:id/locations
-locationsRouter.get("/agreements/:id/locations", requireAuth(), async (req: any, res, next) => {
-  try {
-    const id = String(req.params.id || "");
-    if (!id) return res.status(400).json({ error: "BAD_REQUEST", message: "Agreement id is required" });
-    const ag = await prisma.agreement.findUnique({ where: { id }, select: { id: true } });
-    if (!ag) return res.status(404).json({ error: "NOT_FOUND", message: "Agreement not found" });
-    const out = await LocationsService.getAgreementLocations(id);
-    res.json(out);
-  } catch (e) { next(e); }
-});
+locationsRouter.get(
+	"/agreements/:id/locations",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			const id = String(req.params.id || "");
+			if (!id)
+				return res
+					.status(400)
+					.json({ error: "BAD_REQUEST", message: "Agreement id is required" });
+			const ag = await prisma.agreement.findUnique({
+				where: { id },
+				select: { id: true },
+			});
+			if (!ag)
+				return res
+					.status(404)
+					.json({ error: "NOT_FOUND", message: "Agreement not found" });
+			const out = await LocationsService.getAgreementLocations(id);
+			res.json(out);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -56,14 +77,20 @@ locationsRouter.get("/agreements/:id/locations", requireAuth(), async (req: any,
  *         schema: { type: string }
  */
 locationsRouter.get("/locations", requireAuth(), async (req, res, next) => {
-  try {
-    const client = locationClient();
-    client.ListUNLocodes(
-      { query: String(req.query.query || ""), limit: Number(req.query.limit || 25), cursor: String(req.query.cursor || "") },
-      metaFromReq(req),
-      (err: any, resp: any) => err ? next(err) : res.json(resp)
-    );
-  } catch (e) { next(e); }
+	try {
+		const client = locationClient();
+		client.ListUNLocodes(
+			{
+				query: String(req.query.query || ""),
+				limit: Number(req.query.limit || 25),
+				cursor: String(req.query.cursor || ""),
+			},
+			metaFromReq(req),
+			(err: any, resp: any) => (err ? next(err) : res.json(resp)),
+		);
+	} catch (e) {
+		next(e);
+	}
 });
 
 /**
@@ -73,88 +100,100 @@ locationsRouter.get("/locations", requireAuth(), async (req, res, next) => {
  *     tags: [Locations]
  *     summary: View a Source's coverage (from last sync)
  */
-locationsRouter.get("/coverage/source/:sourceId", requireAuth(), requireCompanyType("ADMIN", "SOURCE", "AGENT"), async (req, res, next) => {
-  try {
-    const sourceId = String(req.params.sourceId || "").trim();
-    if (!sourceId) {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "Source ID is required" });
-    }
+locationsRouter.get(
+	"/coverage/source/:sourceId",
+	requireAuth(),
+	requireCompanyType("ADMIN", "SOURCE", "AGENT"),
+	async (req, res, next) => {
+		try {
+			const sourceId = String(req.params.sourceId || "").trim();
+			if (!sourceId) {
+				return res
+					.status(400)
+					.json({ error: "BAD_REQUEST", message: "Source ID is required" });
+			}
 
-    // Check if source exists and user has permission
-    const source = await prisma.company.findUnique({
-      where: { id: sourceId },
-      select: { id: true, companyName: true, type: true, status: true }
-    });
+			// Check if source exists and user has permission
+			const source = await prisma.company.findUnique({
+				where: { id: sourceId },
+				select: { id: true, companyName: true, type: true, status: true },
+			});
 
-    if (!source) {
-      return res.status(404).json({ error: "NOT_FOUND", message: "Source not found" });
-    }
+			if (!source) {
+				return res
+					.status(404)
+					.json({ error: "NOT_FOUND", message: "Source not found" });
+			}
 
-    if (source.type !== "SOURCE") {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "Company is not a source" });
-    }
+			if (source.type !== "SOURCE") {
+				return res
+					.status(400)
+					.json({ error: "BAD_REQUEST", message: "Company is not a source" });
+			}
 
-    // Get pagination parameters
-    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
-    const cursor = String(req.query.cursor || "");
+			// Get pagination parameters
+			const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+			const cursor = String(req.query.cursor || "");
 
-    // Get source locations with UN/LOCODE details
-    const whereClause = cursor ? { 
-      sourceId, 
-      unlocode: { gt: cursor } 
-    } : { sourceId };
+			// Get source locations with UN/LOCODE details
+			const whereClause = cursor
+				? {
+						sourceId,
+						unlocode: { gt: cursor },
+					}
+				: { sourceId };
 
-    const sourceLocations = await prisma.sourceLocation.findMany({
-      where: whereClause,
-      include: {
-        loc: {
-          select: {
-            unlocode: true,
-            country: true,
-            place: true,
-            iataCode: true,
-            latitude: true,
-            longitude: true,
-          },
-        },
-      },
-      orderBy: { unlocode: "asc" },
-      take: limit + 1,
-    });
+			const sourceLocations = await prisma.sourceLocation.findMany({
+				where: whereClause,
+				include: {
+					loc: {
+						select: {
+							unlocode: true,
+							country: true,
+							place: true,
+							iataCode: true,
+							latitude: true,
+							longitude: true,
+						},
+					},
+				},
+				orderBy: { unlocode: "asc" },
+				take: limit + 1,
+			});
 
-    const hasMore = sourceLocations.length > limit;
-    const page = sourceLocations.slice(0, limit);
-    const enriched = await buildCoverageListItems(
-      sourceId,
-      page.map((sl) => ({
-        unlocode: sl.unlocode,
-        isMock: Boolean((sl as { isMock?: boolean }).isMock),
-        loc: sl.loc,
-      }))
-    );
-    const items = enriched.map((row) => ({
-      ...row,
-      synced_at: null as string | null,
-    }));
+			const hasMore = sourceLocations.length > limit;
+			const page = sourceLocations.slice(0, limit);
+			const enriched = await buildCoverageListItems(
+				sourceId,
+				page.map((sl) => ({
+					unlocode: sl.unlocode,
+					isMock: Boolean((sl as { isMock?: boolean }).isMock),
+					loc: sl.loc,
+				})),
+			);
+			const items = enriched.map((row) => ({
+				...row,
+				synced_at: null as string | null,
+			}));
 
-    const next_cursor = hasMore ? sourceLocations[limit].unlocode : "";
+			const next_cursor = hasMore ? sourceLocations[limit].unlocode : "";
 
-    res.json({
-      source: {
-        id: source.id,
-        companyName: source.companyName,
-        status: source.status
-      },
-      items,
-      next_cursor,
-      total: items.length,
-      has_more: hasMore
-    });
-
-  } catch (e) { 
-    next(e); 
-  }
-});
+			res.json({
+				source: {
+					id: source.id,
+					companyName: source.companyName,
+					status: source.status,
+				},
+				items,
+				next_cursor,
+				total: items.length,
+				has_more: hasMore,
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -163,90 +202,97 @@ locationsRouter.get("/coverage/source/:sourceId", requireAuth(), requireCompanyT
  *     tags: [Locations]
  *     summary: View a Source's imported branches
  */
-locationsRouter.get("/coverage/source/:sourceId/branches", requireAuth(), requireCompanyType("ADMIN", "SOURCE", "AGENT"), async (req: any, res, next) => {
-  try {
-    const sourceId = String(req.params.sourceId || "").trim();
-    if (!sourceId) {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "Source ID is required" });
-    }
+locationsRouter.get(
+	"/coverage/source/:sourceId/branches",
+	requireAuth(),
+	requireCompanyType("ADMIN", "SOURCE", "AGENT"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = String(req.params.sourceId || "").trim();
+			if (!sourceId) {
+				return res
+					.status(400)
+					.json({ error: "BAD_REQUEST", message: "Source ID is required" });
+			}
 
-    const source = await prisma.company.findUnique({
-      where: { id: sourceId },
-      select: { id: true, type: true, companyName: true, status: true },
-    });
-    if (!source || source.type !== "SOURCE") {
-      return res.status(404).json({ error: "NOT_FOUND", message: "Source not found" });
-    }
+			const source = await prisma.company.findUnique({
+				where: { id: sourceId },
+				select: { id: true, type: true, companyName: true, status: true },
+			});
+			if (!source || source.type !== "SOURCE") {
+				return res
+					.status(404)
+					.json({ error: "NOT_FOUND", message: "Source not found" });
+			}
 
-    // Access control
-    if (req.user.role !== "ADMIN") {
-      if (req.user.type === "SOURCE" && req.user.companyId !== sourceId) {
-        return res.status(403).json({ error: "FORBIDDEN", message: "Can only view your own source branches" });
-      }
-      if (req.user.type === "AGENT") {
-        const hasAgreement = await prisma.agreement.findFirst({
-          where: {
-            agentId: req.user.companyId,
-            sourceId,
-            status: { in: ["ACTIVE", "ACCEPTED", "OFFERED"] },
-          },
-          select: { id: true },
-        });
-        if (!hasAgreement) {
-          return res.status(403).json({ error: "FORBIDDEN", message: "No agreement with this source" });
-        }
-      }
-    }
+			// Access control: Sources can only inspect their own branches. Registered agents may browse
+			// active supplier coverage before commercial onboarding/agreement acceptance.
+			if (req.user.role !== "ADMIN") {
+				if (req.user.type === "SOURCE" && req.user.companyId !== sourceId) {
+					return res
+						.status(403)
+						.json({
+							error: "FORBIDDEN",
+							message: "Can only view your own source branches",
+						});
+				}
+				if (req.user.type === "AGENT" && source.status !== "ACTIVE") {
+					return res
+						.status(403)
+						.json({ error: "FORBIDDEN", message: "Source is not active" });
+				}
+			}
 
-    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
-    const offset = Math.max(0, Number(req.query.offset || 0));
-    const search = String(req.query.search || "").trim();
-    const status = String(req.query.status || "").trim();
-    const locationType = String(req.query.locationType || "").trim();
+			const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+			const offset = Math.max(0, Number(req.query.offset || 0));
+			const search = String(req.query.search || "").trim();
+			const status = String(req.query.status || "").trim();
+			const locationType = String(req.query.locationType || "").trim();
 
-    const where: any = {
-      sourceId,
-      ...(status ? { status } : {}),
-      ...(locationType ? { locationType } : {}),
-      ...(search
-        ? {
-            OR: [
-              { branchCode: { contains: search } },
-              { name: { contains: search } },
-              { city: { contains: search } },
-              { country: { contains: search } },
-              { natoLocode: { contains: search } },
-            ],
-          }
-        : {}),
-    };
+			const where: any = {
+				sourceId,
+				...(status ? { status } : {}),
+				...(locationType ? { locationType } : {}),
+				...(search
+					? {
+							OR: [
+								{ branchCode: { contains: search } },
+								{ name: { contains: search } },
+								{ city: { contains: search } },
+								{ country: { contains: search } },
+								{ natoLocode: { contains: search } },
+							],
+						}
+					: {}),
+			};
 
-    const [items, total] = await Promise.all([
-      prisma.branch.findMany({
-        where,
-        orderBy: { updatedAt: "desc" },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.branch.count({ where }),
-    ]);
+			const [items, total] = await Promise.all([
+				prisma.branch.findMany({
+					where,
+					orderBy: { updatedAt: "desc" },
+					take: limit,
+					skip: offset,
+				}),
+				prisma.branch.count({ where }),
+			]);
 
-    res.json({
-      source: {
-        id: source.id,
-        companyName: source.companyName,
-        status: source.status,
-      },
-      items,
-      total,
-      limit,
-      offset,
-      hasMore: offset + limit < total,
-    });
-  } catch (e) {
-    next(e);
-  }
-});
+			res.json({
+				source: {
+					id: source.id,
+					companyName: source.companyName,
+					status: source.status,
+				},
+				items,
+				total,
+				limit,
+				offset,
+				hasMore: offset + limit < total,
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -255,77 +301,103 @@ locationsRouter.get("/coverage/source/:sourceId/branches", requireAuth(), requir
  *     tags: [Locations]
  *     summary: Sync Source coverage from supplier adapter (maps to UN/LOCODE)
  */
-locationsRouter.post("/coverage/source/:sourceId/sync", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const startTime = Date.now();
-    const requestId = (req as any).requestId;
-    
-    // only allow a source to sync its own coverage
-    const sourceId = String(req.params.sourceId || req.body?.source_id || "").trim();
-    if (req.user.companyId !== sourceId) {
-      // Log forbidden access
-      await auditLog({
-        direction: "IN",
-        endpoint: "locations.sync",
-        requestId,
-        companyId: req.user.companyId,
-        sourceId: sourceId,
-        httpStatus: 403,
-        request: { sourceId },
-        response: { error: "FORBIDDEN", message: "Can only sync your own coverage" },
-        durationMs: Date.now() - startTime,
-      });
-      
-      return res.status(403).json({ error: "FORBIDDEN", message: "Can only sync your own coverage" });
-    }
-    
-    let resp: SyncSourceCoverageResult;
-    try {
-      resp = await syncSourceCoverage(sourceId);
-    } catch (err: any) {
-      const duration = Date.now() - startTime;
-      await auditLog({
-        direction: "IN",
-        endpoint: "locations.sync",
-        requestId,
-        companyId: sourceId,
-        sourceId: sourceId,
-        grpcStatus: err.code || 13,
-        request: { sourceId },
-        response: { error: err.message },
-        durationMs: duration,
-      });
-      err.status =
-        err.code === 3 ? 400 : err.code === 5 ? 404 : err.code === 14 ? 503 : 500;
-      return next(err);
-    }
+locationsRouter.post(
+	"/coverage/source/:sourceId/sync",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const startTime = Date.now();
+			const requestId = (req as any).requestId;
 
-    try {
-      await prisma.company.update({
-        where: { id: sourceId },
-        data: {
-          lastLocationSyncAt: new Date(),
-        },
-      });
-    } catch (error) {
-      console.error("Failed to save location sync timestamp to database:", error);
-    }
+			// only allow a source to sync its own coverage
+			const sourceId = String(
+				req.params.sourceId || req.body?.source_id || "",
+			).trim();
+			if (req.user.companyId !== sourceId) {
+				// Log forbidden access
+				await auditLog({
+					direction: "IN",
+					endpoint: "locations.sync",
+					requestId,
+					companyId: req.user.companyId,
+					sourceId: sourceId,
+					httpStatus: 403,
+					request: { sourceId },
+					response: {
+						error: "FORBIDDEN",
+						message: "Can only sync your own coverage",
+					},
+					durationMs: Date.now() - startTime,
+				});
 
-    await auditLog({
-      direction: "IN",
-      endpoint: "locations.sync",
-      requestId,
-      companyId: sourceId,
-      sourceId: sourceId,
-      httpStatus: 200,
-      request: { sourceId },
-      response: resp,
-      durationMs: Date.now() - startTime,
-    });
+				return res
+					.status(403)
+					.json({
+						error: "FORBIDDEN",
+						message: "Can only sync your own coverage",
+					});
+			}
 
-    res.json(resp);
-  } catch (e) { next(e); }
-});
+			let resp: SyncSourceCoverageResult;
+			try {
+				resp = await syncSourceCoverage(sourceId);
+			} catch (err: any) {
+				const duration = Date.now() - startTime;
+				await auditLog({
+					direction: "IN",
+					endpoint: "locations.sync",
+					requestId,
+					companyId: sourceId,
+					sourceId: sourceId,
+					grpcStatus: err.code || 13,
+					request: { sourceId },
+					response: { error: err.message },
+					durationMs: duration,
+				});
+				err.status =
+					err.code === 3
+						? 400
+						: err.code === 5
+							? 404
+							: err.code === 14
+								? 503
+								: 500;
+				return next(err);
+			}
+
+			try {
+				await prisma.company.update({
+					where: { id: sourceId },
+					data: {
+						lastLocationSyncAt: new Date(),
+					},
+				});
+			} catch (error) {
+				console.error(
+					"Failed to save location sync timestamp to database:",
+					error,
+				);
+			}
+
+			await auditLog({
+				direction: "IN",
+				endpoint: "locations.sync",
+				requestId,
+				companyId: sourceId,
+				sourceId: sourceId,
+				httpStatus: 200,
+				request: { sourceId },
+				response: resp,
+				durationMs: Date.now() - startTime,
+			});
+
+			res.json(resp);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -334,14 +406,27 @@ locationsRouter.post("/coverage/source/:sourceId/sync", requireAuth(), requireCo
  *     tags: [Locations]
  *     summary: Effective coverage for an Agreement (base source coverage ∪ allow overrides − deny overrides)
  */
-locationsRouter.get("/coverage/agreement/:agreementId", requireAuth(), async (req, res, next) => {
-  try {
-    const client = locationClient();
-    client.ListCoverageByAgreement({ agreement_id: String(req.params.agreementId) }, metaFromReq(req), (err: any, resp: any) => err ? next(err) : res.json(resp));
-  } catch (e) { next(e); }
-});
+locationsRouter.get(
+	"/coverage/agreement/:agreementId",
+	requireAuth(),
+	async (req, res, next) => {
+		try {
+			const client = locationClient();
+			client.ListCoverageByAgreement(
+				{ agreement_id: String(req.params.agreementId) },
+				metaFromReq(req),
+				(err: any, resp: any) => (err ? next(err) : res.json(resp)),
+			);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
-const overrideSchema = z.object({ unlocode: z.string().min(3), allowed: z.boolean() });
+const overrideSchema = z.object({
+	unlocode: z.string().min(3),
+	allowed: z.boolean(),
+});
 /**
  * @openapi
  * /coverage/agreement/{agreementId}/override:
@@ -349,17 +434,27 @@ const overrideSchema = z.object({ unlocode: z.string().min(3), allowed: z.boolea
  *     tags: [Locations]
  *     summary: Upsert a per-agreement location override (allow or deny)
  */
-locationsRouter.post("/coverage/agreement/:agreementId/override", requireAuth(), async (req, res, next) => {
-  try {
-    const body = overrideSchema.parse(req.body);
-    const client = locationClient();
-    client.UpsertAgreementOverride(
-      { agreement_id: String(req.params.agreementId), unlocode: body.unlocode, allowed: body.allowed },
-      metaFromReq(req),
-      (err: any, resp: any) => err ? next(err) : res.json(resp)
-    );
-  } catch (e) { next(e); }
-});
+locationsRouter.post(
+	"/coverage/agreement/:agreementId/override",
+	requireAuth(),
+	async (req, res, next) => {
+		try {
+			const body = overrideSchema.parse(req.body);
+			const client = locationClient();
+			client.UpsertAgreementOverride(
+				{
+					agreement_id: String(req.params.agreementId),
+					unlocode: body.unlocode,
+					allowed: body.allowed,
+				},
+				metaFromReq(req),
+				(err: any, resp: any) => (err ? next(err) : res.json(resp)),
+			);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -368,16 +463,25 @@ locationsRouter.post("/coverage/agreement/:agreementId/override", requireAuth(),
  *     tags: [Locations]
  *     summary: Remove a per-agreement override
  */
-locationsRouter.delete("/coverage/agreement/:agreementId/override/:unlocode", requireAuth(), async (req, res, next) => {
-  try {
-    const client = locationClient();
-    client.RemoveAgreementOverride(
-      { agreement_id: String(req.params.agreementId), unlocode: String(req.params.unlocode) },
-      metaFromReq(req),
-      (err: any, resp: any) => err ? next(err) : res.json(resp)
-    );
-  } catch (e) { next(e); }
-});
+locationsRouter.delete(
+	"/coverage/agreement/:agreementId/override/:unlocode",
+	requireAuth(),
+	async (req, res, next) => {
+		try {
+			const client = locationClient();
+			client.RemoveAgreementOverride(
+				{
+					agreement_id: String(req.params.agreementId),
+					unlocode: String(req.params.unlocode),
+				},
+				metaFromReq(req),
+				(err: any, resp: any) => (err ? next(err) : res.json(resp)),
+			);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 // ============================================================================
 // Location Request Endpoints
@@ -393,59 +497,70 @@ locationsRouter.delete("/coverage/agreement/:agreementId/override/:unlocode", re
  *       - bearerAuth: []
  */
 const locationRequestSchema = z.object({
-  locationName: z.string().min(1, "Location name is required"),
-  country: z.string()
-    .length(2, "Country code must be exactly 2 letters (ISO 3166-1 alpha-2)")
-    .regex(/^[A-Z]{2}$/, "Country code must be 2 uppercase letters (e.g., GB, US, FR)"),
-  city: z.string().optional(),
-  address: z.string().optional(),
-  iataCode: z.string()
-    .max(3, "IATA code must be 3 letters or less")
-    .regex(/^[A-Z]{0,3}$/, "IATA code must contain only uppercase letters")
-    .optional()
-    .or(z.literal("")),
-  reason: z.string().optional(),
+	locationName: z.string().min(1, "Location name is required"),
+	country: z
+		.string()
+		.length(2, "Country code must be exactly 2 letters (ISO 3166-1 alpha-2)")
+		.regex(
+			/^[A-Z]{2}$/,
+			"Country code must be 2 uppercase letters (e.g., GB, US, FR)",
+		),
+	city: z.string().optional(),
+	address: z.string().optional(),
+	iataCode: z
+		.string()
+		.max(3, "IATA code must be 3 letters or less")
+		.regex(/^[A-Z]{0,3}$/, "IATA code must contain only uppercase letters")
+		.optional()
+		.or(z.literal("")),
+	reason: z.string().optional(),
 });
 
-locationsRouter.post("/locations/request", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    // Normalize country code to uppercase
-    if (req.body.country) {
-      req.body.country = req.body.country.toUpperCase().trim();
-    }
-    // Normalize IATA code to uppercase if provided
-    if (req.body.iataCode) {
-      req.body.iataCode = req.body.iataCode.toUpperCase().trim() || null;
-    }
-    const body = locationRequestSchema.parse(req.body);
+locationsRouter.post(
+	"/locations/request",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			// Normalize country code to uppercase
+			if (req.body.country) {
+				req.body.country = req.body.country.toUpperCase().trim();
+			}
+			// Normalize IATA code to uppercase if provided
+			if (req.body.iataCode) {
+				req.body.iataCode = req.body.iataCode.toUpperCase().trim() || null;
+			}
+			const body = locationRequestSchema.parse(req.body);
 
-    const request = await prisma.locationRequest.create({
-      data: {
-        sourceId,
-        locationName: body.locationName.trim(),
-        country: body.country,
-        city: body.city?.trim() || null,
-        address: body.address?.trim() || null,
-        iataCode: body.iataCode && body.iataCode.length > 0 ? body.iataCode : null,
-        reason: body.reason?.trim() || null,
-        status: "PENDING",
-      },
-      include: {
-        source: {
-          select: {
-            id: true,
-            companyName: true,
-          },
-        },
-      },
-    });
+			const request = await prisma.locationRequest.create({
+				data: {
+					sourceId,
+					locationName: body.locationName.trim(),
+					country: body.country,
+					city: body.city?.trim() || null,
+					address: body.address?.trim() || null,
+					iataCode:
+						body.iataCode && body.iataCode.length > 0 ? body.iataCode : null,
+					reason: body.reason?.trim() || null,
+					status: "PENDING",
+				},
+				include: {
+					source: {
+						select: {
+							id: true,
+							companyName: true,
+						},
+					},
+				},
+			});
 
-    res.status(201).json(request);
-  } catch (e) {
-    next(e);
-  }
-});
+			res.status(201).json(request);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -456,39 +571,44 @@ locationsRouter.post("/locations/request", requireAuth(), requireCompanyType("SO
  *     security:
  *       - bearerAuth: []
  */
-locationsRouter.get("/locations/requests", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const status = req.query.status as string | undefined;
-    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
-    const offset = Math.max(0, Number(req.query.offset || 0));
+locationsRouter.get(
+	"/locations/requests",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const status = req.query.status as string | undefined;
+			const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+			const offset = Math.max(0, Number(req.query.offset || 0));
 
-    const where: any = { sourceId };
-    if (status) {
-      where.status = status;
-    }
+			const where: any = { sourceId };
+			if (status) {
+				where.status = status;
+			}
 
-    const [requests, total] = await Promise.all([
-      prisma.locationRequest.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.locationRequest.count({ where }),
-    ]);
+			const [requests, total] = await Promise.all([
+				prisma.locationRequest.findMany({
+					where,
+					orderBy: { createdAt: "desc" },
+					take: limit,
+					skip: offset,
+				}),
+				prisma.locationRequest.count({ where }),
+			]);
 
-    res.json({
-      items: requests,
-      total,
-      limit,
-      offset,
-      hasMore: offset + limit < total,
-    });
-  } catch (e) {
-    next(e);
-  }
-});
+			res.json({
+				items: requests,
+				total,
+				limit,
+				offset,
+				hasMore: offset + limit < total,
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -499,35 +619,45 @@ locationsRouter.get("/locations/requests", requireAuth(), requireCompanyType("SO
  *     security:
  *       - bearerAuth: []
  */
-locationsRouter.get("/locations/requests/:id", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const { id } = req.params;
-    const sourceId = req.user.companyId;
+locationsRouter.get(
+	"/locations/requests/:id",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const { id } = req.params;
+			const sourceId = req.user.companyId;
 
-    const request = await prisma.locationRequest.findFirst({
-      where: {
-        id,
-        sourceId, // Ensure request belongs to this source
-      },
-      include: {
-        source: {
-          select: {
-            id: true,
-            companyName: true,
-          },
-        },
-      },
-    });
+			const request = await prisma.locationRequest.findFirst({
+				where: {
+					id,
+					sourceId, // Ensure request belongs to this source
+				},
+				include: {
+					source: {
+						select: {
+							id: true,
+							companyName: true,
+						},
+					},
+				},
+			});
 
-    if (!request) {
-      return res.status(404).json({ error: "REQUEST_NOT_FOUND", message: "Location request not found" });
-    }
+			if (!request) {
+				return res
+					.status(404)
+					.json({
+						error: "REQUEST_NOT_FOUND",
+						message: "Location request not found",
+					});
+			}
 
-    res.json(request);
-  } catch (e) {
-    next(e);
-  }
-});
+			res.json(request);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -538,51 +668,56 @@ locationsRouter.get("/locations/requests/:id", requireAuth(), requireCompanyType
  *     security:
  *       - bearerAuth: []
  */
-locationsRouter.get("/admin/locations/requests", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
-  try {
-    const sourceId = req.query.sourceId as string | undefined;
-    const status = req.query.status as string | undefined;
-    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
-    const offset = Math.max(0, Number(req.query.offset || 0));
+locationsRouter.get(
+	"/admin/locations/requests",
+	requireAuth(),
+	requireRole("ADMIN"),
+	async (req, res, next) => {
+		try {
+			const sourceId = req.query.sourceId as string | undefined;
+			const status = req.query.status as string | undefined;
+			const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+			const offset = Math.max(0, Number(req.query.offset || 0));
 
-    const where: any = {};
-    if (sourceId) {
-      where.sourceId = sourceId;
-    }
-    if (status) {
-      where.status = status;
-    }
+			const where: any = {};
+			if (sourceId) {
+				where.sourceId = sourceId;
+			}
+			if (status) {
+				where.status = status;
+			}
 
-    const [requests, total] = await Promise.all([
-      prisma.locationRequest.findMany({
-        where,
-        include: {
-          source: {
-            select: {
-              id: true,
-              companyName: true,
-              companyCode: true,
-            },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.locationRequest.count({ where }),
-    ]);
+			const [requests, total] = await Promise.all([
+				prisma.locationRequest.findMany({
+					where,
+					include: {
+						source: {
+							select: {
+								id: true,
+								companyName: true,
+								companyCode: true,
+							},
+						},
+					},
+					orderBy: { createdAt: "desc" },
+					take: limit,
+					skip: offset,
+				}),
+				prisma.locationRequest.count({ where }),
+			]);
 
-    res.json({
-      items: requests,
-      total,
-      limit,
-      offset,
-      hasMore: offset + limit < total,
-    });
-  } catch (e) {
-    next(e);
-  }
-});
+			res.json({
+				items: requests,
+				total,
+				limit,
+				offset,
+				hasMore: offset + limit < total,
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -593,32 +728,42 @@ locationsRouter.get("/admin/locations/requests", requireAuth(), requireRole("ADM
  *     security:
  *       - bearerAuth: []
  */
-locationsRouter.get("/admin/locations/requests/:id", requireAuth(), requireRole("ADMIN"), async (req, res, next) => {
-  try {
-    const { id } = req.params;
+locationsRouter.get(
+	"/admin/locations/requests/:id",
+	requireAuth(),
+	requireRole("ADMIN"),
+	async (req, res, next) => {
+		try {
+			const { id } = req.params;
 
-    const request = await prisma.locationRequest.findUnique({
-      where: { id },
-      include: {
-        source: {
-          select: {
-            id: true,
-            companyName: true,
-            companyCode: true,
-          },
-        },
-      },
-    });
+			const request = await prisma.locationRequest.findUnique({
+				where: { id },
+				include: {
+					source: {
+						select: {
+							id: true,
+							companyName: true,
+							companyCode: true,
+						},
+					},
+				},
+			});
 
-    if (!request) {
-      return res.status(404).json({ error: "REQUEST_NOT_FOUND", message: "Location request not found" });
-    }
+			if (!request) {
+				return res
+					.status(404)
+					.json({
+						error: "REQUEST_NOT_FOUND",
+						message: "Location request not found",
+					});
+			}
 
-    res.json(request);
-  } catch (e) {
-    next(e);
-  }
-});
+			res.json(request);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -630,50 +775,60 @@ locationsRouter.get("/admin/locations/requests/:id", requireAuth(), requireRole(
  *       - bearerAuth: []
  */
 const updateLocationRequestSchema = z.object({
-  status: z.enum(["PENDING", "APPROVED", "REJECTED"]).optional(),
-  adminNotes: z.string().optional().nullable(),
+	status: z.enum(["PENDING", "APPROVED", "REJECTED"]).optional(),
+	adminNotes: z.string().optional().nullable(),
 });
 
-locationsRouter.patch("/admin/locations/requests/:id", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
-  try {
-    const { id } = req.params;
-    const body = updateLocationRequestSchema.parse(req.body);
-    const adminUserId = req.user.id;
+locationsRouter.patch(
+	"/admin/locations/requests/:id",
+	requireAuth(),
+	requireRole("ADMIN"),
+	async (req: any, res, next) => {
+		try {
+			const { id } = req.params;
+			const body = updateLocationRequestSchema.parse(req.body);
+			const adminUserId = req.user.id;
 
-    const updateData: any = {};
-    if (body.status) {
-      updateData.status = body.status;
-      if (body.status === "APPROVED" || body.status === "REJECTED") {
-        updateData.reviewedBy = adminUserId;
-        updateData.reviewedAt = new Date();
-      }
-    }
-    if (body.adminNotes !== undefined) {
-      updateData.adminNotes = body.adminNotes;
-    }
+			const updateData: any = {};
+			if (body.status) {
+				updateData.status = body.status;
+				if (body.status === "APPROVED" || body.status === "REJECTED") {
+					updateData.reviewedBy = adminUserId;
+					updateData.reviewedAt = new Date();
+				}
+			}
+			if (body.adminNotes !== undefined) {
+				updateData.adminNotes = body.adminNotes;
+			}
 
-    const request = await prisma.locationRequest.update({
-      where: { id },
-      data: updateData,
-      include: {
-        source: {
-          select: {
-            id: true,
-            companyName: true,
-            companyCode: true,
-          },
-        },
-      },
-    });
+			const request = await prisma.locationRequest.update({
+				where: { id },
+				data: updateData,
+				include: {
+					source: {
+						select: {
+							id: true,
+							companyName: true,
+							companyCode: true,
+						},
+					},
+				},
+			});
 
-    res.json(request);
-  } catch (e: any) {
-    if (e.code === "P2025") {
-      return res.status(404).json({ error: "REQUEST_NOT_FOUND", message: "Location request not found" });
-    }
-    next(e);
-  }
-});
+			res.json(request);
+		} catch (e: any) {
+			if (e.code === "P2025") {
+				return res
+					.status(404)
+					.json({
+						error: "REQUEST_NOT_FOUND",
+						message: "Location request not found",
+					});
+			}
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -684,39 +839,49 @@ locationsRouter.patch("/admin/locations/requests/:id", requireAuth(), requireRol
  *     security:
  *       - bearerAuth: []
  */
-locationsRouter.post("/admin/locations/requests/:id/approve", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
-  try {
-    const { id } = req.params;
-    const adminUserId = req.user.id;
-    const adminNotes = req.body.adminNotes as string | undefined;
+locationsRouter.post(
+	"/admin/locations/requests/:id/approve",
+	requireAuth(),
+	requireRole("ADMIN"),
+	async (req: any, res, next) => {
+		try {
+			const { id } = req.params;
+			const adminUserId = req.user.id;
+			const adminNotes = req.body.adminNotes as string | undefined;
 
-    const request = await prisma.locationRequest.update({
-      where: { id },
-      data: {
-        status: "APPROVED",
-        reviewedBy: adminUserId,
-        reviewedAt: new Date(),
-        adminNotes: adminNotes || null,
-      },
-      include: {
-        source: {
-          select: {
-            id: true,
-            companyName: true,
-            companyCode: true,
-          },
-        },
-      },
-    });
+			const request = await prisma.locationRequest.update({
+				where: { id },
+				data: {
+					status: "APPROVED",
+					reviewedBy: adminUserId,
+					reviewedAt: new Date(),
+					adminNotes: adminNotes || null,
+				},
+				include: {
+					source: {
+						select: {
+							id: true,
+							companyName: true,
+							companyCode: true,
+						},
+					},
+				},
+			});
 
-    res.json(request);
-  } catch (e: any) {
-    if (e.code === "P2025") {
-      return res.status(404).json({ error: "REQUEST_NOT_FOUND", message: "Location request not found" });
-    }
-    next(e);
-  }
-});
+			res.json(request);
+		} catch (e: any) {
+			if (e.code === "P2025") {
+				return res
+					.status(404)
+					.json({
+						error: "REQUEST_NOT_FOUND",
+						message: "Location request not found",
+					});
+			}
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -727,36 +892,46 @@ locationsRouter.post("/admin/locations/requests/:id/approve", requireAuth(), req
  *     security:
  *       - bearerAuth: []
  */
-locationsRouter.post("/admin/locations/requests/:id/reject", requireAuth(), requireRole("ADMIN"), async (req: any, res, next) => {
-  try {
-    const { id } = req.params;
-    const adminUserId = req.user.id;
-    const adminNotes = req.body.adminNotes as string | undefined;
+locationsRouter.post(
+	"/admin/locations/requests/:id/reject",
+	requireAuth(),
+	requireRole("ADMIN"),
+	async (req: any, res, next) => {
+		try {
+			const { id } = req.params;
+			const adminUserId = req.user.id;
+			const adminNotes = req.body.adminNotes as string | undefined;
 
-    const request = await prisma.locationRequest.update({
-      where: { id },
-      data: {
-        status: "REJECTED",
-        reviewedBy: adminUserId,
-        reviewedAt: new Date(),
-        adminNotes: adminNotes || null,
-      },
-      include: {
-        source: {
-          select: {
-            id: true,
-            companyName: true,
-            companyCode: true,
-          },
-        },
-      },
-    });
+			const request = await prisma.locationRequest.update({
+				where: { id },
+				data: {
+					status: "REJECTED",
+					reviewedBy: adminUserId,
+					reviewedAt: new Date(),
+					adminNotes: adminNotes || null,
+				},
+				include: {
+					source: {
+						select: {
+							id: true,
+							companyName: true,
+							companyCode: true,
+						},
+					},
+				},
+			});
 
-    res.json(request);
-  } catch (e: any) {
-    if (e.code === "P2025") {
-      return res.status(404).json({ error: "REQUEST_NOT_FOUND", message: "Location request not found" });
-    }
-    next(e);
-  }
-});
+			res.json(request);
+		} catch (e: any) {
+			if (e.code === "P2025") {
+				return res
+					.status(404)
+					.json({
+						error: "REQUEST_NOT_FOUND",
+						message: "Location request not found",
+					});
+			}
+			next(e);
+		}
+	},
+);
