@@ -1,7 +1,9 @@
 import { Router } from "express";
+import fs from "fs/promises";
+import path from "path";
 import { z } from "zod";
 import { requireAuth } from "../../infra/auth.js";
-import { requireCompanyType, requireRole } from "../../infra/policies.js";
+import { requireCompanyType } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
 import { GrpcTester } from "../../services/grpcTester.js";
 import { normalizeWhitelist } from "../../infra/whitelistEnforcement.js";
@@ -14,47 +16,75 @@ export type BranchEndpointFormat = z.infer<typeof branchEndpointFormatEnum>;
 
 /** JSON clients often send `null` for unset fields; Zod `.optional()` only allows `undefined`. */
 function optionalUrl() {
-  return z.preprocess(
-    (val) => (val === null || val === "" ? undefined : val),
-    z.string().url().optional()
-  );
+	return z.preprocess(
+		(val) => (val === null || val === "" ? undefined : val),
+		z.string().url().optional(),
+	);
 }
 function optionalString() {
-  return z.preprocess(
-    (val) => (val === null || val === "" ? undefined : val),
-    z.string().optional()
-  );
+	return z.preprocess(
+		(val) => (val === null || val === "" ? undefined : val),
+		z.string().optional(),
+	);
+}
+
+const MAX_SETTINGS_LOGO_BYTES = 2 * 1024 * 1024;
+
+function parseSettingsLogoDataUrl(
+	dataUrl: string,
+): { buf: Buffer; ext: string } | { error: string } {
+	const m = dataUrl
+		.trim()
+		.match(/^data:image\/(jpeg|jpg|png|webp);base64,(.+)$/i);
+	if (!m) {
+		return { error: "Invalid or unsupported image. Use JPEG, PNG, or WebP." };
+	}
+	const mimeExt = m[1].toLowerCase();
+	const ext = mimeExt === "jpeg" ? "jpg" : mimeExt;
+	let buf: Buffer;
+	try {
+		buf = Buffer.from(m[2], "base64");
+	} catch {
+		return { error: "Could not read image data." };
+	}
+	if (buf.length > MAX_SETTINGS_LOGO_BYTES) {
+		return { error: "Image must be 2 MB or smaller." };
+	}
+	if (buf.length < 100) {
+		return { error: "Image file is too small or corrupted." };
+	}
+	return { buf, ext };
 }
 
 const endpointConfigSchema = z.object({
-  httpEndpoint: optionalUrl(),
-  grpcEndpoint: optionalString(),
-  adapterType: z.preprocess(
-    (val) => (val === null || val === "" ? undefined : val),
-    z.enum(["mock", "grpc", "http"]).optional()
-  ),
-  description: optionalString(),
-  branchEndpointUrl: optionalUrl(),
-  branchEndpointFormat: z.preprocess(
-    (val) => (val === null || val === "" ? undefined : val),
-    branchEndpointFormatEnum.optional()
-  ),
-  branchDefaultCountryCode: z.preprocess(
-    (val) => (val === null || val === "" ? undefined : val),
-    z.string().max(3).optional()
-  ),
-  locationEndpointUrl: optionalUrl(),
-  locationListEndpointUrl: optionalUrl(),
-  locationListRequestRoot: z.preprocess(
-    (val) => (val === null || val === "" ? undefined : val),
-    z.string().min(1).optional()
-  ),
-  locationListAccountId: optionalString(),
-  locationListTransport: z.preprocess(
-    (val) => (val === null || val === "" ? undefined : val),
-    z.enum(["http", "grpc"]).optional()
-  ),
-  availabilityEndpointUrl: optionalUrl(),
+	httpEndpoint: optionalUrl(),
+	grpcEndpoint: optionalString(),
+	adapterType: z.preprocess(
+		(val) => (val === null || val === "" ? undefined : val),
+		z.enum(["mock", "grpc", "http"]).optional(),
+	),
+	description: optionalString(),
+	branchEndpointUrl: optionalUrl(),
+	branchEndpointFormat: z.preprocess(
+		(val) => (val === null || val === "" ? undefined : val),
+		branchEndpointFormatEnum.optional(),
+	),
+	branchDefaultCountryCode: z.preprocess(
+		(val) => (val === null || val === "" ? undefined : val),
+		z.string().max(3).optional(),
+	),
+	locationEndpointUrl: optionalUrl(),
+	locationListEndpointUrl: optionalUrl(),
+	locationListRequestRoot: z.preprocess(
+		(val) => (val === null || val === "" ? undefined : val),
+		z.string().min(1).optional(),
+	),
+	locationListAccountId: optionalString(),
+	locationListTransport: z.preprocess(
+		(val) => (val === null || val === "" ? undefined : val),
+		z.enum(["http", "grpc"]).optional(),
+	),
+	availabilityEndpointUrl: optionalUrl(),
 });
 
 /**
@@ -107,107 +137,108 @@ const endpointConfigSchema = z.object({
  *                   description: Last update time
  */
 endpointsRouter.get(
-  "/endpoints/config",
-  requireAuth(),
-  async (req: any, res, next) => {
-    try {
-      // Validate that user has companyId
-      if (!req.user?.companyId) {
-        return res.status(401).json({
-          error: "AUTH_ERROR",
-          message: "Invalid authentication: companyId not found in token",
-        });
-      }
+	"/endpoints/config",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			// Validate that user has companyId
+			if (!req.user?.companyId) {
+				return res.status(401).json({
+					error: "AUTH_ERROR",
+					message: "Invalid authentication: companyId not found in token",
+				});
+			}
 
-      const company = await prisma.company.findUnique({
-        where: { id: req.user.companyId },
-        select: {
-          id: true,
-          companyName: true,
-          type: true,
-          status: true,
-          adapterType: true,
-          grpcEndpoint: true,
-          httpEndpoint: true,
-          branchEndpointUrl: true,
-          branchEndpointFormat: true,
-          branchDefaultCountryCode: true,
-          locationEndpointUrl: true,
-          locationListEndpointUrl: true,
-          locationListRequestRoot: true,
-          locationListAccountId: true,
-          locationListTransport: true,
-          availabilityEndpointUrl: true,
-          updatedAt: true,
-          lastGrpcTestResult: true,
-          lastGrpcTestAt: true,
-          lastLocationSyncAt: true,
-        },
-      });
+			const company = await prisma.company.findUnique({
+				where: { id: req.user.companyId },
+				select: {
+					id: true,
+					companyName: true,
+					type: true,
+					status: true,
+					adapterType: true,
+					grpcEndpoint: true,
+					httpEndpoint: true,
+					branchEndpointUrl: true,
+					branchEndpointFormat: true,
+					branchDefaultCountryCode: true,
+					locationEndpointUrl: true,
+					locationListEndpointUrl: true,
+					locationListRequestRoot: true,
+					locationListAccountId: true,
+					locationListTransport: true,
+					availabilityEndpointUrl: true,
+					updatedAt: true,
+					lastGrpcTestResult: true,
+					lastGrpcTestAt: true,
+					lastLocationSyncAt: true,
+				},
+			});
 
-      if (!company) {
-        return res
-          .status(404)
-          .json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
-      }
+			if (!company) {
+				return res
+					.status(404)
+					.json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
+			}
 
-      // Use configured httpEndpoint or fallback to default based on company type
-      const httpEndpoint =
-        company.httpEndpoint ||
-        (company.type === "AGENT"
-          ? `http://localhost:9091` // Agent HTTP port
-          : `http://localhost:9090`); // Source HTTP port
+			// Use configured httpEndpoint or fallback to default based on company type
+			const httpEndpoint =
+				company.httpEndpoint ||
+				(company.type === "AGENT"
+					? `http://localhost:9091` // Agent HTTP port
+					: `http://localhost:9090`); // Source HTTP port
 
-      res.json({
-        companyId: company.id,
-        companyName: company.companyName,
-        type: company.type,
-        httpEndpoint,
-        grpcEndpoint: company.grpcEndpoint || null,
-        branchEndpointUrl: company.branchEndpointUrl || null,
-        branchEndpointFormat: company.branchEndpointFormat || null,
-        branchDefaultCountryCode: company.branchDefaultCountryCode || null,
-        locationEndpointUrl: company.locationEndpointUrl || null,
-        locationListEndpointUrl: company.locationListEndpointUrl ?? null,
-        locationListRequestRoot: company.locationListRequestRoot ?? null,
-        locationListAccountId: company.locationListAccountId ?? null,
-        locationListTransport: company.locationListTransport ?? null,
-        availabilityEndpointUrl: company.availabilityEndpointUrl || null,
-        adapterType: company.adapterType,
-        description: `${
-          company.companyName
-        } ${company.type.toLowerCase()} endpoints`,
-        status: company.status,
-        updatedAt: company.updatedAt,
-        lastGrpcTestResult: company.lastGrpcTestResult,
-        lastGrpcTestAt: company.lastGrpcTestAt,
-        lastLocationSyncAt: company.lastLocationSyncAt,
-      });
-    } catch (e: any) {
-      // Log the error for debugging
-      console.error("Error in GET /endpoints/config:", e);
-      console.error("Request user:", req.user);
-      
-      // Handle database errors
-      if (e?.code && e.code.startsWith('P')) {
-        return res.status(500).json({
-          error: "DATABASE_ERROR",
-          message: "Database query failed",
-          code: e.code
-        });
-      }
-      
-      // Handle MySQL authentication errors
-      if (e?.message && e.message.includes('Access denied')) {
-        return res.status(503).json({
-          error: "DATABASE_AUTH_ERROR",
-          message: "Database authentication failed. Please check your DATABASE_URL in .env file."
-        });
-      }
-      
-      next(e);
-    }
-  }
+			res.json({
+				companyId: company.id,
+				companyName: company.companyName,
+				type: company.type,
+				httpEndpoint,
+				grpcEndpoint: company.grpcEndpoint || null,
+				branchEndpointUrl: company.branchEndpointUrl || null,
+				branchEndpointFormat: company.branchEndpointFormat || null,
+				branchDefaultCountryCode: company.branchDefaultCountryCode || null,
+				locationEndpointUrl: company.locationEndpointUrl || null,
+				locationListEndpointUrl: company.locationListEndpointUrl ?? null,
+				locationListRequestRoot: company.locationListRequestRoot ?? null,
+				locationListAccountId: company.locationListAccountId ?? null,
+				locationListTransport: company.locationListTransport ?? null,
+				availabilityEndpointUrl: company.availabilityEndpointUrl || null,
+				adapterType: company.adapterType,
+				description: `${
+					company.companyName
+				} ${company.type.toLowerCase()} endpoints`,
+				status: company.status,
+				updatedAt: company.updatedAt,
+				lastGrpcTestResult: company.lastGrpcTestResult,
+				lastGrpcTestAt: company.lastGrpcTestAt,
+				lastLocationSyncAt: company.lastLocationSyncAt,
+			});
+		} catch (e: any) {
+			// Log the error for debugging
+			console.error("Error in GET /endpoints/config:", e);
+			console.error("Request user:", req.user);
+
+			// Handle database errors
+			if (e?.code && e.code.startsWith("P")) {
+				return res.status(500).json({
+					error: "DATABASE_ERROR",
+					message: "Database query failed",
+					code: e.code,
+				});
+			}
+
+			// Handle MySQL authentication errors
+			if (e?.message && e.message.includes("Access denied")) {
+				return res.status(503).json({
+					error: "DATABASE_AUTH_ERROR",
+					message:
+						"Database authentication failed. Please check your DATABASE_URL in .env file.",
+				});
+			}
+
+			next(e);
+		}
+	},
 );
 
 /**
@@ -282,159 +313,168 @@ endpointsRouter.get(
  *                   example: "Invalid endpoint configuration"
  */
 endpointsRouter.put(
-  "/endpoints/config",
-  requireAuth(),
-  async (req: any, res, next) => {
-    try {
-      const body = endpointConfigSchema.parse(req.body);
+	"/endpoints/config",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			const body = endpointConfigSchema.parse(req.body);
 
-      // Validate gRPC endpoint format if provided
-      if (body.grpcEndpoint) {
-        const grpcPattern = /^[a-zA-Z0-9.-]+:\d+$/;
-        if (!grpcPattern.test(body.grpcEndpoint)) {
-          return res.status(400).json({
-            error: "INVALID_GRPC_ENDPOINT",
-            message:
-              "gRPC endpoint must be in format 'host:port' (e.g., 'localhost:51062')",
-          });
-        }
-      }
+			// Validate gRPC endpoint format if provided
+			if (body.grpcEndpoint) {
+				const grpcPattern = /^[a-zA-Z0-9.-]+:\d+$/;
+				if (!grpcPattern.test(body.grpcEndpoint)) {
+					return res.status(400).json({
+						error: "INVALID_GRPC_ENDPOINT",
+						message:
+							"gRPC endpoint must be in format 'host:port' (e.g., 'localhost:51062')",
+					});
+				}
+			}
 
-      // Validate HTTP endpoint format if provided
-      if (body.httpEndpoint) {
-        try {
-          new URL(body.httpEndpoint);
-        } catch {
-          return res.status(400).json({
-            error: "INVALID_HTTP_ENDPOINT",
-            message:
-              "HTTP endpoint must be a valid URL (e.g., 'http://localhost:9091')",
-          });
-        }
-      }
+			// Validate HTTP endpoint format if provided
+			if (body.httpEndpoint) {
+				try {
+					new URL(body.httpEndpoint);
+				} catch {
+					return res.status(400).json({
+						error: "INVALID_HTTP_ENDPOINT",
+						message:
+							"HTTP endpoint must be a valid URL (e.g., 'http://localhost:9091')",
+					});
+				}
+			}
 
-      // Validate branch endpoint URL format if provided
-      if (body.branchEndpointUrl) {
-        try {
-          new URL(body.branchEndpointUrl);
-        } catch {
-          return res.status(400).json({
-            error: "INVALID_BRANCH_ENDPOINT",
-            message:
-              "Branch endpoint URL must be a valid URL (e.g., 'https://example.com/loctest.php')",
-          });
-        }
-      }
+			// Validate branch endpoint URL format if provided
+			if (body.branchEndpointUrl) {
+				try {
+					new URL(body.branchEndpointUrl);
+				} catch {
+					return res.status(400).json({
+						error: "INVALID_BRANCH_ENDPOINT",
+						message:
+							"Branch endpoint URL must be a valid URL (e.g., 'https://example.com/loctest.php')",
+					});
+				}
+			}
 
-      // Validate location endpoint URL format if provided
-      if (body.locationEndpointUrl) {
-        try {
-          new URL(body.locationEndpointUrl);
-        } catch {
-          return res.status(400).json({
-            error: "INVALID_LOCATION_ENDPOINT",
-            message:
-              "Location endpoint URL must be a valid URL (e.g., 'https://example.com/locations.php')",
-          });
-        }
-      }
+			// Validate location endpoint URL format if provided
+			if (body.locationEndpointUrl) {
+				try {
+					new URL(body.locationEndpointUrl);
+				} catch {
+					return res.status(400).json({
+						error: "INVALID_LOCATION_ENDPOINT",
+						message:
+							"Location endpoint URL must be a valid URL (e.g., 'https://example.com/locations.php')",
+					});
+				}
+			}
 
-      // Validate location list endpoint URL format if provided
-      if (body.locationListEndpointUrl) {
-        try {
-          new URL(body.locationListEndpointUrl);
-        } catch {
-          return res.status(400).json({
-            error: "INVALID_LOCATION_LIST_ENDPOINT",
-            message:
-              "Location list endpoint URL must be a valid URL (e.g., 'https://example.com/locationlist.php')",
-          });
-        }
-      }
+			// Validate location list endpoint URL format if provided
+			if (body.locationListEndpointUrl) {
+				try {
+					new URL(body.locationListEndpointUrl);
+				} catch {
+					return res.status(400).json({
+						error: "INVALID_LOCATION_LIST_ENDPOINT",
+						message:
+							"Location list endpoint URL must be a valid URL (e.g., 'https://example.com/locationlist.php')",
+					});
+				}
+			}
 
-      // Validate availability endpoint URL format if provided
-      if (body.availabilityEndpointUrl) {
-        try {
-          new URL(body.availabilityEndpointUrl);
-        } catch {
-          return res.status(400).json({
-            error: "INVALID_AVAILABILITY_ENDPOINT",
-            message:
-              "Availability endpoint URL must be a valid URL (e.g., 'https://example.com/pricetest2.php')",
-          });
-        }
-      }
+			// Validate availability endpoint URL format if provided
+			if (body.availabilityEndpointUrl) {
+				try {
+					new URL(body.availabilityEndpointUrl);
+				} catch {
+					return res.status(400).json({
+						error: "INVALID_AVAILABILITY_ENDPOINT",
+						message:
+							"Availability endpoint URL must be a valid URL (e.g., 'https://example.com/pricetest2.php')",
+					});
+				}
+			}
 
-      // Update company configuration
-      const updatedCompany = await prisma.company.update({
-        where: { id: req.user.companyId },
-        data: {
-          adapterType: body.adapterType,
-          grpcEndpoint: body.grpcEndpoint,
-          httpEndpoint: body.httpEndpoint,
-          branchEndpointUrl: body.branchEndpointUrl,
-          branchEndpointFormat: body.branchEndpointFormat,
-          branchDefaultCountryCode: body.branchDefaultCountryCode ? String(body.branchDefaultCountryCode).trim().toUpperCase().slice(0, 3) : null,
-          locationEndpointUrl: body.locationEndpointUrl,
-          locationListEndpointUrl: body.locationListEndpointUrl ?? undefined,
-          locationListRequestRoot: body.locationListRequestRoot ? String(body.locationListRequestRoot).trim() : null,
-          locationListAccountId: body.locationListAccountId ? String(body.locationListAccountId).trim() : null,
-          locationListTransport: body.locationListTransport ?? undefined,
-          availabilityEndpointUrl: body.availabilityEndpointUrl,
-          updatedAt: new Date(),
-        },
-        select: {
-          id: true,
-          companyName: true,
-          type: true,
-          adapterType: true,
-          grpcEndpoint: true,
-          httpEndpoint: true,
-          branchEndpointUrl: true,
-          branchEndpointFormat: true,
-          branchDefaultCountryCode: true,
-          locationEndpointUrl: true,
-          locationListEndpointUrl: true,
-          locationListRequestRoot: true,
-          locationListAccountId: true,
-          locationListTransport: true,
-          availabilityEndpointUrl: true,
-          updatedAt: true,
-        },
-      });
+			// Update company configuration
+			const updatedCompany = await prisma.company.update({
+				where: { id: req.user.companyId },
+				data: {
+					adapterType: body.adapterType,
+					grpcEndpoint: body.grpcEndpoint,
+					httpEndpoint: body.httpEndpoint,
+					branchEndpointUrl: body.branchEndpointUrl,
+					branchEndpointFormat: body.branchEndpointFormat,
+					branchDefaultCountryCode: body.branchDefaultCountryCode
+						? String(body.branchDefaultCountryCode)
+								.trim()
+								.toUpperCase()
+								.slice(0, 3)
+						: null,
+					locationEndpointUrl: body.locationEndpointUrl,
+					locationListEndpointUrl: body.locationListEndpointUrl ?? undefined,
+					locationListRequestRoot: body.locationListRequestRoot
+						? String(body.locationListRequestRoot).trim()
+						: null,
+					locationListAccountId: body.locationListAccountId
+						? String(body.locationListAccountId).trim()
+						: null,
+					locationListTransport: body.locationListTransport ?? undefined,
+					availabilityEndpointUrl: body.availabilityEndpointUrl,
+					updatedAt: new Date(),
+				},
+				select: {
+					id: true,
+					companyName: true,
+					type: true,
+					adapterType: true,
+					grpcEndpoint: true,
+					httpEndpoint: true,
+					branchEndpointUrl: true,
+					branchEndpointFormat: true,
+					branchDefaultCountryCode: true,
+					locationEndpointUrl: true,
+					locationListEndpointUrl: true,
+					locationListRequestRoot: true,
+					locationListAccountId: true,
+					locationListTransport: true,
+					availabilityEndpointUrl: true,
+					updatedAt: true,
+				},
+			});
 
-      res.json({
-        message: "Endpoint configuration updated successfully",
-        companyId: updatedCompany.id,
-        httpEndpoint:
-          updatedCompany.httpEndpoint ||
-          (updatedCompany.type === "AGENT"
-            ? "http://localhost:9091"
-            : "http://localhost:9090"),
-        grpcEndpoint: updatedCompany.grpcEndpoint,
-        branchEndpointUrl: updatedCompany.branchEndpointUrl,
-        branchEndpointFormat: updatedCompany.branchEndpointFormat,
-        branchDefaultCountryCode: updatedCompany.branchDefaultCountryCode,
-        locationEndpointUrl: updatedCompany.locationEndpointUrl,
-        locationListEndpointUrl: updatedCompany.locationListEndpointUrl ?? null,
-        locationListRequestRoot: updatedCompany.locationListRequestRoot ?? null,
-        locationListAccountId: updatedCompany.locationListAccountId ?? null,
-        locationListTransport: updatedCompany.locationListTransport ?? null,
-        availabilityEndpointUrl: updatedCompany.availabilityEndpointUrl,
-        adapterType: updatedCompany.adapterType,
-        updatedAt: updatedCompany.updatedAt,
-      });
-    } catch (e: any) {
-      if (e.name === "ZodError") {
-        return res.status(400).json({
-          error: "VALIDATION_ERROR",
-          message: "Invalid request data",
-          details: e.errors,
-        });
-      }
-      next(e);
-    }
-  }
+			res.json({
+				message: "Endpoint configuration updated successfully",
+				companyId: updatedCompany.id,
+				httpEndpoint:
+					updatedCompany.httpEndpoint ||
+					(updatedCompany.type === "AGENT"
+						? "http://localhost:9091"
+						: "http://localhost:9090"),
+				grpcEndpoint: updatedCompany.grpcEndpoint,
+				branchEndpointUrl: updatedCompany.branchEndpointUrl,
+				branchEndpointFormat: updatedCompany.branchEndpointFormat,
+				branchDefaultCountryCode: updatedCompany.branchDefaultCountryCode,
+				locationEndpointUrl: updatedCompany.locationEndpointUrl,
+				locationListEndpointUrl: updatedCompany.locationListEndpointUrl ?? null,
+				locationListRequestRoot: updatedCompany.locationListRequestRoot ?? null,
+				locationListAccountId: updatedCompany.locationListAccountId ?? null,
+				locationListTransport: updatedCompany.locationListTransport ?? null,
+				availabilityEndpointUrl: updatedCompany.availabilityEndpointUrl,
+				adapterType: updatedCompany.adapterType,
+				updatedAt: updatedCompany.updatedAt,
+			});
+		} catch (e: any) {
+			if (e.name === "ZodError") {
+				return res.status(400).json({
+					error: "VALIDATION_ERROR",
+					message: "Invalid request data",
+					details: e.errors,
+				});
+			}
+			next(e);
+		}
+	},
 );
 
 /**
@@ -505,152 +545,158 @@ endpointsRouter.put(
  *                   description: Overall endpoint health status
  */
 endpointsRouter.post(
-  "/endpoints/test",
-  requireAuth(),
-  async (req: any, res, next) => {
-    try {
-      const { testHttp = true, testGrpc = true } = req.body || {};
+	"/endpoints/test",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			const { testHttp = true, testGrpc = true } = req.body || {};
 
-      const company = await prisma.company.findUnique({
-        where: { id: req.user.companyId },
-        select: {
-          id: true,
-          type: true,
-          adapterType: true,
-          grpcEndpoint: true,
-        },
-      });
+			const company = await prisma.company.findUnique({
+				where: { id: req.user.companyId },
+				select: {
+					id: true,
+					type: true,
+					adapterType: true,
+					grpcEndpoint: true,
+				},
+			});
 
-      if (!company) {
-        return res
-          .status(404)
-          .json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
-      }
+			if (!company) {
+				return res
+					.status(404)
+					.json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
+			}
 
-      const results: any = {};
-      let overallStatus = "healthy";
+			const results: any = {};
+			let overallStatus = "healthy";
 
-      // Test HTTP endpoint
-      if (testHttp) {
-        const httpStart = Date.now();
-        try {
-          // Use ports that don't conflict with main API (8080) and gRPC servers (50051, 50052)
-          const httpEndpoint =
-            company.type === "AGENT"
-              ? "http://localhost:9091/health"
-              : "http://localhost:9090/health";
+			// Test HTTP endpoint
+			if (testHttp) {
+				const httpStart = Date.now();
+				try {
+					// Use ports that don't conflict with main API (8080) and gRPC servers (50051, 50052)
+					const httpEndpoint =
+						company.type === "AGENT"
+							? "http://localhost:9091/health"
+							: "http://localhost:9090/health";
 
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000);
-          
-          const response = await fetch(httpEndpoint, {
-            method: "GET",
-            signal: controller.signal,
-          });
-          
-          clearTimeout(timeoutId);
+					const controller = new AbortController();
+					const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-          const httpTime = Date.now() - httpStart;
+					const response = await fetch(httpEndpoint, {
+						method: "GET",
+						signal: controller.signal,
+					});
 
-          if (response.ok) {
-            results.http = {
-              endpoint: httpEndpoint,
-              status: "success",
-              responseTime: httpTime,
-              message: "HTTP endpoint is responding",
-            };
-          } else {
-            results.http = {
-              endpoint: httpEndpoint,
-              status: "failed",
-              responseTime: httpTime,
-              message: `HTTP endpoint returned status ${response.status}`,
-            };
-            overallStatus = "partial";
-          }
-        } catch (error: any) {
-          const httpTime = Date.now() - httpStart;
-          results.http = {
-            endpoint:
-              company.type === "AGENT"
-                ? "http://localhost:9091/health"
-                : "http://localhost:9090/health",
-            status: "failed",
-            responseTime: httpTime,
-            message: `HTTP endpoint test failed: ${error.message}`,
-          };
-          overallStatus = "partial";
-        }
-      } else {
-        results.http = {
-          endpoint: "N/A",
-          status: "skipped",
-          responseTime: 0,
-          message: "HTTP test skipped",
-        };
-      }
+					clearTimeout(timeoutId);
 
-      // Test gRPC endpoint
-      if (testGrpc && company.grpcEndpoint) {
-        try {
-          // Validate gRPC endpoint format first
-          const validation = GrpcTester.validateGrpcEndpoint(company.grpcEndpoint);
-          if (!validation.valid) {
-            results.grpc = {
-              endpoint: company.grpcEndpoint,
-              status: "failed",
-              responseTime: 0,
-              message: validation.error || "Invalid gRPC endpoint format",
-            };
-            overallStatus = overallStatus === "healthy" ? "partial" : "unhealthy";
-          } else {
-            // Perform actual gRPC connectivity test
-            // Handle port conflicts by using alternative ports if needed
-            const grpcResult = await GrpcTester.testGrpcEndpoint(company.grpcEndpoint);
-            results.grpc = grpcResult;
-            
-            if (grpcResult.status === "failed") {
-              overallStatus = overallStatus === "healthy" ? "partial" : "unhealthy";
-            }
-          }
-        } catch (error: any) {
-          results.grpc = {
-            endpoint: company.grpcEndpoint,
-            status: "failed",
-            responseTime: 0,
-            message: `gRPC endpoint test failed: ${error.message}`,
-            details: {
-              error: error.message,
-              note: "Check if gRPC server is running and port is available"
-            }
-          };
-          overallStatus = overallStatus === "healthy" ? "partial" : "unhealthy";
-        }
-      } else if (testGrpc) {
-        results.grpc = {
-          endpoint: "Not configured",
-          status: "skipped",
-          responseTime: 0,
-          message: "gRPC endpoint not configured",
-        };
-      } else {
-        results.grpc = {
-          endpoint: "N/A",
-          status: "skipped",
-          responseTime: 0,
-          message: "gRPC test skipped",
-        };
-      }
+					const httpTime = Date.now() - httpStart;
 
-      res.json({
-        companyId: company.id,
-        results,
-        overallStatus,
-      });
-    } catch (e) {
-      next(e);
-    }
-  }
+					if (response.ok) {
+						results.http = {
+							endpoint: httpEndpoint,
+							status: "success",
+							responseTime: httpTime,
+							message: "HTTP endpoint is responding",
+						};
+					} else {
+						results.http = {
+							endpoint: httpEndpoint,
+							status: "failed",
+							responseTime: httpTime,
+							message: `HTTP endpoint returned status ${response.status}`,
+						};
+						overallStatus = "partial";
+					}
+				} catch (error: any) {
+					const httpTime = Date.now() - httpStart;
+					results.http = {
+						endpoint:
+							company.type === "AGENT"
+								? "http://localhost:9091/health"
+								: "http://localhost:9090/health",
+						status: "failed",
+						responseTime: httpTime,
+						message: `HTTP endpoint test failed: ${error.message}`,
+					};
+					overallStatus = "partial";
+				}
+			} else {
+				results.http = {
+					endpoint: "N/A",
+					status: "skipped",
+					responseTime: 0,
+					message: "HTTP test skipped",
+				};
+			}
+
+			// Test gRPC endpoint
+			if (testGrpc && company.grpcEndpoint) {
+				try {
+					// Validate gRPC endpoint format first
+					const validation = GrpcTester.validateGrpcEndpoint(
+						company.grpcEndpoint,
+					);
+					if (!validation.valid) {
+						results.grpc = {
+							endpoint: company.grpcEndpoint,
+							status: "failed",
+							responseTime: 0,
+							message: validation.error || "Invalid gRPC endpoint format",
+						};
+						overallStatus =
+							overallStatus === "healthy" ? "partial" : "unhealthy";
+					} else {
+						// Perform actual gRPC connectivity test
+						// Handle port conflicts by using alternative ports if needed
+						const grpcResult = await GrpcTester.testGrpcEndpoint(
+							company.grpcEndpoint,
+						);
+						results.grpc = grpcResult;
+
+						if (grpcResult.status === "failed") {
+							overallStatus =
+								overallStatus === "healthy" ? "partial" : "unhealthy";
+						}
+					}
+				} catch (error: any) {
+					results.grpc = {
+						endpoint: company.grpcEndpoint,
+						status: "failed",
+						responseTime: 0,
+						message: `gRPC endpoint test failed: ${error.message}`,
+						details: {
+							error: error.message,
+							note: "Check if gRPC server is running and port is available",
+						},
+					};
+					overallStatus = overallStatus === "healthy" ? "partial" : "unhealthy";
+				}
+			} else if (testGrpc) {
+				results.grpc = {
+					endpoint: "Not configured",
+					status: "skipped",
+					responseTime: 0,
+					message: "gRPC endpoint not configured",
+				};
+			} else {
+				results.grpc = {
+					endpoint: "N/A",
+					status: "skipped",
+					responseTime: 0,
+					message: "gRPC test skipped",
+				};
+			}
+
+			res.json({
+				companyId: company.id,
+				results,
+				overallStatus,
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
 );
 
 /**
@@ -705,101 +751,101 @@ endpointsRouter.post(
  *                   description: Last health check time
  */
 endpointsRouter.get(
-  "/endpoints/status",
-  requireAuth(),
-  async (req: any, res, next) => {
-    try {
-      const company = await prisma.company.findUnique({
-        where: { id: req.user.companyId },
-        select: {
-          id: true,
-          type: true,
-          adapterType: true,
-          grpcEndpoint: true,
-          httpEndpoint: true,
-          updatedAt: true,
-        },
-      });
+	"/endpoints/status",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			const company = await prisma.company.findUnique({
+				where: { id: req.user.companyId },
+				select: {
+					id: true,
+					type: true,
+					adapterType: true,
+					grpcEndpoint: true,
+					httpEndpoint: true,
+					updatedAt: true,
+				},
+			});
 
-      if (!company) {
-        return res
-          .status(404)
-          .json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
-      }
+			if (!company) {
+				return res
+					.status(404)
+					.json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
+			}
 
-      // Use ports that don't conflict with main API (8080) and gRPC servers (50051, 50052)
-      const httpEndpoint =
-        company.httpEndpoint ||
-        (company.type === "AGENT"
-          ? "http://localhost:9091"
-          : "http://localhost:9090");
+			// Use ports that don't conflict with main API (8080) and gRPC servers (50051, 50052)
+			const httpEndpoint =
+				company.httpEndpoint ||
+				(company.type === "AGENT"
+					? "http://localhost:9091"
+					: "http://localhost:9090");
 
-      // Perform actual health checks
-      let httpStatus: "active" | "inactive" | "unknown" = "unknown";
-      let grpcStatus: "active" | "inactive" | "unknown" = "unknown";
+			// Perform actual health checks
+			let httpStatus: "active" | "inactive" | "unknown" = "unknown";
+			let grpcStatus: "active" | "inactive" | "unknown" = "unknown";
 
-      // Check HTTP endpoint health
-      if (httpEndpoint) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
-          
-          const healthUrl = httpEndpoint.endsWith('/health') 
-            ? httpEndpoint 
-            : `${httpEndpoint}/health`;
-          
-          const response = await fetch(healthUrl, {
-            method: 'GET',
-            signal: controller.signal,
-            headers: {
-              'Accept': 'application/json',
-            },
-          });
-          
-          clearTimeout(timeoutId);
-          
-          if (response.ok) {
-            httpStatus = "active";
-          } else {
-            httpStatus = "inactive";
-          }
-        } catch (error) {
-          // Health check failed - endpoint is inactive or unreachable
-          httpStatus = "inactive";
-        }
-      }
+			// Check HTTP endpoint health
+			if (httpEndpoint) {
+				try {
+					const controller = new AbortController();
+					const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
 
-      // Check gRPC endpoint health (simplified - just check if configured)
-      // Full gRPC health check would require gRPC client connection
-      if (company.grpcEndpoint) {
-        // For now, mark as active if configured (full health check would require gRPC call)
-        // TODO: Implement actual gRPC health check using gRPC health service
-        grpcStatus = "active";
-      } else {
-        grpcStatus = "inactive";
-      }
+					const healthUrl = httpEndpoint.endsWith("/health")
+						? httpEndpoint
+						: `${httpEndpoint}/health`;
 
-      res.json({
-        companyId: company.id,
-        endpoints: {
-          http: {
-            configured: !!httpEndpoint,
-            endpoint: httpEndpoint,
-            status: httpStatus,
-          },
-          grpc: {
-            configured: !!company.grpcEndpoint,
-            endpoint: company.grpcEndpoint || null,
-            status: grpcStatus,
-          },
-        },
-        adapterType: company.adapterType,
-        lastChecked: new Date().toISOString(),
-      });
-    } catch (e) {
-      next(e);
-    }
-  }
+					const response = await fetch(healthUrl, {
+						method: "GET",
+						signal: controller.signal,
+						headers: {
+							Accept: "application/json",
+						},
+					});
+
+					clearTimeout(timeoutId);
+
+					if (response.ok) {
+						httpStatus = "active";
+					} else {
+						httpStatus = "inactive";
+					}
+				} catch (error) {
+					// Health check failed - endpoint is inactive or unreachable
+					httpStatus = "inactive";
+				}
+			}
+
+			// Check gRPC endpoint health (simplified - just check if configured)
+			// Full gRPC health check would require gRPC client connection
+			if (company.grpcEndpoint) {
+				// For now, mark as active if configured (full health check would require gRPC call)
+				// TODO: Implement actual gRPC health check using gRPC health service
+				grpcStatus = "active";
+			} else {
+				grpcStatus = "inactive";
+			}
+
+			res.json({
+				companyId: company.id,
+				endpoints: {
+					http: {
+						configured: !!httpEndpoint,
+						endpoint: httpEndpoint,
+						status: httpStatus,
+					},
+					grpc: {
+						configured: !!company.grpcEndpoint,
+						endpoint: company.grpcEndpoint || null,
+						status: grpcStatus,
+					},
+				},
+				adapterType: company.adapterType,
+				lastChecked: new Date().toISOString(),
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
 );
 
 /**
@@ -864,107 +910,127 @@ endpointsRouter.get(
  *       200:
  *         description: List of notifications
  */
-endpointsRouter.get("/endpoints/notifications", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const companyId = req.user.companyId;
-    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 50)));
-    const unreadOnly = req.query.unreadOnly === 'true';
-    
-    const notifications: any[] = [];
-    
-    // 1. Get health issues (excluded sources)
-    const health = await prisma.sourceHealth.findUnique({
-      where: { sourceId: companyId },
-    });
-    
-    if (health && health.excludedUntil && new Date(health.excludedUntil).getTime() > Date.now()) {
-      notifications.push({
-        id: `health-excluded-${companyId}`,
-        type: 'health',
-        title: 'Source excluded due to health issues',
-        message: `Your source has been excluded until ${new Date(health.excludedUntil).toLocaleString()}. Please check your endpoint performance.`,
-        timestamp: health.excludedUntil.toISOString(),
-        read: false,
-        actionUrl: '/health',
-      });
-    }
-    
-    // 2. Get agreement status updates
-    const recentAgreements = await prisma.agreement.findMany({
-      where: {
-        sourceId: companyId,
-        status: { in: ['ACCEPTED', 'ACTIVE'] },
-      },
-      include: {
-        agent: {
-          select: {
-            companyName: true,
-          },
-        },
-      },
-      orderBy: { updatedAt: 'desc' },
-      take: 10,
-    });
-    
-    recentAgreements.forEach(agreement => {
-      if (agreement.status === 'ACCEPTED' || agreement.status === 'ACTIVE') {
-        notifications.push({
-          id: `agreement-${agreement.status.toLowerCase()}-${agreement.id}`,
-          type: 'agreement',
-          title: `Agreement ${agreement.status.toLowerCase()}`,
-          message: `${agreement.agent?.companyName || 'Agent'} has ${agreement.status === 'ACCEPTED' ? 'accepted' : 'activated'} your agreement: ${agreement.agreementRef}`,
-          timestamp: agreement.updatedAt.toISOString(),
-          read: false,
-          actionUrl: '/agreements',
-        });
-      }
-    });
-    
-    // 3. Get database notifications for this company
-    const dbNotifications = await prisma.notification.findMany({
-      where: {
-        companyId: companyId,
-        ...(unreadOnly && { readAt: null }),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-    });
-    
-    dbNotifications.forEach(notif => {
-      let frontendType: 'agreement' | 'health' | 'company' | 'system' = 'system';
-      if (notif.type.includes('AGREEMENT')) {
-        frontendType = 'agreement';
-      } else if (notif.type.includes('HEALTH') || notif.type.includes('EXCLUDED')) {
-        frontendType = 'health';
-      } else if (notif.type.includes('COMPANY')) {
-        frontendType = 'company';
-      }
-      
-      notifications.push({
-        id: notif.id,
-        type: frontendType,
-        title: notif.title,
-        message: notif.message,
-        timestamp: notif.createdAt.toISOString(),
-        read: !!notif.readAt,
-        actionUrl: frontendType === 'agreement' ? '/agreements' : 
-                   frontendType === 'health' ? '/health' : '/dashboard',
-      });
-    });
-    
-    // Sort by timestamp (newest first) and limit
-    const sortedNotifications = notifications
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, limit);
-    
-    res.json({
-      items: sortedNotifications,
-      total: sortedNotifications.length,
-    });
-  } catch (e) {
-    next(e);
-  }
-});
+endpointsRouter.get(
+	"/endpoints/notifications",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const companyId = req.user.companyId;
+			const limit = Math.max(1, Math.min(100, Number(req.query.limit || 50)));
+			const unreadOnly = req.query.unreadOnly === "true";
+
+			const notifications: any[] = [];
+
+			// 1. Get health issues (excluded sources)
+			const health = await prisma.sourceHealth.findUnique({
+				where: { sourceId: companyId },
+			});
+
+			if (
+				health &&
+				health.excludedUntil &&
+				new Date(health.excludedUntil).getTime() > Date.now()
+			) {
+				notifications.push({
+					id: `health-excluded-${companyId}`,
+					type: "health",
+					title: "Source excluded due to health issues",
+					message: `Your source has been excluded until ${new Date(health.excludedUntil).toLocaleString()}. Please check your endpoint performance.`,
+					timestamp: health.excludedUntil.toISOString(),
+					read: false,
+					actionUrl: "/health",
+				});
+			}
+
+			// 2. Get agreement status updates
+			const recentAgreements = await prisma.agreement.findMany({
+				where: {
+					sourceId: companyId,
+					status: { in: ["ACCEPTED", "ACTIVE"] },
+				},
+				include: {
+					agent: {
+						select: {
+							companyName: true,
+						},
+					},
+				},
+				orderBy: { updatedAt: "desc" },
+				take: 10,
+			});
+
+			recentAgreements.forEach((agreement) => {
+				if (agreement.status === "ACCEPTED" || agreement.status === "ACTIVE") {
+					notifications.push({
+						id: `agreement-${agreement.status.toLowerCase()}-${agreement.id}`,
+						type: "agreement",
+						title: `Agreement ${agreement.status.toLowerCase()}`,
+						message: `${agreement.agent?.companyName || "Agent"} has ${agreement.status === "ACCEPTED" ? "accepted" : "activated"} your agreement: ${agreement.agreementRef}`,
+						timestamp: agreement.updatedAt.toISOString(),
+						read: false,
+						actionUrl: "/agreements",
+					});
+				}
+			});
+
+			// 3. Get database notifications for this company
+			const dbNotifications = await prisma.notification.findMany({
+				where: {
+					companyId: companyId,
+					...(unreadOnly && { readAt: null }),
+				},
+				orderBy: { createdAt: "desc" },
+				take: limit,
+			});
+
+			dbNotifications.forEach((notif) => {
+				let frontendType: "agreement" | "health" | "company" | "system" =
+					"system";
+				if (notif.type.includes("AGREEMENT")) {
+					frontendType = "agreement";
+				} else if (
+					notif.type.includes("HEALTH") ||
+					notif.type.includes("EXCLUDED")
+				) {
+					frontendType = "health";
+				} else if (notif.type.includes("COMPANY")) {
+					frontendType = "company";
+				}
+
+				notifications.push({
+					id: notif.id,
+					type: frontendType,
+					title: notif.title,
+					message: notif.message,
+					timestamp: notif.createdAt.toISOString(),
+					read: !!notif.readAt,
+					actionUrl:
+						frontendType === "agreement"
+							? "/agreements"
+							: frontendType === "health"
+								? "/health"
+								: "/dashboard",
+				});
+			});
+
+			// Sort by timestamp (newest first) and limit
+			const sortedNotifications = notifications
+				.sort(
+					(a, b) =>
+						new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+				)
+				.slice(0, limit);
+
+			res.json({
+				items: sortedNotifications,
+				total: sortedNotifications.length,
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -975,78 +1041,83 @@ endpointsRouter.get("/endpoints/notifications", requireAuth(), requireCompanyTyp
  *     security:
  *       - bearerAuth: []
  */
-endpointsRouter.post("/endpoints/notifications/:id/read", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const { id } = req.params;
-    const companyId = req.user.companyId;
-    
-    // If it's a database notification, update it
-    if (id.startsWith('cl')) {
-      await prisma.notification.updateMany({
-        where: { 
-          id,
-          companyId: companyId, // Ensure it belongs to this company
-        },
-        data: { readAt: new Date() },
-      });
-    }
-    
-    res.json({ success: true });
-  } catch (e) {
-    next(e);
-  }
-});
+endpointsRouter.post(
+	"/endpoints/notifications/:id/read",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const { id } = req.params;
+			const companyId = req.user.companyId;
+
+			// If it's a database notification, update it
+			if (id.startsWith("cl")) {
+				await prisma.notification.updateMany({
+					where: {
+						id,
+						companyId: companyId, // Ensure it belongs to this company
+					},
+					data: { readAt: new Date() },
+				});
+			}
+
+			res.json({ success: true });
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 endpointsRouter.post(
-  "/endpoints/reset",
-  requireAuth(),
-  async (req: any, res, next) => {
-    try {
-      const company = await prisma.company.findUnique({
-        where: { id: req.user.companyId },
-        select: { id: true, type: true },
-      });
+	"/endpoints/reset",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			const company = await prisma.company.findUnique({
+				where: { id: req.user.companyId },
+				select: { id: true, type: true },
+			});
 
-      if (!company) {
-        return res
-          .status(404)
-          .json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
-      }
+			if (!company) {
+				return res
+					.status(404)
+					.json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
+			}
 
-      // Reset to default values
-      const updatedCompany = await prisma.company.update({
-        where: { id: req.user.companyId },
-        data: {
-          adapterType: "mock",
-          grpcEndpoint: null,
-          updatedAt: new Date(),
-        },
-        select: {
-          id: true,
-          adapterType: true,
-          grpcEndpoint: true,
-        },
-      });
+			// Reset to default values
+			const updatedCompany = await prisma.company.update({
+				where: { id: req.user.companyId },
+				data: {
+					adapterType: "mock",
+					grpcEndpoint: null,
+					updatedAt: new Date(),
+				},
+				select: {
+					id: true,
+					adapterType: true,
+					grpcEndpoint: true,
+				},
+			});
 
-      // Use ports that don't conflict with main API (8080) and gRPC servers (50051, 50052)
-      const defaultHttpEndpoint =
-        company.type === "AGENT"
-          ? "http://localhost:9091"
-          : "http://localhost:9090";
+			// Use ports that don't conflict with main API (8080) and gRPC servers (50051, 50052)
+			const defaultHttpEndpoint =
+				company.type === "AGENT"
+					? "http://localhost:9091"
+					: "http://localhost:9090";
 
-      res.json({
-        message: "Endpoint configuration reset to defaults",
-        companyId: updatedCompany.id,
-        defaultConfig: {
-          httpEndpoint: defaultHttpEndpoint,
-          grpcEndpoint: null,
-          adapterType: "mock",
-        },
-      });
-    } catch (e) {
-      next(e);
-    }
-  }
+			res.json({
+				message: "Endpoint configuration reset to defaults",
+				companyId: updatedCompany.id,
+				defaultConfig: {
+					httpEndpoint: defaultHttpEndpoint,
+					grpcEndpoint: null,
+					adapterType: "mock",
+				},
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
 );
 
 /**
@@ -1059,41 +1130,70 @@ endpointsRouter.post(
  *       - bearerAuth: []
  */
 endpointsRouter.get("/settings", requireAuth(), async (req: any, res, next) => {
-  try {
-    const company = await prisma.company.findUnique({
-      where: { id: req.user.companyId },
-      select: {
-        id: true,
-        companyName: true,
-        whitelistedDomains: true,
-        companyCode: true,
-        companyWebsiteUrl: true,
-      },
-    });
+	try {
+		const company = await prisma.company.findUnique({
+			where: { id: req.user.companyId },
+			select: {
+				id: true,
+				companyName: true,
+				whitelistedDomains: true,
+				companyCode: true,
+				companyWebsiteUrl: true,
+				registrationBranchName: true,
+				companyAddress: true,
+				registrationPhotoUrl: true,
+				type: true,
+				status: true,
+				approvalStatus: true,
+			},
+		});
 
-    if (!company) {
-      return res.status(404).json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
-    }
+		if (!company) {
+			return res
+				.status(404)
+				.json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
+		}
 
-    res.json({
-      companyId: company.id,
-      companyName: company.companyName,
-      companyCode: company.companyCode,
-      companyWebsiteUrl: company.companyWebsiteUrl || "",
-      whitelistedDomains: company.whitelistedDomains
-        ? normalizeWhitelist(company.whitelistedDomains)
-        : [],
-    });
-  } catch (e) {
-    next(e);
-  }
+		res.json({
+			companyId: company.id,
+			companyName: company.companyName,
+			companyCode: company.companyCode,
+			companyWebsiteUrl: company.companyWebsiteUrl || "",
+			registrationBranchName: company.registrationBranchName || null,
+			companyAddress: company.companyAddress || null,
+			registrationPhotoUrl: company.registrationPhotoUrl || null,
+			companyType: company.type,
+			companyStatus: company.status,
+			approvalStatus: company.approvalStatus,
+			whitelistedDomains: company.whitelistedDomains
+				? normalizeWhitelist(company.whitelistedDomains)
+				: [],
+		});
+	} catch (e) {
+		next(e);
+	}
 });
 
 const patchSettingsSchema = z.object({
-  companyName: z.string().trim().min(1, "Company name is required").max(160).optional(),
-  companyWebsiteUrl: z
-    .union([z.string().url("Enter a valid URL (https://…)"), z.literal(""), z.null()])
-    .optional(),
+	companyName: z
+		.string()
+		.trim()
+		.min(1, "Company name is required")
+		.max(160)
+		.optional(),
+	companyWebsiteUrl: z
+		.union([
+			z.string().url("Enter a valid URL (https://…)"),
+			z.literal(""),
+			z.null(),
+		])
+		.optional(),
+	registrationBranchName: z
+		.union([z.string().trim().max(300), z.null()])
+		.optional(),
+	companyAddress: z.union([z.string().trim().max(2000), z.null()]).optional(),
+	registrationPhotoDataUrl: z.string().max(4_000_000).optional(),
+	removeRegistrationPhoto: z.boolean().optional(),
 });
 
 /**
@@ -1105,59 +1205,130 @@ const patchSettingsSchema = z.object({
  *     security:
  *       - bearerAuth: []
  */
-endpointsRouter.patch("/settings", requireAuth(), async (req: any, res, next) => {
-  try {
-    const body = patchSettingsSchema.parse(req.body);
-    if (body.companyName === undefined && body.companyWebsiteUrl === undefined) {
-      return res.status(400).json({
-        error: "NO_FIELDS",
-        message: "Provide companyName and/or companyWebsiteUrl to update",
-      });
-    }
+endpointsRouter.patch(
+	"/settings",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			const body = patchSettingsSchema.parse(req.body);
+			if (
+				body.companyName === undefined &&
+				body.companyWebsiteUrl === undefined &&
+				body.registrationBranchName === undefined &&
+				body.companyAddress === undefined &&
+				body.registrationPhotoDataUrl === undefined &&
+				body.removeRegistrationPhoto === undefined
+			) {
+				return res.status(400).json({
+					error: "NO_FIELDS",
+					message:
+						"Provide companyName, companyWebsiteUrl, registrationBranchName, companyAddress, or logo fields to update",
+				});
+			}
 
-    const data: { companyName?: string; companyWebsiteUrl?: string | null } = {};
-    if (body.companyName !== undefined) {
-      data.companyName = body.companyName;
-    }
-    if (body.companyWebsiteUrl !== undefined) {
-      data.companyWebsiteUrl =
-        body.companyWebsiteUrl === "" || body.companyWebsiteUrl === null
-          ? null
-          : body.companyWebsiteUrl;
-    }
+			const data: {
+				companyName?: string;
+				companyWebsiteUrl?: string | null;
+				registrationBranchName?: string | null;
+				companyAddress?: string | null;
+				registrationPhotoUrl?: string | null;
+			} = {};
+			if (body.companyName !== undefined) {
+				data.companyName = body.companyName;
+			}
+			if (body.companyWebsiteUrl !== undefined) {
+				data.companyWebsiteUrl =
+					body.companyWebsiteUrl === "" || body.companyWebsiteUrl === null
+						? null
+						: body.companyWebsiteUrl;
+			}
+			if (body.registrationBranchName !== undefined) {
+				data.registrationBranchName =
+					body.registrationBranchName === "" ||
+					body.registrationBranchName === null
+						? null
+						: body.registrationBranchName;
+			}
+			if (body.companyAddress !== undefined) {
+				data.companyAddress =
+					body.companyAddress === "" || body.companyAddress === null
+						? null
+						: body.companyAddress;
+			}
 
-    const company = await prisma.company.update({
-      where: { id: req.user.companyId },
-      data,
-      select: {
-        id: true,
-        companyName: true,
-        companyCode: true,
-        whitelistedDomains: true,
-        companyWebsiteUrl: true,
-      },
-    });
+			const photoRaw = body.registrationPhotoDataUrl?.trim();
+			if (photoRaw) {
+				const parsed = parseSettingsLogoDataUrl(photoRaw);
+				if ("error" in parsed) {
+					return res
+						.status(400)
+						.json({ error: "INVALID_PHOTO", message: parsed.error });
+				}
+				try {
+					const dir = path.join(
+						process.cwd(),
+						"uploads",
+						"registration-photos",
+					);
+					await fs.mkdir(dir, { recursive: true });
+					const filename = `${req.user.companyId}-${Date.now()}.${parsed.ext}`;
+					await fs.writeFile(path.join(dir, filename), parsed.buf);
+					data.registrationPhotoUrl = `/api/uploads/registration-photos/${filename}`;
+				} catch (photoErr: any) {
+					return res.status(500).json({
+						error: "PHOTO_UPLOAD_FAILED",
+						message: photoErr?.message || "Could not save company logo",
+					});
+				}
+			} else if (body.removeRegistrationPhoto === true) {
+				data.registrationPhotoUrl = null;
+			}
 
-    res.json({
-      companyId: company.id,
-      companyName: company.companyName,
-      companyCode: company.companyCode,
-      companyWebsiteUrl: company.companyWebsiteUrl || "",
-      whitelistedDomains: company.whitelistedDomains
-        ? normalizeWhitelist(company.whitelistedDomains)
-        : [],
-    });
-  } catch (e: any) {
-    if (e.name === "ZodError") {
-      return res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: "Invalid request data",
-        details: e.errors,
-      });
-    }
-    next(e);
-  }
-});
+			const company = await prisma.company.update({
+				where: { id: req.user.companyId },
+				data,
+				select: {
+					id: true,
+					companyName: true,
+					companyCode: true,
+					whitelistedDomains: true,
+					companyWebsiteUrl: true,
+					registrationBranchName: true,
+					companyAddress: true,
+					registrationPhotoUrl: true,
+					type: true,
+					status: true,
+					approvalStatus: true,
+				},
+			});
+
+			res.json({
+				companyId: company.id,
+				companyName: company.companyName,
+				companyCode: company.companyCode,
+				companyWebsiteUrl: company.companyWebsiteUrl || "",
+				registrationBranchName: company.registrationBranchName || null,
+				companyAddress: company.companyAddress || null,
+				registrationPhotoUrl: company.registrationPhotoUrl || null,
+				companyType: company.type,
+				companyStatus: company.status,
+				approvalStatus: company.approvalStatus,
+				whitelistedDomains: company.whitelistedDomains
+					? normalizeWhitelist(company.whitelistedDomains)
+					: [],
+			});
+		} catch (e: any) {
+			if (e.name === "ZodError") {
+				return res.status(400).json({
+					error: "VALIDATION_ERROR",
+					message: "Invalid request data",
+					details: e.errors,
+				});
+			}
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -1181,47 +1352,60 @@ endpointsRouter.patch("/settings", requireAuth(), async (req: any, res, next) =>
  *                   type: string
  *                 description: Array of domains/IPs to whitelist (comma-separated string also accepted)
  */
-endpointsRouter.post("/settings/whitelist", requireAuth(), async (req: any, res, next) => {
-  try {
-    const schema = z.object({
-      domains: z.union([
-        z.array(z.string()),
-        z.string().transform((s) => s.split(',').map((d) => d.trim()).filter(Boolean)),
-      ]),
-    });
+endpointsRouter.post(
+	"/settings/whitelist",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			const schema = z.object({
+				domains: z.union([
+					z.array(z.string()),
+					z.string().transform((s) =>
+						s
+							.split(",")
+							.map((d) => d.trim())
+							.filter(Boolean),
+					),
+				]),
+			});
 
-    const { domains } = schema.parse(req.body);
-    const whitelistString = Array.isArray(domains) ? domains.join(',') : domains;
+			const { domains } = schema.parse(req.body);
+			const whitelistString = Array.isArray(domains)
+				? domains.join(",")
+				: domains;
 
-    // Normalize and validate
-    const normalized = normalizeWhitelist(whitelistString);
-    const finalWhitelist = normalized.join(',');
+			// Normalize and validate
+			const normalized = normalizeWhitelist(whitelistString);
+			const finalWhitelist = normalized.join(",");
 
-    const updatedCompany = await prisma.company.update({
-      where: { id: req.user.companyId },
-      data: { whitelistedDomains: finalWhitelist || null },
-      select: {
-        id: true,
-        companyName: true,
-        whitelistedDomains: true,
-      },
-    });
+			const updatedCompany = await prisma.company.update({
+				where: { id: req.user.companyId },
+				data: { whitelistedDomains: finalWhitelist || null },
+				select: {
+					id: true,
+					companyName: true,
+					whitelistedDomains: true,
+				},
+			});
 
-    res.json({
-      message: "Whitelist updated successfully",
-      whitelistedDomains: normalizeWhitelist(updatedCompany.whitelistedDomains),
-    });
-  } catch (e: any) {
-    if (e.name === "ZodError") {
-      return res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: "Invalid request data",
-        details: e.errors,
-      });
-    }
-    next(e);
-  }
-});
+			res.json({
+				message: "Whitelist updated successfully",
+				whitelistedDomains: normalizeWhitelist(
+					updatedCompany.whitelistedDomains,
+				),
+			});
+		} catch (e: any) {
+			if (e.name === "ZodError") {
+				return res.status(400).json({
+					error: "VALIDATION_ERROR",
+					message: "Invalid request data",
+					details: e.errors,
+				});
+			}
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -1254,69 +1438,72 @@ endpointsRouter.post("/settings/whitelist", requireAuth(), async (req: any, res,
  *                   description: Whether all setup steps are complete
  */
 endpointsRouter.get(
-  "/endpoints/setup-status",
-  requireAuth(),
-  async (req: any, res, next) => {
-    try {
-      const company = await prisma.company.findUnique({
-        where: { id: req.user.companyId },
-        select: {
-          id: true,
-          type: true,
-          httpEndpoint: true,
-          grpcEndpoint: true,
-        },
-      });
+	"/endpoints/setup-status",
+	requireAuth(),
+	async (req: any, res, next) => {
+		try {
+			const company = await prisma.company.findUnique({
+				where: { id: req.user.companyId },
+				select: {
+					id: true,
+					type: true,
+					httpEndpoint: true,
+					grpcEndpoint: true,
+				},
+			});
 
-      if (!company) {
-        return res
-          .status(404)
-          .json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
-      }
+			if (!company) {
+				return res
+					.status(404)
+					.json({ error: "COMPANY_NOT_FOUND", message: "Company not found" });
+			}
 
-      // Check endpoint configuration
-      const endpointsConfigured = !!(company.httpEndpoint && company.grpcEndpoint);
+			// Check endpoint configuration
+			const endpointsConfigured = !!(
+				company.httpEndpoint && company.grpcEndpoint
+			);
 
-      // Check booking test completion (check verification status)
-      let bookingTestCompleted = false;
-      try {
-        const verification = await prisma.verificationReport.findFirst({
-          where: {
-            companyId: company.id,
-            kind: "AGENT",
-            passed: true,
-          },
-          orderBy: { createdAt: "desc" },
-        });
-        bookingTestCompleted = !!verification;
-      } catch (e) {
-        console.error("Failed to check verification status:", e);
-      }
+			// Check booking test completion (check verification status)
+			let bookingTestCompleted = false;
+			try {
+				const verification = await prisma.verificationReport.findFirst({
+					where: {
+						companyId: company.id,
+						kind: "AGENT",
+						passed: true,
+					},
+					orderBy: { createdAt: "desc" },
+				});
+				bookingTestCompleted = !!verification;
+			} catch (e) {
+				console.error("Failed to check verification status:", e);
+			}
 
-      // Check agreement acceptance
-      let agreementAccepted = false;
-      try {
-        const acceptedAgreement = await prisma.agreement.findFirst({
-          where: {
-            agentId: company.id,
-            status: "ACCEPTED",
-          },
-        });
-        agreementAccepted = !!acceptedAgreement;
-      } catch (e) {
-        console.error("Failed to check agreement status:", e);
-      }
+			// Check agreement acceptance
+			let agreementAccepted = false;
+			try {
+				const acceptedAgreement = await prisma.agreement.findFirst({
+					where: {
+						agentId: company.id,
+						status: "ACCEPTED",
+					},
+				});
+				agreementAccepted = !!acceptedAgreement;
+			} catch (e) {
+				console.error("Failed to check agreement status:", e);
+			}
 
-      const allComplete = endpointsConfigured && bookingTestCompleted && agreementAccepted;
+			const allComplete =
+				endpointsConfigured && bookingTestCompleted && agreementAccepted;
 
-      res.json({
-        endpointsConfigured,
-        bookingTestCompleted,
-        agreementAccepted,
-        allComplete,
-      });
-    } catch (e) {
-      next(e);
-    }
-  }
+			res.json({
+				endpointsConfigured,
+				bookingTestCompleted,
+				agreementAccepted,
+				allComplete,
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
 );

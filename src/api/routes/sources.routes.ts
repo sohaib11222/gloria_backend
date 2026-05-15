@@ -8,52 +8,84 @@ import multer from "multer";
 import { requireAuth } from "../../infra/auth.js";
 import { requireCompanyType } from "../../infra/policies.js";
 import { prisma } from "../../data/prisma.js";
-import { parseXMLToGloria, extractBranchesFromGloria, validateXMLStructure } from "../../services/xmlParser.js";
-import { isOtaVehAvailResponse, parseOtaVehAvailResponse } from "../../adapters/grpc.adapter.js";
-import { convertPhpVarDumpToObject, convertPhpVarDumpToVehAvailRS } from "../../services/phpVarDumpVehAvail.js";
+import {
+	parseXMLToGloria,
+	extractBranchesFromGloria,
+	validateXMLStructure,
+} from "../../services/xmlParser.js";
+import {
+	isOtaVehAvailResponse,
+	parseOtaVehAvailResponse,
+} from "../../adapters/grpc.adapter.js";
+import {
+	convertPhpVarDumpToObject,
+	convertPhpVarDumpToVehAvailRS,
+} from "../../services/phpVarDumpVehAvail.js";
 import { buildGloriaAvailabilityRq } from "../../services/otaXmlBuilder.js";
 import { makeGrpcSourceAdapter } from "../../adapters/grpcSourceAdapter.js";
 import { parseGloriaAvailabilityOffers } from "../../services/gloriaAvailability.js";
 import { ensureUnlocodeRowForBranch } from "../../services/ensureUnlocodeForBranch.js";
 
-const SOURCE_AVAILABILITY_UPLOAD_ROOT = path.join(process.cwd(), "uploads", "source-availability");
+const SOURCE_AVAILABILITY_UPLOAD_ROOT = path.join(
+	process.cwd(),
+	"uploads",
+	"source-availability",
+);
 
 const manualAvailabilityImageUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req: any, _file, cb) => {
-      const sourceId = String(req.user?.companyId ?? "unknown");
-      const dest = path.join(SOURCE_AVAILABILITY_UPLOAD_ROOT, sourceId);
-      fs.mkdirSync(dest, { recursive: true });
-      cb(null, dest);
-    },
-    filename: (_req, file, cb) => {
-      const extRaw = path.extname(file.originalname || "").toLowerCase();
-      const ext = [".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(extRaw) ? extRaw : ".jpg";
-      cb(null, `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ext}`);
-    },
-  }),
-  limits: { fileSize: 3 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const ok = ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(file.mimetype);
-    if (ok) cb(null, true);
-    else cb(new Error("Only JPEG, PNG, GIF, or WEBP images are allowed."));
-  },
+	storage: multer.diskStorage({
+		destination: (req: any, _file, cb) => {
+			const sourceId = String(req.user?.companyId ?? "unknown");
+			const dest = path.join(SOURCE_AVAILABILITY_UPLOAD_ROOT, sourceId);
+			fs.mkdirSync(dest, { recursive: true });
+			cb(null, dest);
+		},
+		filename: (_req, file, cb) => {
+			const extRaw = path.extname(file.originalname || "").toLowerCase();
+			const ext = [".jpg", ".jpeg", ".png", ".gif", ".webp"].includes(extRaw)
+				? extRaw
+				: ".jpg";
+			cb(null, `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ext}`);
+		},
+	}),
+	limits: { fileSize: 3 * 1024 * 1024 },
+	fileFilter: (_req, file, cb) => {
+		const ok = ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(
+			file.mimetype,
+		);
+		if (ok) cb(null, true);
+		else cb(new Error("Only JPEG, PNG, GIF, or WEBP images are allowed."));
+	},
 });
 
 /** Require active subscription for source; return null if ok, or { status, body } to send as 402 */
-async function requireActiveSubscription(sourceId: string): Promise<{ status: number; body: object } | null> {
-  const sub = await prisma.sourceSubscription.findUnique({
-    where: { sourceId },
-    include: { plan: true },
-  });
-  if (!sub || sub.status !== "active") {
-    return { status: 402, body: { error: "PLAN_REQUIRED", message: "Active plan required. Please subscribe to a plan." } };
-  }
-  const now = new Date();
-  if (!sub.currentPeriodEnd || sub.currentPeriodEnd < now) {
-    return { status: 402, body: { error: "PLAN_EXPIRED", message: "Your plan has expired. Please renew to continue." } };
-  }
-  return null;
+async function requireActiveSubscription(
+	sourceId: string,
+): Promise<{ status: number; body: object } | null> {
+	const sub = await prisma.sourceSubscription.findUnique({
+		where: { sourceId },
+		include: { plan: true },
+	});
+	if (!sub || sub.status !== "active") {
+		return {
+			status: 402,
+			body: {
+				error: "PLAN_REQUIRED",
+				message: "Active plan required. Please subscribe to a plan.",
+			},
+		};
+	}
+	const now = new Date();
+	if (!sub.currentPeriodEnd || sub.currentPeriodEnd < now) {
+		return {
+			status: 402,
+			body: {
+				error: "PLAN_EXPIRED",
+				message: "Your plan has expired. Please renew to continue.",
+			},
+		};
+	}
+	return null;
 }
 
 /**
@@ -61,111 +93,435 @@ async function requireActiveSubscription(sourceId: string): Promise<{ status: nu
  * Tries exact match first, then case-insensitive match, then prefix/contains.
  * Returns the unlocode string if found, otherwise null.
  */
-async function autoAssignLocode(countryCode: string | null, city: string | null): Promise<string | null> {
-  if (!countryCode || !city) return null;
-  const cc = countryCode.toUpperCase().trim();
-  const cityName = city.trim();
-  if (!cc || !cityName) return null;
+async function autoAssignLocode(
+	countryCode: string | null,
+	city: string | null,
+): Promise<string | null> {
+	if (!countryCode || !city) return null;
+	const cc = countryCode.toUpperCase().trim();
+	const cityName = city.trim();
+	if (!cc || !cityName) return null;
 
-  // MySQL string comparisons are case-insensitive by default (utf8_general_ci collation)
+	// MySQL string comparisons are case-insensitive by default (utf8_general_ci collation)
 
-  // 1. Exact match on country + place
-  const exact = await prisma.uNLocode.findFirst({
-    where: { country: cc, place: cityName },
-  });
-  if (exact) return exact.unlocode;
+	// 1. Exact match on country + place
+	const exact = await prisma.uNLocode.findFirst({
+		where: { country: cc, place: cityName },
+	});
+	if (exact) return exact.unlocode;
 
-  // 2. Place starts with city name (handles "Tivat" matching "Tivat Airport" etc.)
-  const startsWith = await prisma.uNLocode.findFirst({
-    where: { country: cc, place: { startsWith: cityName } },
-  });
-  if (startsWith) return startsWith.unlocode;
+	// 2. Place starts with city name (handles "Tivat" matching "Tivat Airport" etc.)
+	const startsWith = await prisma.uNLocode.findFirst({
+		where: { country: cc, place: { startsWith: cityName } },
+	});
+	if (startsWith) return startsWith.unlocode;
 
-  // 3. Place contains the city name
-  const contains = await prisma.uNLocode.findFirst({
-    where: { country: cc, place: { contains: cityName } },
-  });
-  if (contains) return contains.unlocode;
+	// 3. Place contains the city name
+	const contains = await prisma.uNLocode.findFirst({
+		where: { country: cc, place: { contains: cityName } },
+	});
+	if (contains) return contains.unlocode;
 
-  // 4. Try first word of city if multi-word (e.g. "Orlando Florida" -> try "Orlando")
-  const firstWord = cityName.split(/[\s,]+/)[0];
-  if (firstWord && firstWord.length >= 3 && firstWord !== cityName) {
-    const partial = await prisma.uNLocode.findFirst({
-      where: { country: cc, place: { contains: firstWord } },
-    });
-    if (partial) return partial.unlocode;
-  }
+	// 4. Try first word of city if multi-word (e.g. "Orlando Florida" -> try "Orlando")
+	const firstWord = cityName.split(/[\s,]+/)[0];
+	if (firstWord && firstWord.length >= 3 && firstWord !== cityName) {
+		const partial = await prisma.uNLocode.findFirst({
+			where: { country: cc, place: { contains: firstWord } },
+		});
+		if (partial) return partial.unlocode;
+	}
 
-  return null;
+	return null;
 }
 
 /** True when supplier payload includes an explicit UN/LOCODE (not empty). */
-function explicitNatoFromBranch(branch: Record<string, unknown>): string | null {
-  const v = (branch as any).NatoLocode ?? (branch as any).natoLocode;
-  if (v == null || String(v).trim() === "") return null;
-  return String(v).trim().toUpperCase();
+function explicitNatoFromBranch(
+	branch: Record<string, unknown>,
+): string | null {
+	const v =
+		(branch as any).NatoLocode ??
+		(branch as any).natoLocode ??
+		(branch as any).UNLocode ??
+		(branch as any).unlocode ??
+		(branch as any).LocationCode ??
+		(branch as any).locationCode ??
+		(branch as any).attr?.LocationCode ??
+		(branch as any).attr?.NatoLocode ??
+		(branch as any).attr?.UNLocode;
+	if (v == null || String(v).trim() === "") return null;
+	return String(v).trim().toUpperCase();
+}
+
+function pickFirstNonEmpty(...values: unknown[]): unknown {
+	for (const value of values) {
+		if (value === undefined || value === null) continue;
+		if (typeof value === "string" && value.trim() === "") continue;
+		return value;
+	}
+	return null;
+}
+
+function nestedValue(value: unknown): unknown {
+	if (value && typeof value === "object" && "value" in (value as any)) {
+		return (value as any).value;
+	}
+	return value;
+}
+
+function stringOrNull(value: unknown): string | null {
+	const normalized = nestedValue(value);
+	if (normalized === undefined || normalized === null) return null;
+	const text = String(normalized).trim();
+	return text ? text : null;
+}
+
+function numberOrNull(value: unknown): number | null {
+	const normalized = nestedValue(value);
+	if (normalized === undefined || normalized === null || normalized === "")
+		return null;
+	const parsed =
+		typeof normalized === "number"
+			? normalized
+			: Number.parseFloat(String(normalized));
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+function booleanStringOrNull(value: unknown): string | null {
+	const normalized = nestedValue(value);
+	if (normalized === undefined || normalized === null || normalized === "")
+		return null;
+	if (
+		normalized === true ||
+		String(normalized).toLowerCase() === "true" ||
+		normalized === 1 ||
+		String(normalized) === "1"
+	)
+		return "true";
+	if (
+		normalized === false ||
+		String(normalized).toLowerCase() === "false" ||
+		normalized === 0 ||
+		String(normalized) === "0"
+	)
+		return "false";
+	return String(normalized).trim() || null;
+}
+
+function extractBranchCode(branch: any): string {
+	return String(
+		pickFirstNonEmpty(
+			branch.Branchcode,
+			branch.BranchCode,
+			branch.branchCode,
+			branch.Code,
+			branch.code,
+			branch.attr?.Code,
+			branch.attr?.BranchType,
+			branch.LocationDetail?.attr?.Code,
+			branch.LocationDetail?.attr?.BranchType,
+			branch.rawJson?.Branchcode,
+			branch.rawJson?.BranchCode,
+			branch.rawJson?.branchCode,
+			branch.rawJson?.Code,
+			branch.rawJson?.attr?.Code,
+		) || "",
+	).trim();
+}
+
+function normalizeBranchCodeFallback(branch: any): string {
+	const existing = extractBranchCode(branch);
+	if (existing) return existing;
+	const nameForCode =
+		stringOrNull(
+			pickFirstNonEmpty(
+				branch.Name,
+				branch.name,
+				branch.attr?.Name,
+				branch.LocationDetail?.attr?.Name,
+			),
+		) || "BRANCH";
+	return `${nameForCode}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+		.toUpperCase()
+		.replace(/[^A-Z0-9_]/g, "_")
+		.slice(0, 50);
+}
+
+function normalizeBranchForDb(
+	branch: any,
+	fallbackCountryCode?: string | null,
+	existingNatoLocode?: string | null,
+) {
+	const branchCode = normalizeBranchCodeFallback(branch);
+	const name = stringOrNull(
+		pickFirstNonEmpty(
+			branch.Name,
+			branch.name,
+			branch.attr?.Name,
+			branch.LocationDetail?.attr?.Name,
+			branch.rawJson?.Name,
+			branch.rawJson?.name,
+		),
+	);
+	const atAirport = booleanStringOrNull(
+		pickFirstNonEmpty(
+			branch.AtAirport,
+			branch.atAirport,
+			branch.attr?.AtAirport,
+			branch.LocationDetail?.attr?.AtAirport,
+			branch.rawJson?.AtAirport,
+		),
+	);
+	const locationType = stringOrNull(
+		pickFirstNonEmpty(
+			branch.LocationType,
+			branch.locationType,
+			branch.attr?.LocationType,
+			branch.LocationDetail?.attr?.LocationType,
+			branch.rawJson?.LocationType,
+		),
+	);
+	const collectionType =
+		stringOrNull(
+			pickFirstNonEmpty(
+				branch.CollectionType,
+				branch.collectionType,
+				branch.attr?.CollectionType,
+				branch.LocationDetail?.attr?.CollectionType,
+				branch.rawJson?.CollectionType,
+			),
+		) ||
+		(atAirport === "true" ? "AIRPORT" : atAirport === "false" ? "CITY" : null);
+	const rawCountry = pickFirstNonEmpty(
+		branch.Address?.CountryName,
+		branch.country,
+		branch.Country,
+		branch.rawJson?.country,
+	);
+	const countryCode = stringOrNull(
+		pickFirstNonEmpty(
+			branch.Address?.CountryName?.attr?.Code,
+			branch.Address?.CountryName?.Code,
+			branch.countryCode,
+			branch.CountryCode,
+			branch.rawJson?.countryCode,
+			fallbackCountryCode,
+		),
+	);
+	const city = stringOrNull(
+		pickFirstNonEmpty(
+			branch.Address?.CityName,
+			branch.city,
+			branch.City,
+			branch.CityName,
+			branch.rawJson?.city,
+		),
+	);
+
+	return {
+		branchCode,
+		name,
+		status:
+			stringOrNull(pickFirstNonEmpty(branch.Status, branch.status)) || "ACTIVE",
+		locationType,
+		collectionType,
+		email: stringOrNull(
+			pickFirstNonEmpty(
+				branch.EmailAddress,
+				branch.email,
+				branch.Email,
+				branch.rawJson?.EmailAddress,
+			),
+		),
+		phone: stringOrNull(
+			pickFirstNonEmpty(
+				branch.Telephone?.attr?.PhoneNumber,
+				branch.Telephone?.PhoneNumber,
+				branch.phone,
+				branch.Phone,
+				branch.Telephone,
+				branch.rawJson?.phone,
+			),
+		),
+		latitude: numberOrNull(
+			pickFirstNonEmpty(
+				branch.Latitude,
+				branch.latitude,
+				branch.lat,
+				branch.attr?.Latitude,
+				branch.LocationDetail?.attr?.Latitude,
+				branch.rawJson?.Latitude,
+			),
+		),
+		longitude: numberOrNull(
+			pickFirstNonEmpty(
+				branch.Longitude,
+				branch.longitude,
+				branch.lon,
+				branch.lng,
+				branch.attr?.Longitude,
+				branch.LocationDetail?.attr?.Longitude,
+				branch.rawJson?.Longitude,
+			),
+		),
+		addressLine: stringOrNull(
+			pickFirstNonEmpty(
+				branch.Address?.AddressLine,
+				branch.addressLine,
+				branch.AddressLine,
+				branch.address,
+				branch.Address,
+				branch.rawJson?.addressLine,
+			),
+		),
+		city,
+		postalCode: stringOrNull(
+			pickFirstNonEmpty(
+				branch.Address?.PostalCode,
+				branch.postalCode,
+				branch.PostalCode,
+				branch.rawJson?.postalCode,
+			),
+		),
+		country: stringOrNull(rawCountry),
+		countryCode,
+		natoLocode:
+			explicitNatoFromBranch(branch as Record<string, unknown>) ||
+			existingNatoLocode ||
+			null,
+		agreementId: stringOrNull(
+			pickFirstNonEmpty(branch.AgreementId, branch.agreementId),
+		),
+		rawJson: branch,
+	};
+}
+
+function standardizeBranchPayload(
+	branch: any,
+	fallbackCountryCode?: string | null,
+): any {
+	const normalized = normalizeBranchForDb(branch, fallbackCountryCode);
+	const countryValue = normalized.country || normalized.countryCode || "";
+	return {
+		...branch,
+		Branchcode: normalized.branchCode,
+		BranchCode: normalized.branchCode,
+		Code: normalized.branchCode,
+		Name: normalized.name || normalized.branchCode,
+		Status: normalized.status,
+		AtAirport:
+			booleanStringOrNull(
+				pickFirstNonEmpty(
+					branch.AtAirport,
+					branch.atAirport,
+					branch.attr?.AtAirport,
+				),
+			) ?? branch.AtAirport,
+		LocationType: normalized.locationType ?? branch.LocationType,
+		CollectionType: normalized.collectionType ?? branch.CollectionType,
+		Latitude: normalized.latitude ?? branch.Latitude,
+		Longitude: normalized.longitude ?? branch.Longitude,
+		EmailAddress: normalized.email ?? branch.EmailAddress,
+		Telephone: normalized.phone
+			? {
+					attr: { PhoneNumber: normalized.phone },
+					PhoneNumber: normalized.phone,
+				}
+			: branch.Telephone,
+		Address: {
+			...(branch.Address || {}),
+			AddressLine: normalized.addressLine
+				? { value: normalized.addressLine }
+				: branch.Address?.AddressLine,
+			CityName: normalized.city
+				? { value: normalized.city }
+				: branch.Address?.CityName,
+			PostalCode: normalized.postalCode
+				? { value: normalized.postalCode }
+				: branch.Address?.PostalCode,
+			CountryName:
+				normalized.countryCode ||
+				normalized.country ||
+				branch.Address?.CountryName
+					? {
+							value: countryValue,
+							attr: {
+								Code:
+									normalized.countryCode ||
+									branch.Address?.CountryName?.attr?.Code ||
+									"",
+							},
+						}
+					: branch.Address?.CountryName,
+		},
+		NatoLocode: normalized.natoLocode || branch.NatoLocode || branch.natoLocode,
+		AgreementId:
+			normalized.agreementId || branch.AgreementId || branch.agreementId,
+	};
 }
 
 /** Check branch quota (subscribed quantity); locations are unlimited and not counted.
  *  Return null if ok, or { status, body } for 402. */
 async function checkBranchQuota(
-  sourceId: string,
-  subscribedBranchCount: number,
-  addingBranches: number,
-  _addingLocations: number = 0
+	sourceId: string,
+	subscribedBranchCount: number,
+	addingBranches: number,
+	_addingLocations: number = 0,
 ): Promise<{ status: number; body: object } | null> {
-  const branchCount = await prisma.branch.count({ where: { sourceId } });
-  const after = branchCount + addingBranches;
-  if (subscribedBranchCount > 0 && after > subscribedBranchCount) {
-    const needToAdd = after - subscribedBranchCount;
-    return {
-      status: 402,
-      body: {
-        error: "BRANCH_QUOTA_EXCEEDED",
-        message: `Your plan covers ${subscribedBranchCount} branches. You have ${branchCount} and are adding ${addingBranches}; upgrade to add ${needToAdd} more.`,
-        currentBranchCount: branchCount,
-        subscribedBranchCount,
-        addingBranches,
-        needToAdd,
-      },
-    };
-  }
-  return null;
+	const branchCount = await prisma.branch.count({ where: { sourceId } });
+	const after = branchCount + addingBranches;
+	if (subscribedBranchCount > 0 && after > subscribedBranchCount) {
+		const needToAdd = after - subscribedBranchCount;
+		return {
+			status: 402,
+			body: {
+				error: "BRANCH_QUOTA_EXCEEDED",
+				message: `Your plan covers ${subscribedBranchCount} branches. You have ${branchCount} and are adding ${addingBranches}; upgrade to add ${needToAdd} more.`,
+				currentBranchCount: branchCount,
+				subscribedBranchCount,
+				addingBranches,
+				needToAdd,
+			},
+		};
+	}
+	return null;
 }
 
 /**
  * Find the position of the matching closing brace, skipping braces inside double-quoted strings.
  * PHP var_dump can have "}" inside string values which would break naive brace counting.
  */
-function findMatchingBraceSkipStrings(text: string, openBracePos: number): number {
-  let braceCount = 1;
-  let pos = openBracePos + 1;
-  let inString = false;
-  let escape = false;
-  while (pos < text.length && braceCount > 0) {
-    const c = text[pos];
-    if (escape) {
-      escape = false;
-      pos++;
-      continue;
-    }
-    if (inString) {
-      if (c === '\\') escape = true;
-      else if (c === '"') inString = false;
-      pos++;
-      continue;
-    }
-    if (c === '"') {
-      inString = true;
-      pos++;
-      continue;
-    }
-    if (c === '{') braceCount++;
-    else if (c === '}') braceCount--;
-    if (braceCount === 0) return pos;
-    pos++;
-  }
-  return -1;
+function findMatchingBraceSkipStrings(
+	text: string,
+	openBracePos: number,
+): number {
+	let braceCount = 1;
+	let pos = openBracePos + 1;
+	let inString = false;
+	let escape = false;
+	while (pos < text.length && braceCount > 0) {
+		const c = text[pos];
+		if (escape) {
+			escape = false;
+			pos++;
+			continue;
+		}
+		if (inString) {
+			if (c === "\\") escape = true;
+			else if (c === '"') inString = false;
+			pos++;
+			continue;
+		}
+		if (c === '"') {
+			inString = true;
+			pos++;
+			continue;
+		}
+		if (c === "{") braceCount++;
+		else if (c === "}") braceCount--;
+		if (braceCount === 0) return pos;
+		pos++;
+	}
+	return -1;
 }
 
 /**
@@ -175,224 +531,290 @@ function findMatchingBraceSkipStrings(text: string, openBracePos: number): numbe
  * Client requested to use "gloria" format name, but we support both for compatibility
  */
 function convertPhpVarDumpToOta(phpText: string): any {
-  try {
-    const result: any = {
-      OTA_VehLocSearchRS: {
-        VehMatchedLocs: []
-      },
-      // Also support "gloria" format name as client requested
-      gloria: {
-        VehMatchedLocs: []
-      }
-    };
-    
-    // The structure is: ["VehMatchedLocs"]=> array(2) { [0]=> array(1) { ["VehMatchedLoc"]=> array(1) { ["LocationDetail"]=> ...
-    // We need to extract each VehMatchedLoc block
-    
-    // Find the VehMatchedLocs array - match the opening and find the content
-    // Pattern: ["VehMatchedLocs"]=> array(2) { ...content... }
-    // Try different bracket formats: ["VehMatchedLocs"], ['VehMatchedLocs'], or escaped versions
-    let vehMatchedLocsStart = phpText.indexOf('["VehMatchedLocs"]');
-    if (vehMatchedLocsStart === -1) {
-      vehMatchedLocsStart = phpText.indexOf("['VehMatchedLocs']");
-    }
-    if (vehMatchedLocsStart === -1) {
-      // Try HTML-escaped versions
-      vehMatchedLocsStart = phpText.indexOf('[&quot;VehMatchedLocs&quot;]');
-      if (vehMatchedLocsStart !== -1) {
-        // Decode HTML entities in the text
-        phpText = phpText.replace(/&quot;/g, '"').replace(/&#91;/g, '[').replace(/&#93;/g, ']');
-        vehMatchedLocsStart = phpText.indexOf('["VehMatchedLocs"]');
-      }
-    }
-    if (vehMatchedLocsStart === -1) {
-      // Log debug info to help diagnose
-      const preview = phpText.substring(0, Math.min(1000, phpText.length));
-      const containsOta = phpText.includes('OTA_VehLocSearchRS');
-      const containsArray = phpText.includes('array(');
-      throw new Error(`Could not find VehMatchedLocs in PHP var_dump. Contains OTA_VehLocSearchRS: ${containsOta}, Contains array(: ${containsArray}. Preview: ${preview.substring(0, 200)}...`);
-    }
-    
-    // Find the opening brace after array(count)
-    let bracePos = phpText.indexOf('{', vehMatchedLocsStart);
-    if (bracePos === -1) {
-      throw new Error("Could not find opening brace for VehMatchedLocs");
-    }
-    
-    const vehMatchedLocsEnd = findMatchingBraceSkipStrings(phpText, bracePos);
-    if (vehMatchedLocsEnd === -1) {
-      throw new Error("Could not find closing brace for VehMatchedLocs");
-    }
-    
-    const vehMatchedLocsText = phpText.substring(bracePos + 1, vehMatchedLocsEnd);
-    
-    // Extract each indexed entry: [0]=> array(1) { ["VehMatchedLoc"]=> array(1) { ["LocationDetail"]=> ...
-    // Use a pattern that finds [index]=> array(1) { ["VehMatchedLoc"]=> array(1) { ["LocationDetail"]=> array(count) { ...content... } } }
-    const locations: any[] = [];
-    
-    // Find all LocationDetail blocks by looking for the pattern
-    // [index]=> array(1) { ["VehMatchedLoc"]=> array(1) { ["LocationDetail"]=> array(count) { ...content... } } }
-    let searchPos = 0;
-    
-    while (true) {
-      // Find next LocationDetail
-      const locationDetailStart = vehMatchedLocsText.indexOf('["LocationDetail"]', searchPos);
-      if (locationDetailStart === -1) break;
-      
-      // Find the array(count) after LocationDetail
-      const arrayStart = vehMatchedLocsText.indexOf('array(', locationDetailStart);
-      if (arrayStart === -1) break;
-      
-      // Find the opening brace
-      const contentStart = vehMatchedLocsText.indexOf('{', arrayStart);
-      if (contentStart === -1) break;
-      
-      const detailEnd = findMatchingBraceSkipStrings(vehMatchedLocsText, contentStart);
-      if (detailEnd === -1) break;
-      
-      const locationText = vehMatchedLocsText.substring(contentStart + 1, detailEnd);
-      const locationDetail = parsePhpLocationDetail(locationText);
-      
-      if (locationDetail) {
-        // Ensure the structure is correct - LocationDetail should have attr
-        if (!locationDetail.attr && Object.keys(locationDetail).length > 0) {
-          console.warn(`[PHP Parser] LocationDetail missing attr, keys:`, Object.keys(locationDetail));
-        }
-        locations.push({
-          VehMatchedLoc: {
-            LocationDetail: locationDetail
-          }
-        });
-      }
-      
-      searchPos = detailEnd + 1;
-    }
-    
-    console.log(`[PHP Parser] Extracted ${locations.length} locations from PHP var_dump`);
-    
-    if (locations.length === 0) {
-      console.warn("[PHP Parser] No locations extracted from PHP var_dump");
-      console.warn("[PHP Parser] VehMatchedLocs text length:", vehMatchedLocsText.length);
-      console.warn("[PHP Parser] First 500 chars:", vehMatchedLocsText.substring(0, 500));
-      console.warn("[PHP Parser] Contains LocationDetail:", vehMatchedLocsText.includes('["LocationDetail"]'));
-      // Try alternative parsing - maybe the structure is different
-      // Look for VehMatchedLoc directly
-      const vehMatchedLocPattern = /\[(\d+)\]=>\s*array\(\d+\)\s*\{\s*\["VehMatchedLoc"\]/g;
-      const matches = [...vehMatchedLocsText.matchAll(vehMatchedLocPattern)];
-      console.warn("[PHP Parser] Found VehMatchedLoc patterns:", matches.length);
-      if (matches.length > 0) {
-        console.warn("[PHP Parser] Trying alternative extraction method...");
-        // Try extracting by finding each [index]=> array pattern
-        for (let i = 0; i < matches.length; i++) {
-          const match = matches[i];
-          const startPos = match.index || 0;
-          // Find the LocationDetail within this VehMatchedLoc
-          const locDetailStart = vehMatchedLocsText.indexOf('["LocationDetail"]', startPos);
-          if (locDetailStart !== -1) {
-            const arrayStart = vehMatchedLocsText.indexOf('array(', locDetailStart);
-            if (arrayStart !== -1) {
-              const contentStart = vehMatchedLocsText.indexOf('{', arrayStart);
-              if (contentStart !== -1) {
-                const detailEnd = findMatchingBraceSkipStrings(vehMatchedLocsText, contentStart);
-                if (detailEnd !== -1) {
-                  const locationText = vehMatchedLocsText.substring(contentStart + 1, detailEnd);
-                  const locationDetail = parsePhpLocationDetail(locationText);
-                  if (locationDetail) {
-                    locations.push({
-                      VehMatchedLoc: {
-                        LocationDetail: locationDetail
-                      }
-                    });
-                  }
-                }
-              }
-            }
-          }
-        }
-        console.warn(`[PHP Parser] Alternative method extracted ${locations.length} locations`);
-      }
-    } else {
-      // Log first location details for verification
-      if (locations[0]?.VehMatchedLoc?.LocationDetail) {
-        const firstLoc = locations[0].VehMatchedLoc.LocationDetail;
-        console.log(`[PHP Parser] First location extracted:`, {
-          code: firstLoc.attr?.Code || firstLoc.attr?.BranchType,
-          name: firstLoc.attr?.Name,
-          hasAddress: !!firstLoc.Address,
-          hasCars: !!firstLoc.Cars
-        });
-      }
-    }
-    
-    result.OTA_VehLocSearchRS.VehMatchedLocs = locations;
-    result.gloria.VehMatchedLocs = locations; // Support "gloria" format name
-    
-    return result;
-  } catch (error: any) {
-    throw new Error(`Failed to parse PHP var_dump: ${error.message || String(error)}`);
-  }
+	try {
+		const result: any = {
+			OTA_VehLocSearchRS: {
+				VehMatchedLocs: [],
+			},
+			// Also support "gloria" format name as client requested
+			gloria: {
+				VehMatchedLocs: [],
+			},
+		};
+
+		// The structure is: ["VehMatchedLocs"]=> array(2) { [0]=> array(1) { ["VehMatchedLoc"]=> array(1) { ["LocationDetail"]=> ...
+		// We need to extract each VehMatchedLoc block
+
+		// Find the VehMatchedLocs array - match the opening and find the content
+		// Pattern: ["VehMatchedLocs"]=> array(2) { ...content... }
+		// Try different bracket formats: ["VehMatchedLocs"], ['VehMatchedLocs'], or escaped versions
+		let vehMatchedLocsStart = phpText.indexOf('["VehMatchedLocs"]');
+		if (vehMatchedLocsStart === -1) {
+			vehMatchedLocsStart = phpText.indexOf("['VehMatchedLocs']");
+		}
+		if (vehMatchedLocsStart === -1) {
+			// Try HTML-escaped versions
+			vehMatchedLocsStart = phpText.indexOf("[&quot;VehMatchedLocs&quot;]");
+			if (vehMatchedLocsStart !== -1) {
+				// Decode HTML entities in the text
+				phpText = phpText
+					.replace(/&quot;/g, '"')
+					.replace(/&#91;/g, "[")
+					.replace(/&#93;/g, "]");
+				vehMatchedLocsStart = phpText.indexOf('["VehMatchedLocs"]');
+			}
+		}
+		if (vehMatchedLocsStart === -1) {
+			// Log debug info to help diagnose
+			const preview = phpText.substring(0, Math.min(1000, phpText.length));
+			const containsOta = phpText.includes("OTA_VehLocSearchRS");
+			const containsArray = phpText.includes("array(");
+			throw new Error(
+				`Could not find VehMatchedLocs in PHP var_dump. Contains OTA_VehLocSearchRS: ${containsOta}, Contains array(: ${containsArray}. Preview: ${preview.substring(0, 200)}...`,
+			);
+		}
+
+		// Find the opening brace after array(count)
+		const bracePos = phpText.indexOf("{", vehMatchedLocsStart);
+		if (bracePos === -1) {
+			throw new Error("Could not find opening brace for VehMatchedLocs");
+		}
+
+		const vehMatchedLocsEnd = findMatchingBraceSkipStrings(phpText, bracePos);
+		if (vehMatchedLocsEnd === -1) {
+			throw new Error("Could not find closing brace for VehMatchedLocs");
+		}
+
+		const vehMatchedLocsText = phpText.substring(
+			bracePos + 1,
+			vehMatchedLocsEnd,
+		);
+
+		// Extract each indexed entry: [0]=> array(1) { ["VehMatchedLoc"]=> array(1) { ["LocationDetail"]=> ...
+		// Use a pattern that finds [index]=> array(1) { ["VehMatchedLoc"]=> array(1) { ["LocationDetail"]=> array(count) { ...content... } } }
+		const locations: any[] = [];
+
+		// Find all LocationDetail blocks by looking for the pattern
+		// [index]=> array(1) { ["VehMatchedLoc"]=> array(1) { ["LocationDetail"]=> array(count) { ...content... } } }
+		let searchPos = 0;
+
+		while (true) {
+			// Find next LocationDetail
+			const locationDetailStart = vehMatchedLocsText.indexOf(
+				'["LocationDetail"]',
+				searchPos,
+			);
+			if (locationDetailStart === -1) break;
+
+			// Find the array(count) after LocationDetail
+			const arrayStart = vehMatchedLocsText.indexOf(
+				"array(",
+				locationDetailStart,
+			);
+			if (arrayStart === -1) break;
+
+			// Find the opening brace
+			const contentStart = vehMatchedLocsText.indexOf("{", arrayStart);
+			if (contentStart === -1) break;
+
+			const detailEnd = findMatchingBraceSkipStrings(
+				vehMatchedLocsText,
+				contentStart,
+			);
+			if (detailEnd === -1) break;
+
+			const locationText = vehMatchedLocsText.substring(
+				contentStart + 1,
+				detailEnd,
+			);
+			const locationDetail = parsePhpLocationDetail(locationText);
+
+			if (locationDetail) {
+				// Ensure the structure is correct - LocationDetail should have attr
+				if (!locationDetail.attr && Object.keys(locationDetail).length > 0) {
+					console.warn(
+						`[PHP Parser] LocationDetail missing attr, keys:`,
+						Object.keys(locationDetail),
+					);
+				}
+				locations.push({
+					VehMatchedLoc: {
+						LocationDetail: locationDetail,
+					},
+				});
+			}
+
+			searchPos = detailEnd + 1;
+		}
+
+		console.log(
+			`[PHP Parser] Extracted ${locations.length} locations from PHP var_dump`,
+		);
+
+		if (locations.length === 0) {
+			console.warn("[PHP Parser] No locations extracted from PHP var_dump");
+			console.warn(
+				"[PHP Parser] VehMatchedLocs text length:",
+				vehMatchedLocsText.length,
+			);
+			console.warn(
+				"[PHP Parser] First 500 chars:",
+				vehMatchedLocsText.substring(0, 500),
+			);
+			console.warn(
+				"[PHP Parser] Contains LocationDetail:",
+				vehMatchedLocsText.includes('["LocationDetail"]'),
+			);
+			// Try alternative parsing - maybe the structure is different
+			// Look for VehMatchedLoc directly
+			const vehMatchedLocPattern =
+				/\[(\d+)\]=>\s*array\(\d+\)\s*\{\s*\["VehMatchedLoc"\]/g;
+			const matches = [...vehMatchedLocsText.matchAll(vehMatchedLocPattern)];
+			console.warn(
+				"[PHP Parser] Found VehMatchedLoc patterns:",
+				matches.length,
+			);
+			if (matches.length > 0) {
+				console.warn("[PHP Parser] Trying alternative extraction method...");
+				// Try extracting by finding each [index]=> array pattern
+				for (let i = 0; i < matches.length; i++) {
+					const match = matches[i];
+					const startPos = match.index || 0;
+					// Find the LocationDetail within this VehMatchedLoc
+					const locDetailStart = vehMatchedLocsText.indexOf(
+						'["LocationDetail"]',
+						startPos,
+					);
+					if (locDetailStart !== -1) {
+						const arrayStart = vehMatchedLocsText.indexOf(
+							"array(",
+							locDetailStart,
+						);
+						if (arrayStart !== -1) {
+							const contentStart = vehMatchedLocsText.indexOf("{", arrayStart);
+							if (contentStart !== -1) {
+								const detailEnd = findMatchingBraceSkipStrings(
+									vehMatchedLocsText,
+									contentStart,
+								);
+								if (detailEnd !== -1) {
+									const locationText = vehMatchedLocsText.substring(
+										contentStart + 1,
+										detailEnd,
+									);
+									const locationDetail = parsePhpLocationDetail(locationText);
+									if (locationDetail) {
+										locations.push({
+											VehMatchedLoc: {
+												LocationDetail: locationDetail,
+											},
+										});
+									}
+								}
+							}
+						}
+					}
+				}
+				console.warn(
+					`[PHP Parser] Alternative method extracted ${locations.length} locations`,
+				);
+			}
+		} else {
+			// Log first location details for verification
+			if (locations[0]?.VehMatchedLoc?.LocationDetail) {
+				const firstLoc = locations[0].VehMatchedLoc.LocationDetail;
+				console.log(`[PHP Parser] First location extracted:`, {
+					code: firstLoc.attr?.Code || firstLoc.attr?.BranchType,
+					name: firstLoc.attr?.Name,
+					hasAddress: !!firstLoc.Address,
+					hasCars: !!firstLoc.Cars,
+				});
+			}
+		}
+
+		result.OTA_VehLocSearchRS.VehMatchedLocs = locations;
+		result.gloria.VehMatchedLocs = locations; // Support "gloria" format name
+
+		return result;
+	} catch (error: any) {
+		throw new Error(
+			`Failed to parse PHP var_dump: ${error.message || String(error)}`,
+		);
+	}
 }
 
 /**
  * Parse PHP var_dump response with GLORIA_locationlistrs / Locs / location / LocationDetail.
  * Returns same shape as OTA (VehMatchedLocs array of { VehMatchedLoc: { LocationDetail } }) so extraction can be reused.
  */
-function convertPhpVarDumpToGloriaLocationList(phpText: string, responseRoot = "GLORIA_locationlistrs"): { VehMatchedLocs: any[] } {
-  try {
-    const rootKey = `["${responseRoot}"]`;
-    let locsStart = phpText.indexOf(rootKey);
-    if (locsStart === -1) {
-      const alt = phpText.indexOf(`['${responseRoot}']`);
-      if (alt !== -1) locsStart = alt;
-    }
-    if (locsStart === -1) {
-      throw new Error(`Could not find ${responseRoot} in PHP var_dump`);
-    }
+function convertPhpVarDumpToGloriaLocationList(
+	phpText: string,
+	responseRoot = "GLORIA_locationlistrs",
+): { VehMatchedLocs: any[] } {
+	try {
+		const rootKey = `["${responseRoot}"]`;
+		let locsStart = phpText.indexOf(rootKey);
+		if (locsStart === -1) {
+			const alt = phpText.indexOf(`['${responseRoot}']`);
+			if (alt !== -1) locsStart = alt;
+		}
+		if (locsStart === -1) {
+			throw new Error(`Could not find ${responseRoot} in PHP var_dump`);
+		}
 
-    const locsKey = '["Locs"]';
-    let locsArrayStart = phpText.indexOf(locsKey, locsStart);
-    if (locsArrayStart === -1) {
-      const alt = phpText.indexOf("['Locs']", locsStart);
-      if (alt !== -1) locsArrayStart = alt;
-    }
-    if (locsArrayStart === -1) {
-      throw new Error("Could not find Locs in GLORIA_locationlistrs response");
-    }
+		const locsKey = '["Locs"]';
+		let locsArrayStart = phpText.indexOf(locsKey, locsStart);
+		if (locsArrayStart === -1) {
+			const alt = phpText.indexOf("['Locs']", locsStart);
+			if (alt !== -1) locsArrayStart = alt;
+		}
+		if (locsArrayStart === -1) {
+			throw new Error("Could not find Locs in GLORIA_locationlistrs response");
+		}
 
-    const bracePos = phpText.indexOf("{", locsArrayStart);
-    if (bracePos === -1) throw new Error("Could not find opening brace for Locs");
-    const locsEnd = findMatchingBraceSkipStrings(phpText, bracePos);
-    if (locsEnd === -1) throw new Error("Could not find closing brace for Locs");
-    const locsText = phpText.substring(bracePos + 1, locsEnd);
+		const bracePos = phpText.indexOf("{", locsArrayStart);
+		if (bracePos === -1)
+			throw new Error("Could not find opening brace for Locs");
+		const locsEnd = findMatchingBraceSkipStrings(phpText, bracePos);
+		if (locsEnd === -1)
+			throw new Error("Could not find closing brace for Locs");
+		const locsText = phpText.substring(bracePos + 1, locsEnd);
 
-    const locations: any[] = [];
-    let searchPos = 0;
-    while (true) {
-      const locationDetailStart = locsText.indexOf('["LocationDetail"]', searchPos);
-      if (locationDetailStart === -1) break;
-      const arrayStart = locsText.indexOf("array(", locationDetailStart);
-      if (arrayStart === -1) break;
-      const contentStart = locsText.indexOf("{", arrayStart);
-      if (contentStart === -1) break;
-      const detailEnd = findMatchingBraceSkipStrings(locsText, contentStart);
-      if (detailEnd === -1) break;
-      const locationText = locsText.substring(contentStart + 1, detailEnd);
-      const locationDetail = parsePhpLocationDetail(locationText);
-      if (locationDetail) {
-        locations.push({
-          VehMatchedLoc: {
-            LocationDetail: locationDetail,
-          },
-        });
-      }
-      searchPos = detailEnd + 1;
-    }
+		const locations: any[] = [];
+		let searchPos = 0;
+		while (true) {
+			const locationDetailStart = locsText.indexOf(
+				'["LocationDetail"]',
+				searchPos,
+			);
+			if (locationDetailStart === -1) break;
+			const arrayStart = locsText.indexOf("array(", locationDetailStart);
+			if (arrayStart === -1) break;
+			const contentStart = locsText.indexOf("{", arrayStart);
+			if (contentStart === -1) break;
+			const detailEnd = findMatchingBraceSkipStrings(locsText, contentStart);
+			if (detailEnd === -1) break;
+			const locationText = locsText.substring(contentStart + 1, detailEnd);
+			const locationDetail = parsePhpLocationDetail(locationText);
+			if (locationDetail) {
+				locations.push({
+					VehMatchedLoc: {
+						LocationDetail: locationDetail,
+					},
+				});
+			}
+			searchPos = detailEnd + 1;
+		}
 
-    console.log(`[PHP Parser] GLORIA_locationlistrs: extracted ${locations.length} locations from Locs`);
-    return { VehMatchedLocs: locations };
-  } catch (error: any) {
-    throw new Error(`Failed to parse PHP var_dump (GLORIA_locationlistrs): ${error.message || String(error)}`);
-  }
+		console.log(
+			`[PHP Parser] GLORIA_locationlistrs: extracted ${locations.length} locations from Locs`,
+		);
+		return { VehMatchedLocs: locations };
+	} catch (error: any) {
+		throw new Error(
+			`Failed to parse PHP var_dump (GLORIA_locationlistrs): ${error.message || String(error)}`,
+		);
+	}
 }
 
 /**
@@ -401,259 +823,357 @@ function convertPhpVarDumpToGloriaLocationList(phpText: string, responseRoot = "
  * Handles nested PHP array structures and converts to expected format
  */
 function parsePhpLocationDetail(locationText: string): any {
-  const location: any = {
-    attr: {}
-  };
-  
-  // Extract attributes from ["attr"]=> array(8) { ... }
-  // Handle nested braces - find the complete attr section
-  const attrStart = locationText.indexOf('["attr"]');
-  if (attrStart !== -1) {
-    // Find array(count) after ["attr"]
-    const arrayStart = locationText.indexOf('array(', attrStart);
-    if (arrayStart !== -1) {
-      // Find opening brace
-      const braceStart = locationText.indexOf('{', arrayStart);
-      if (braceStart !== -1) {
-        const braceEnd = findMatchingBraceSkipStrings(locationText, braceStart);
-        
-        if (braceEnd !== -1) {
-          const attrSection = locationText.substring(braceStart + 1, braceEnd);
-          
-          // Match: ["Key"]=> string(length) "value"
-          // Handle both single-line and multi-line values
-          // Pattern: ["Key"]=> string(N) "value"
-          // CRITICAL: Must match the exact PHP var_dump format
-          // Example: ["Code"]=> string(6) "DXBA02"
-          // Updated regex to handle values that may contain escaped quotes or special characters
-          const attrRegex = /\["([^"]+)"\]\s*=>\s*string\(\d+\)\s*"((?:[^"\\]|\\.)*)"/g;
-          let attrMatch;
-          
-          while ((attrMatch = attrRegex.exec(attrSection)) !== null) {
-            const key = attrMatch[1];
-            let value = attrMatch[2];
-            // Unescape any escaped characters
-            value = value.replace(/\\(.)/g, '$1');
-            location.attr[key] = value;
-          }
-          
-          // If no attributes were extracted, try a more lenient pattern
-          if (Object.keys(location.attr).length === 0) {
-            console.warn('[PHP Parser] No attributes extracted with strict pattern, trying lenient pattern');
-            const lenientRegex = /\["([^"]+)"\]\s*=>\s*string\([^)]+\)\s*"([^"]*)"/g;
-            let lenientMatch;
-            while ((lenientMatch = lenientRegex.exec(attrSection)) !== null) {
-              const key = lenientMatch[1];
-              const value = lenientMatch[2];
-              location.attr[key] = value;
-            }
-          }
-          
-          // Debug: Log extracted attributes with full details
-          console.log(`[PHP Parser] Extracted ${Object.keys(location.attr).length} attributes:`, Object.keys(location.attr));
-          console.log(`[PHP Parser] Full attr object:`, JSON.stringify(location.attr, null, 2));
-          console.log(`[PHP Parser] Code:`, location.attr.Code || 'MISSING');
-          console.log(`[PHP Parser] BranchType:`, location.attr.BranchType || 'MISSING');
-          console.log(`[PHP Parser] Name:`, location.attr.Name || 'MISSING');
-          console.log(`[PHP Parser] Latitude:`, location.attr.Latitude || 'MISSING');
-          console.log(`[PHP Parser] Longitude:`, location.attr.Longitude || 'MISSING');
-          
-          // CRITICAL: If Code is missing but BranchType exists, use BranchType as Code
-          // The PHP data shows: ["Code"]=> string(6) "DXBA02" in the attr section
-          if (!location.attr.Code && location.attr.BranchType) {
-            location.attr.Code = location.attr.BranchType;
-            console.log(`[PHP Parser] Using BranchType as Code:`, location.attr.Code);
-          }
-          
-          // Ensure Code exists - it's critical for branch identification
-          if (!location.attr.Code) {
-            console.error(`[PHP Parser] ERROR: No Code found in attr! Available keys:`, Object.keys(location.attr));
-            console.error(`[PHP Parser] Attr section sample:`, attrSection.substring(0, 500));
-          }
-        } else {
-          console.warn(`[PHP Parser] Could not find closing brace for attr section`);
-        }
-      } else {
-        console.warn(`[PHP Parser] Could not find opening brace for attr section`);
-      }
-    } else {
-      console.warn(`[PHP Parser] Could not find array( after ["attr"]`);
-    }
-  } else {
-    console.warn(`[PHP Parser] Could not find ["attr"] in location text`);
-  }
-  
-  // Extract Address components - handle nested structure
-  location.Address = {};
-  
-  // AddressLine: ["AddressLine"]=> array(1) { ["value"]=> string(69) "..." }
-  const addressLineMatch = locationText.match(/\["AddressLine"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-  if (addressLineMatch) {
-    const valueMatch = addressLineMatch[1].match(/\["value"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
-    if (valueMatch) {
-      location.Address.AddressLine = { value: valueMatch[2] };
-    }
-  }
-  
-  // CityName
-  const cityMatch = locationText.match(/\["CityName"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-  if (cityMatch) {
-    const valueMatch = cityMatch[1].match(/\["value"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
-    if (valueMatch) {
-      location.Address.CityName = { value: valueMatch[2] };
-    }
-  }
-  
-  // PostalCode
-  const postalMatch = locationText.match(/\["PostalCode"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-  if (postalMatch) {
-    const valueMatch = postalMatch[1].match(/\["value"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
-    if (valueMatch) {
-      location.Address.PostalCode = { value: valueMatch[2] };
-    }
-  }
-  
-  // CountryName: ["CountryName"]=> array(2) { ["value"]=> ..., ["attr"]=> ... }
-  const countryMatch = locationText.match(/\["CountryName"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-  if (countryMatch) {
-    location.Address.CountryName = {};
-    
-    const countryText = countryMatch[1];
-    const valueMatch = countryText.match(/\["value"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
-    if (valueMatch) {
-      location.Address.CountryName.value = valueMatch[2];
-    }
-    
-    // Extract Code from attr
-    const codeAttrMatch = countryText.match(/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-    if (codeAttrMatch) {
-      const codeMatch = codeAttrMatch[1].match(/\["Code"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
-      if (codeMatch) {
-        location.Address.CountryName.attr = { Code: codeMatch[2] };
-      }
-    }
-  }
-  
-  // Extract Telephone: ["Telephone"]=> array(1) { ["attr"]=> array(1) { ["PhoneNumber"]=> ... } }
-  const telephoneMatch = locationText.match(/\["Telephone"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-  if (telephoneMatch) {
-    const phoneAttrMatch = telephoneMatch[1].match(/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-    if (phoneAttrMatch) {
-      const phoneMatch = phoneAttrMatch[1].match(/\["PhoneNumber"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
-      if (phoneMatch) {
-        location.Telephone = {
-          attr: {
-            PhoneNumber: phoneMatch[2]
-          }
-        };
-      }
-    }
-  }
-  
-  // Extract Opening hours - handle multiple times per day
-  const openingMatch = locationText.match(/\["Opening"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-  if (openingMatch) {
-    location.Opening = {};
-    const openingText = openingMatch[1];
-    
-    // Extract each day: ["monday"]=> array(1) { ["attr"]=> array(1) { ["Open"]=> ... } }
-    const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-    for (const day of days) {
-      const dayMatch = openingText.match(new RegExp(`\\["${day}"\\]\\s*=>\\s*array\\(\\d+\\)\\s*\\{([\\s\\S]*?)\\}\\s*\\}`));
-      if (dayMatch) {
-        const dayAttrMatch = dayMatch[1].match(/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-        if (dayAttrMatch) {
-          const openMatch = dayAttrMatch[1].match(/\["Open"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
-          if (openMatch) {
-            location.Opening[day] = {
-              attr: {
-                Open: openMatch[2]
-              }
-            };
-          }
-        }
-      }
-    }
-  }
-  
-  // Extract PickupInstructions
-  const pickupMatch = locationText.match(/\["PickupInstructions"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-  if (pickupMatch) {
-    const pickupAttrMatch = pickupMatch[1].match(/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-    if (pickupAttrMatch) {
-      const pickupValueMatch = pickupAttrMatch[1].match(/\["Pickup"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/);
-      if (pickupValueMatch) {
-        location.PickupInstructions = {
-          attr: {
-            Pickup: pickupValueMatch[2]
-          }
-        };
-      }
-    }
-  }
-  
-  // Extract Cars - ACRISS codes for vehicles
-  const carsMatch = locationText.match(/\["Cars"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-  if (carsMatch) {
-    location.Cars = {};
-    const carsText = carsMatch[1];
-    
-    // Extract Code array: ["Code"]=> array(6) { [0]=> array(1) { ["attr"]=> ... } }
-    const codeArrayMatch = carsText.match(/\["Code"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/);
-    if (codeArrayMatch) {
-      const codeArrayText = codeArrayMatch[1];
-      location.Cars.Code = [];
-      
-      // Extract each car code: [0]=> array(1) { ["attr"]=> array(7) { ["Acrisscode"]=> ... } }
-      const carCodePattern = /\[(\d+)\]\s*=>\s*array\(\d+\)\s*\{\s*\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}\s*\}/g;
-      let carMatch;
-      
-      while ((carMatch = carCodePattern.exec(codeArrayText)) !== null) {
-        const carAttrText = carMatch[2];
-        const carAttrs: any = {};
-        
-        // Extract all attributes from car attr section
-        const carAttrRegex = /\["([^"]+)"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/g;
-        let carAttrMatch;
-        
-        while ((carAttrMatch = carAttrRegex.exec(carAttrText)) !== null) {
-          carAttrs[carAttrMatch[1]] = carAttrMatch[3];
-        }
-        
-        if (Object.keys(carAttrs).length > 0) {
-          location.Cars.Code.push({
-            attr: carAttrs
-          });
-        }
-      }
-    }
-  }
-  
-  return location;
+	const location: any = {
+		attr: {},
+	};
+
+	// Extract attributes from ["attr"]=> array(8) { ... }
+	// Handle nested braces - find the complete attr section
+	const attrStart = locationText.indexOf('["attr"]');
+	if (attrStart !== -1) {
+		// Find array(count) after ["attr"]
+		const arrayStart = locationText.indexOf("array(", attrStart);
+		if (arrayStart !== -1) {
+			// Find opening brace
+			const braceStart = locationText.indexOf("{", arrayStart);
+			if (braceStart !== -1) {
+				const braceEnd = findMatchingBraceSkipStrings(locationText, braceStart);
+
+				if (braceEnd !== -1) {
+					const attrSection = locationText.substring(braceStart + 1, braceEnd);
+
+					// Match: ["Key"]=> string(length) "value"
+					// Handle both single-line and multi-line values
+					// Pattern: ["Key"]=> string(N) "value"
+					// CRITICAL: Must match the exact PHP var_dump format
+					// Example: ["Code"]=> string(6) "DXBA02"
+					// Updated regex to handle values that may contain escaped quotes or special characters
+					const attrRegex =
+						/\["([^"]+)"\]\s*=>\s*string\(\d+\)\s*"((?:[^"\\]|\\.)*)"/g;
+					let attrMatch;
+
+					while ((attrMatch = attrRegex.exec(attrSection)) !== null) {
+						const key = attrMatch[1];
+						let value = attrMatch[2];
+						// Unescape any escaped characters
+						value = value.replace(/\\(.)/g, "$1");
+						location.attr[key] = value;
+					}
+
+					// If no attributes were extracted, try a more lenient pattern
+					if (Object.keys(location.attr).length === 0) {
+						console.warn(
+							"[PHP Parser] No attributes extracted with strict pattern, trying lenient pattern",
+						);
+						const lenientRegex =
+							/\["([^"]+)"\]\s*=>\s*string\([^)]+\)\s*"([^"]*)"/g;
+						let lenientMatch;
+						while ((lenientMatch = lenientRegex.exec(attrSection)) !== null) {
+							const key = lenientMatch[1];
+							const value = lenientMatch[2];
+							location.attr[key] = value;
+						}
+					}
+
+					// Debug: Log extracted attributes with full details
+					console.log(
+						`[PHP Parser] Extracted ${Object.keys(location.attr).length} attributes:`,
+						Object.keys(location.attr),
+					);
+					console.log(
+						`[PHP Parser] Full attr object:`,
+						JSON.stringify(location.attr, null, 2),
+					);
+					console.log(`[PHP Parser] Code:`, location.attr.Code || "MISSING");
+					console.log(
+						`[PHP Parser] BranchType:`,
+						location.attr.BranchType || "MISSING",
+					);
+					console.log(`[PHP Parser] Name:`, location.attr.Name || "MISSING");
+					console.log(
+						`[PHP Parser] Latitude:`,
+						location.attr.Latitude || "MISSING",
+					);
+					console.log(
+						`[PHP Parser] Longitude:`,
+						location.attr.Longitude || "MISSING",
+					);
+
+					// CRITICAL: If Code is missing but BranchType exists, use BranchType as Code
+					// The PHP data shows: ["Code"]=> string(6) "DXBA02" in the attr section
+					if (!location.attr.Code && location.attr.BranchType) {
+						location.attr.Code = location.attr.BranchType;
+						console.log(
+							`[PHP Parser] Using BranchType as Code:`,
+							location.attr.Code,
+						);
+					}
+
+					// Ensure Code exists - it's critical for branch identification
+					if (!location.attr.Code) {
+						console.error(
+							`[PHP Parser] ERROR: No Code found in attr! Available keys:`,
+							Object.keys(location.attr),
+						);
+						console.error(
+							`[PHP Parser] Attr section sample:`,
+							attrSection.substring(0, 500),
+						);
+					}
+				} else {
+					console.warn(
+						`[PHP Parser] Could not find closing brace for attr section`,
+					);
+				}
+			} else {
+				console.warn(
+					`[PHP Parser] Could not find opening brace for attr section`,
+				);
+			}
+		} else {
+			console.warn(`[PHP Parser] Could not find array( after ["attr"]`);
+		}
+	} else {
+		console.warn(`[PHP Parser] Could not find ["attr"] in location text`);
+	}
+
+	// Extract Address components - handle nested structure
+	location.Address = {};
+
+	// AddressLine: ["AddressLine"]=> array(1) { ["value"]=> string(69) "..." }
+	const addressLineMatch = locationText.match(
+		/\["AddressLine"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+	);
+	if (addressLineMatch) {
+		const valueMatch = addressLineMatch[1].match(
+			/\["value"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/,
+		);
+		if (valueMatch) {
+			location.Address.AddressLine = { value: valueMatch[2] };
+		}
+	}
+
+	// CityName
+	const cityMatch = locationText.match(
+		/\["CityName"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+	);
+	if (cityMatch) {
+		const valueMatch = cityMatch[1].match(
+			/\["value"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/,
+		);
+		if (valueMatch) {
+			location.Address.CityName = { value: valueMatch[2] };
+		}
+	}
+
+	// PostalCode
+	const postalMatch = locationText.match(
+		/\["PostalCode"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+	);
+	if (postalMatch) {
+		const valueMatch = postalMatch[1].match(
+			/\["value"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/,
+		);
+		if (valueMatch) {
+			location.Address.PostalCode = { value: valueMatch[2] };
+		}
+	}
+
+	// CountryName: ["CountryName"]=> array(2) { ["value"]=> ..., ["attr"]=> ... }
+	const countryMatch = locationText.match(
+		/\["CountryName"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+	);
+	if (countryMatch) {
+		location.Address.CountryName = {};
+
+		const countryText = countryMatch[1];
+		const valueMatch = countryText.match(
+			/\["value"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/,
+		);
+		if (valueMatch) {
+			location.Address.CountryName.value = valueMatch[2];
+		}
+
+		// Extract Code from attr
+		const codeAttrMatch = countryText.match(
+			/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+		);
+		if (codeAttrMatch) {
+			const codeMatch = codeAttrMatch[1].match(
+				/\["Code"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/,
+			);
+			if (codeMatch) {
+				location.Address.CountryName.attr = { Code: codeMatch[2] };
+			}
+		}
+	}
+
+	// Extract Telephone: ["Telephone"]=> array(1) { ["attr"]=> array(1) { ["PhoneNumber"]=> ... } }
+	const telephoneMatch = locationText.match(
+		/\["Telephone"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+	);
+	if (telephoneMatch) {
+		const phoneAttrMatch = telephoneMatch[1].match(
+			/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+		);
+		if (phoneAttrMatch) {
+			const phoneMatch = phoneAttrMatch[1].match(
+				/\["PhoneNumber"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/,
+			);
+			if (phoneMatch) {
+				location.Telephone = {
+					attr: {
+						PhoneNumber: phoneMatch[2],
+					},
+				};
+			}
+		}
+	}
+
+	// Extract Opening hours - handle multiple times per day
+	const openingMatch = locationText.match(
+		/\["Opening"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+	);
+	if (openingMatch) {
+		location.Opening = {};
+		const openingText = openingMatch[1];
+
+		// Extract each day: ["monday"]=> array(1) { ["attr"]=> array(1) { ["Open"]=> ... } }
+		const days = [
+			"monday",
+			"tuesday",
+			"wednesday",
+			"thursday",
+			"friday",
+			"saturday",
+			"sunday",
+		];
+		for (const day of days) {
+			const dayMatch = openingText.match(
+				new RegExp(
+					`\\["${day}"\\]\\s*=>\\s*array\\(\\d+\\)\\s*\\{([\\s\\S]*?)\\}\\s*\\}`,
+				),
+			);
+			if (dayMatch) {
+				const dayAttrMatch = dayMatch[1].match(
+					/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+				);
+				if (dayAttrMatch) {
+					const openMatch = dayAttrMatch[1].match(
+						/\["Open"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/,
+					);
+					if (openMatch) {
+						location.Opening[day] = {
+							attr: {
+								Open: openMatch[2],
+							},
+						};
+					}
+				}
+			}
+		}
+	}
+
+	// Extract PickupInstructions
+	const pickupMatch = locationText.match(
+		/\["PickupInstructions"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+	);
+	if (pickupMatch) {
+		const pickupAttrMatch = pickupMatch[1].match(
+			/\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+		);
+		if (pickupAttrMatch) {
+			const pickupValueMatch = pickupAttrMatch[1].match(
+				/\["Pickup"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/,
+			);
+			if (pickupValueMatch) {
+				location.PickupInstructions = {
+					attr: {
+						Pickup: pickupValueMatch[2],
+					},
+				};
+			}
+		}
+	}
+
+	// Extract Cars - ACRISS codes for vehicles
+	const carsMatch = locationText.match(
+		/\["Cars"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+	);
+	if (carsMatch) {
+		location.Cars = {};
+		const carsText = carsMatch[1];
+
+		// Extract Code array: ["Code"]=> array(6) { [0]=> array(1) { ["attr"]=> ... } }
+		const codeArrayMatch = carsText.match(
+			/\["Code"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}/,
+		);
+		if (codeArrayMatch) {
+			const codeArrayText = codeArrayMatch[1];
+			location.Cars.Code = [];
+
+			// Extract each car code: [0]=> array(1) { ["attr"]=> array(7) { ["Acrisscode"]=> ... } }
+			const carCodePattern =
+				/\[(\d+)\]\s*=>\s*array\(\d+\)\s*\{\s*\["attr"\]\s*=>\s*array\(\d+\)\s*\{([\s\S]*?)\}\s*\}\s*\}/g;
+			let carMatch;
+
+			while ((carMatch = carCodePattern.exec(codeArrayText)) !== null) {
+				const carAttrText = carMatch[2];
+				const carAttrs: any = {};
+
+				// Extract all attributes from car attr section
+				const carAttrRegex =
+					/\["([^"]+)"\]\s*=>\s*string\((\d+)\)\s*"([^"]*)"/g;
+				let carAttrMatch;
+
+				while ((carAttrMatch = carAttrRegex.exec(carAttrText)) !== null) {
+					carAttrs[carAttrMatch[1]] = carAttrMatch[3];
+				}
+
+				if (Object.keys(carAttrs).length > 0) {
+					location.Cars.Code.push({
+						attr: carAttrs,
+					});
+				}
+			}
+		}
+	}
+
+	return location;
 }
 
 export const sourcesRouter = Router();
 
-function formatSourceBookingCustomer(ci: unknown): { customerName: string; contact: string } {
-  if (ci == null) return { customerName: "", contact: "" };
-  let o: any = ci;
-  if (typeof o === "string") {
-    try {
-      o = JSON.parse(o);
-    } catch {
-      return { customerName: "", contact: String(ci).slice(0, 120) };
-    }
-  }
-  if (typeof o !== "object" || o === null) return { customerName: "", contact: "" };
-  const given = String(o.given_name || o.givenName || o.GivenName || "").trim();
-  const sur = String(o.surname || o.Surname || "").trim();
-  const name =
-    (given && sur ? `${given} ${sur}` : given || sur) ||
-    String(o.name || o.customerName || o.full_name || o.FullName || "").trim();
-  const contact = String(
-    o.email || o.Email || o.telephone || o.phone || o.mobile || o.PhoneNumber || ""
-  ).trim();
-  return { customerName: name, contact };
+function formatSourceBookingCustomer(ci: unknown): {
+	customerName: string;
+	contact: string;
+} {
+	if (ci == null) return { customerName: "", contact: "" };
+	let o: any = ci;
+	if (typeof o === "string") {
+		try {
+			o = JSON.parse(o);
+		} catch {
+			return { customerName: "", contact: String(ci).slice(0, 120) };
+		}
+	}
+	if (typeof o !== "object" || o === null)
+		return { customerName: "", contact: "" };
+	const given = String(o.given_name || o.givenName || o.GivenName || "").trim();
+	const sur = String(o.surname || o.Surname || "").trim();
+	const name =
+		(given && sur ? `${given} ${sur}` : given || sur) ||
+		String(o.name || o.customerName || o.full_name || o.FullName || "").trim();
+	const contact = String(
+		o.email ||
+			o.Email ||
+			o.telephone ||
+			o.phone ||
+			o.mobile ||
+			o.PhoneNumber ||
+			"",
+	).trim();
+	return { customerName: name, contact };
 }
 
 /**
@@ -662,77 +1182,85 @@ function formatSourceBookingCustomer(ci: unknown): { customerName: string; conta
  * - cancellations: only CANCELLED
  * - all: every status
  */
-sourcesRouter.get("/sources/bookings", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
-    const offset = Math.max(0, Number(req.query.offset || 0));
-    const view = String(req.query.view || "all").toLowerCase();
+sourcesRouter.get(
+	"/sources/bookings",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const limit = Math.max(1, Math.min(200, Number(req.query.limit || 50)));
+			const offset = Math.max(0, Number(req.query.offset || 0));
+			const view = String(req.query.view || "all").toLowerCase();
 
-    const where: any = { sourceId };
-    if (view === "reservations") {
-      where.status = { not: "CANCELLED" };
-    } else if (view === "cancellations") {
-      where.status = "CANCELLED";
-    }
+			const where: any = { sourceId };
+			if (view === "reservations") {
+				where.status = { not: "CANCELLED" };
+			} else if (view === "cancellations") {
+				where.status = "CANCELLED";
+			}
 
-    const [rows, total] = await Promise.all([
-      prisma.booking.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.booking.count({ where }),
-    ]);
+			const [rows, total] = await Promise.all([
+				prisma.booking.findMany({
+					where,
+					orderBy: { createdAt: "desc" },
+					take: limit,
+					skip: offset,
+				}),
+				prisma.booking.count({ where }),
+			]);
 
-    const agentIds = [...new Set(rows.map((r) => r.agentId))];
-    const agents =
-      agentIds.length === 0
-        ? []
-        : await prisma.company.findMany({
-            where: { id: { in: agentIds } },
-            select: { id: true, companyName: true, email: true },
-          });
-    const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
+			const agentIds = [...new Set(rows.map((r) => r.agentId))];
+			const agents =
+				agentIds.length === 0
+					? []
+					: await prisma.company.findMany({
+							where: { id: { in: agentIds } },
+							select: { id: true, companyName: true, email: true },
+						});
+			const agentMap = Object.fromEntries(agents.map((a) => [a.id, a]));
 
-    const items = rows.map((b) => {
-      const { customerName, contact } = formatSourceBookingCustomer(b.customerInfoJson);
-      return {
-        id: b.id,
-        agentId: b.agentId,
-        agentCompanyName: agentMap[b.agentId]?.companyName || b.agentId,
-        agentEmail: agentMap[b.agentId]?.email ?? null,
-        agreementRef: b.agreementRef,
-        supplierBookingRef: b.supplierBookingRef,
-        agentBookingRef: b.agentBookingRef,
-        status: b.status,
-        pickupUnlocode: b.pickupUnlocode,
-        dropoffUnlocode: b.dropoffUnlocode,
-        pickupDateTime: b.pickupDateTime?.toISOString() ?? null,
-        dropoffDateTime: b.dropoffDateTime?.toISOString() ?? null,
-        vehicleClass: b.vehicleClass,
-        vehicleMakeModel: b.vehicleMakeModel,
-        ratePlanCode: b.ratePlanCode,
-        customerName: customerName || null,
-        contact: contact || null,
-        createdAt: b.createdAt.toISOString(),
-        updatedAt: b.updatedAt.toISOString(),
-      };
-    });
+			const items = rows.map((b) => {
+				const { customerName, contact } = formatSourceBookingCustomer(
+					b.customerInfoJson,
+				);
+				return {
+					id: b.id,
+					agentId: b.agentId,
+					agentCompanyName: agentMap[b.agentId]?.companyName || b.agentId,
+					agentEmail: agentMap[b.agentId]?.email ?? null,
+					agreementRef: b.agreementRef,
+					supplierBookingRef: b.supplierBookingRef,
+					agentBookingRef: b.agentBookingRef,
+					status: b.status,
+					pickupUnlocode: b.pickupUnlocode,
+					dropoffUnlocode: b.dropoffUnlocode,
+					pickupDateTime: b.pickupDateTime?.toISOString() ?? null,
+					dropoffDateTime: b.dropoffDateTime?.toISOString() ?? null,
+					vehicleClass: b.vehicleClass,
+					vehicleMakeModel: b.vehicleMakeModel,
+					ratePlanCode: b.ratePlanCode,
+					customerName: customerName || null,
+					contact: contact || null,
+					createdAt: b.createdAt.toISOString(),
+					updatedAt: b.updatedAt.toISOString(),
+				};
+			});
 
-    res.json({
-      items,
-      total,
-      limit,
-      offset,
-      hasMore: offset + limit < total,
-      view: view === "reservations" || view === "cancellations" ? view : "all",
-    });
-  } catch (e) {
-    next(e);
-  }
-});
+			res.json({
+				items,
+				total,
+				limit,
+				offset,
+				hasMore: offset + limit < total,
+				view:
+					view === "reservations" || view === "cancellations" ? view : "all",
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -759,60 +1287,68 @@ sourcesRouter.get("/sources/bookings", requireAuth(), requireCompanyType("SOURCE
  *         name: offset
  *         schema: { type: integer, default: 0 }
  */
-sourcesRouter.get("/sources/branches", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    // Trim and filter out empty strings - treat empty strings as undefined
-    const status = (req.query.status as string | undefined)?.trim() || undefined;
-    const locationType = (req.query.locationType as string | undefined)?.trim() || undefined;
-    const search = (req.query.search as string | undefined)?.trim() || undefined;
-    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
-    const offset = Math.max(0, Number(req.query.offset || 0));
+sourcesRouter.get(
+	"/sources/branches",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			// Trim and filter out empty strings - treat empty strings as undefined
+			const status =
+				(req.query.status as string | undefined)?.trim() || undefined;
+			const locationType =
+				(req.query.locationType as string | undefined)?.trim() || undefined;
+			const search =
+				(req.query.search as string | undefined)?.trim() || undefined;
+			const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+			const offset = Math.max(0, Number(req.query.offset || 0));
 
-    const where: any = {
-      sourceId,
-    };
-    
-    // Only add filters if they have actual values (not empty strings)
-    if (status && status.length > 0) {
-      where.status = status;
-    }
-    
-    if (locationType && locationType.length > 0) {
-      where.locationType = locationType;
-    }
-    
-    // Only add search filter if search term exists
-    // MySQL's default collation is case-insensitive, so contains should work case-insensitively
-    if (search && search.length > 0) {
-      where.OR = [
-        { branchCode: { contains: search } },
-        { name: { contains: search } },
-        { city: { contains: search } },
-      ];
-    }
+			const where: any = {
+				sourceId,
+			};
 
-    const [branches, total] = await Promise.all([
-      prisma.branch.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.branch.count({ where }),
-    ]);
+			// Only add filters if they have actual values (not empty strings)
+			if (status && status.length > 0) {
+				where.status = status;
+			}
 
-    res.json({
-      items: branches,
-      total,
-      limit,
-      offset,
-      hasMore: offset + limit < total,
-    });
-  } catch (e) {
-    next(e);
-  }
-});
+			if (locationType && locationType.length > 0) {
+				where.locationType = locationType;
+			}
+
+			// Only add search filter if search term exists
+			// MySQL's default collation is case-insensitive, so contains should work case-insensitively
+			if (search && search.length > 0) {
+				where.OR = [
+					{ branchCode: { contains: search } },
+					{ name: { contains: search } },
+					{ city: { contains: search } },
+				];
+			}
+
+			const [branches, total] = await Promise.all([
+				prisma.branch.findMany({
+					where,
+					orderBy: { createdAt: "desc" },
+					take: limit,
+					skip: offset,
+				}),
+				prisma.branch.count({ where }),
+			]);
+
+			res.json({
+				items: branches,
+				total,
+				limit,
+				offset,
+				hasMore: offset + limit < total,
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -824,127 +1360,146 @@ sourcesRouter.get("/sources/branches", requireAuth(), requireCompanyType("SOURCE
  *       - bearerAuth: []
  */
 const createSourceBranchSchema = z.object({
-  branchCode: z.string().min(1, "Branch code is required"),
-  name: z.string().min(1, "Name is required"),
-  status: z.string().optional(),
-  locationType: z.string().optional(),
-  collectionType: z.string().optional(),
-  email: z.preprocess((v) => (v === "" || v === null ? undefined : v), z.string().email().optional()).optional(),
-  phone: z.string().optional().nullable(),
-  latitude: z.number().optional().nullable(),
-  longitude: z.number().optional().nullable(),
-  addressLine: z.string().optional().nullable(),
-  city: z.string().optional().nullable(),
-  postalCode: z.string().optional().nullable(),
-  country: z.string().optional().nullable(),
-  countryCode: z.string().optional().nullable(),
-  natoLocode: z.string().optional().nullable(),
-  agreementId: z.string().optional().nullable(),
-  /** Same shape as supplier import / edit-branch merge (Opening, PickupInstructions, AtAirport, Brand, …) */
-  rawJson: z.any().optional().nullable(),
-  pickupTimes: z.any().optional().nullable(),
-  dropoffTimes: z.any().optional().nullable(),
+	branchCode: z.string().min(1, "Branch code is required"),
+	name: z.string().min(1, "Name is required"),
+	status: z.string().optional(),
+	locationType: z.string().optional(),
+	collectionType: z.string().optional(),
+	email: z
+		.preprocess(
+			(v) => (v === "" || v === null ? undefined : v),
+			z.string().email().optional(),
+		)
+		.optional(),
+	phone: z.string().optional().nullable(),
+	latitude: z.number().optional().nullable(),
+	longitude: z.number().optional().nullable(),
+	addressLine: z.string().optional().nullable(),
+	city: z.string().optional().nullable(),
+	postalCode: z.string().optional().nullable(),
+	country: z.string().optional().nullable(),
+	countryCode: z.string().optional().nullable(),
+	natoLocode: z.string().optional().nullable(),
+	agreementId: z.string().optional().nullable(),
+	/** Same shape as supplier import / edit-branch merge (Opening, PickupInstructions, AtAirport, Brand, …) */
+	rawJson: z.any().optional().nullable(),
+	pickupTimes: z.any().optional().nullable(),
+	dropoffTimes: z.any().optional().nullable(),
 });
 
-sourcesRouter.post("/sources/branches", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const body = createSourceBranchSchema.parse(req.body);
+sourcesRouter.post(
+	"/sources/branches",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const body = createSourceBranchSchema.parse(req.body);
 
-    // Check if branch code already exists for this source
-    const existing = await prisma.branch.findUnique({
-      where: {
-        sourceId_branchCode: {
-          sourceId,
-          branchCode: body.branchCode,
-        },
-      },
-    });
+			// Check if branch code already exists for this source
+			const existing = await prisma.branch.findUnique({
+				where: {
+					sourceId_branchCode: {
+						sourceId,
+						branchCode: body.branchCode,
+					},
+				},
+			});
 
-    if (existing) {
-      return res.status(409).json({
-        error: "BRANCH_CODE_EXISTS",
-        message: `Branch with code ${body.branchCode} already exists`,
-      });
-    }
+			if (existing) {
+				return res.status(409).json({
+					error: "BRANCH_CODE_EXISTS",
+					message: `Branch with code ${body.branchCode} already exists`,
+				});
+			}
 
-    let natoLocodeCreate: string | null = body.natoLocode ? String(body.natoLocode).trim() : "";
-    if (natoLocodeCreate) {
-      try {
-        natoLocodeCreate = await ensureUnlocodeRowForBranch(natoLocodeCreate, {
-          countryCode: body.countryCode,
-          city: body.city,
-          country: body.country,
-        });
-      } catch (e: any) {
-        if (e?.code === "INVALID_UNLOCODE_FORMAT") {
-          return res.status(400).json({ error: e.code, message: e.message });
-        }
-        throw e;
-      }
-    } else {
-      natoLocodeCreate = null;
-    }
+			let natoLocodeCreate: string | null = body.natoLocode
+				? String(body.natoLocode).trim()
+				: "";
+			if (natoLocodeCreate) {
+				try {
+					natoLocodeCreate = await ensureUnlocodeRowForBranch(
+						natoLocodeCreate,
+						{
+							countryCode: body.countryCode,
+							city: body.city,
+							country: body.country,
+						},
+					);
+				} catch (e: any) {
+					if (e?.code === "INVALID_UNLOCODE_FORMAT") {
+						return res.status(400).json({ error: e.code, message: e.message });
+					}
+					throw e;
+				}
+			} else {
+				natoLocodeCreate = null;
+			}
 
-    // Validate agreementId if provided
-    if (body.agreementId) {
-      const agreement = await prisma.agreement.findFirst({
-        where: {
-          id: body.agreementId,
-          sourceId,
-        },
-      });
-      if (!agreement) {
-        return res.status(400).json({
-          error: "INVALID_AGREEMENT",
-          message: "Agreement not found or does not belong to this source",
-        });
-      }
-    }
+			// Validate agreementId if provided
+			if (body.agreementId) {
+				const agreement = await prisma.agreement.findFirst({
+					where: {
+						id: body.agreementId,
+						sourceId,
+					},
+				});
+				if (!agreement) {
+					return res.status(400).json({
+						error: "INVALID_AGREEMENT",
+						message: "Agreement not found or does not belong to this source",
+					});
+				}
+			}
 
-    const branch = await prisma.branch.create({
-      data: {
-        sourceId,
-        branchCode: body.branchCode,
-        name: body.name,
-        status: body.status || null,
-        locationType: body.locationType || null,
-        collectionType: body.collectionType || null,
-        email: body.email ?? null,
-        phone: body.phone || null,
-        latitude: body.latitude || null,
-        longitude: body.longitude || null,
-        addressLine: body.addressLine || null,
-        city: body.city || null,
-        postalCode: body.postalCode || null,
-        country: body.country || null,
-        countryCode: body.countryCode || null,
-        natoLocode: natoLocodeCreate,
-        agreementId: body.agreementId || null,
-        ...(body.rawJson !== undefined ? { rawJson: body.rawJson } : {}),
-        ...(body.pickupTimes !== undefined ? { pickupTimes: body.pickupTimes } : {}),
-        ...(body.dropoffTimes !== undefined ? { dropoffTimes: body.dropoffTimes } : {}),
-      },
-    });
+			const branch = await prisma.branch.create({
+				data: {
+					sourceId,
+					branchCode: body.branchCode,
+					name: body.name,
+					status: body.status || null,
+					locationType: body.locationType || null,
+					collectionType: body.collectionType || null,
+					email: body.email ?? null,
+					phone: body.phone || null,
+					latitude: body.latitude || null,
+					longitude: body.longitude || null,
+					addressLine: body.addressLine || null,
+					city: body.city || null,
+					postalCode: body.postalCode || null,
+					country: body.country || null,
+					countryCode: body.countryCode || null,
+					natoLocode: natoLocodeCreate,
+					agreementId: body.agreementId || null,
+					...(body.rawJson !== undefined ? { rawJson: body.rawJson } : {}),
+					...(body.pickupTimes !== undefined
+						? { pickupTimes: body.pickupTimes }
+						: {}),
+					...(body.dropoffTimes !== undefined
+						? { dropoffTimes: body.dropoffTimes }
+						: {}),
+				},
+			});
 
-    res.status(201).json(branch);
-  } catch (e: any) {
-    if (e.code === "P2002") {
-      return res.status(409).json({
-        error: "BRANCH_CODE_EXISTS",
-        message: "Branch code already exists for this source",
-      });
-    }
-    if (e.name === "ZodError") {
-      return res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: "Invalid request data",
-        errors: e.errors,
-      });
-    }
-    next(e);
-  }
-});
+			res.status(201).json(branch);
+		} catch (e: any) {
+			if (e.code === "P2002") {
+				return res.status(409).json({
+					error: "BRANCH_CODE_EXISTS",
+					message: "Branch code already exists for this source",
+				});
+			}
+			if (e.name === "ZodError") {
+				return res.status(400).json({
+					error: "VALIDATION_ERROR",
+					message: "Invalid request data",
+					errors: e.errors,
+				});
+			}
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -955,27 +1510,34 @@ sourcesRouter.post("/sources/branches", requireAuth(), requireCompanyType("SOURC
  *     security:
  *       - bearerAuth: []
  */
-sourcesRouter.get("/sources/branches/:id", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const { id } = req.params;
-    const sourceId = req.user.companyId;
-    
-    const branch = await prisma.branch.findFirst({
-      where: { 
-        id,
-        sourceId, // Ensure branch belongs to this source
-      },
-    });
+sourcesRouter.get(
+	"/sources/branches/:id",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const { id } = req.params;
+			const sourceId = req.user.companyId;
 
-    if (!branch) {
-      return res.status(404).json({ error: "BRANCH_NOT_FOUND", message: "Branch not found" });
-    }
+			const branch = await prisma.branch.findFirst({
+				where: {
+					id,
+					sourceId, // Ensure branch belongs to this source
+				},
+			});
 
-    res.json(branch);
-  } catch (e) {
-    next(e);
-  }
-});
+			if (!branch) {
+				return res
+					.status(404)
+					.json({ error: "BRANCH_NOT_FOUND", message: "Branch not found" });
+			}
+
+			res.json(branch);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -987,82 +1549,98 @@ sourcesRouter.get("/sources/branches/:id", requireAuth(), requireCompanyType("SO
  *       - bearerAuth: []
  */
 const updateSourceBranchSchema = z.object({
-  name: z.string().optional(),
-  status: z.string().optional(),
-  locationType: z.string().optional(),
-  collectionType: z.string().optional(),
-  email: z.string().email().optional().nullable(),
-  phone: z.string().optional().nullable(),
-  latitude: z.number().optional().nullable(),
-  longitude: z.number().optional().nullable(),
-  addressLine: z.string().optional().nullable(),
-  city: z.string().optional().nullable(),
-  postalCode: z.string().optional().nullable(),
-  country: z.string().optional().nullable(),
-  countryCode: z.string().optional().nullable(),
-  natoLocode: z.string().optional().nullable(),
-  pickupTimes: z.any().optional().nullable(),
-  dropoffTimes: z.any().optional().nullable(),
-  rawJson: z.any().optional().nullable(),
+	name: z.string().optional(),
+	status: z.string().optional(),
+	locationType: z.string().optional(),
+	collectionType: z.string().optional(),
+	email: z.string().email().optional().nullable(),
+	phone: z.string().optional().nullable(),
+	latitude: z.number().optional().nullable(),
+	longitude: z.number().optional().nullable(),
+	addressLine: z.string().optional().nullable(),
+	city: z.string().optional().nullable(),
+	postalCode: z.string().optional().nullable(),
+	country: z.string().optional().nullable(),
+	countryCode: z.string().optional().nullable(),
+	natoLocode: z.string().optional().nullable(),
+	pickupTimes: z.any().optional().nullable(),
+	dropoffTimes: z.any().optional().nullable(),
+	rawJson: z.any().optional().nullable(),
 });
 
-sourcesRouter.patch("/sources/branches/:id", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const { id } = req.params;
-    const sourceId = req.user.companyId;
-    const body = updateSourceBranchSchema.parse(req.body);
+sourcesRouter.patch(
+	"/sources/branches/:id",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const { id } = req.params;
+			const sourceId = req.user.companyId;
+			const body = updateSourceBranchSchema.parse(req.body);
 
-    // Verify branch belongs to this source
-    const existing = await prisma.branch.findFirst({
-      where: { 
-        id,
-        sourceId,
-      },
-    });
+			// Verify branch belongs to this source
+			const existing = await prisma.branch.findFirst({
+				where: {
+					id,
+					sourceId,
+				},
+			});
 
-    if (!existing) {
-      return res.status(404).json({ error: "BRANCH_NOT_FOUND", message: "Branch not found" });
-    }
+			if (!existing) {
+				return res
+					.status(404)
+					.json({ error: "BRANCH_NOT_FOUND", message: "Branch not found" });
+			}
 
-    // Merge rawJson if provided (don't completely replace existing data)
-    let updateData: any = { ...body };
+			// Merge rawJson if provided (don't completely replace existing data)
+			const updateData: any = { ...body };
 
-    if (body.natoLocode !== undefined) {
-      const raw = body.natoLocode == null ? "" : String(body.natoLocode).trim();
-      if (!raw) {
-        updateData.natoLocode = null;
-      } else {
-        try {
-          updateData.natoLocode = await ensureUnlocodeRowForBranch(raw, {
-            countryCode: body.countryCode ?? existing.countryCode,
-            city: body.city ?? existing.city,
-            country: body.country ?? existing.country,
-          });
-        } catch (e: any) {
-          if (e?.code === "INVALID_UNLOCODE_FORMAT") {
-            return res.status(400).json({ error: e.code, message: e.message });
-          }
-          throw e;
-        }
-      }
-    }
-    if (body.rawJson && existing.rawJson && typeof existing.rawJson === "object") {
-      updateData.rawJson = { ...(existing.rawJson as any), ...body.rawJson };
-    }
+			if (body.natoLocode !== undefined) {
+				const raw =
+					body.natoLocode == null ? "" : String(body.natoLocode).trim();
+				if (!raw) {
+					updateData.natoLocode = null;
+				} else {
+					try {
+						updateData.natoLocode = await ensureUnlocodeRowForBranch(raw, {
+							countryCode: body.countryCode ?? existing.countryCode,
+							city: body.city ?? existing.city,
+							country: body.country ?? existing.country,
+						});
+					} catch (e: any) {
+						if (e?.code === "INVALID_UNLOCODE_FORMAT") {
+							return res
+								.status(400)
+								.json({ error: e.code, message: e.message });
+						}
+						throw e;
+					}
+				}
+			}
+			if (
+				body.rawJson &&
+				existing.rawJson &&
+				typeof existing.rawJson === "object"
+			) {
+				updateData.rawJson = { ...(existing.rawJson as any), ...body.rawJson };
+			}
 
-    const branch = await prisma.branch.update({
-      where: { id },
-      data: updateData,
-    });
+			const branch = await prisma.branch.update({
+				where: { id },
+				data: updateData,
+			});
 
-    res.json(branch);
-  } catch (e: any) {
-    if (e.code === "P2025") {
-      return res.status(404).json({ error: "BRANCH_NOT_FOUND", message: "Branch not found" });
-    }
-    next(e);
-  }
-});
+			res.json(branch);
+		} catch (e: any) {
+			if (e.code === "P2025") {
+				return res
+					.status(404)
+					.json({ error: "BRANCH_NOT_FOUND", message: "Branch not found" });
+			}
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -1073,38 +1651,43 @@ sourcesRouter.patch("/sources/branches/:id", requireAuth(), requireCompanyType("
  *     security:
  *       - bearerAuth: []
  */
-sourcesRouter.get("/sources/branches/unmapped", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
-    const offset = Math.max(0, Number(req.query.offset || 0));
+sourcesRouter.get(
+	"/sources/branches/unmapped",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+			const offset = Math.max(0, Number(req.query.offset || 0));
 
-    const where: any = {
-      sourceId,
-      natoLocode: null,
-    };
+			const where: any = {
+				sourceId,
+				natoLocode: null,
+			};
 
-    const [branches, total] = await Promise.all([
-      prisma.branch.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip: offset,
-      }),
-      prisma.branch.count({ where }),
-    ]);
+			const [branches, total] = await Promise.all([
+				prisma.branch.findMany({
+					where,
+					orderBy: { createdAt: "desc" },
+					take: limit,
+					skip: offset,
+				}),
+				prisma.branch.count({ where }),
+			]);
 
-    res.json({
-      items: branches,
-      total,
-      limit,
-      offset,
-      hasMore: offset + limit < total,
-    });
-  } catch (e) {
-    next(e);
-  }
-});
+			res.json({
+				items: branches,
+				total,
+				limit,
+				offset,
+				hasMore: offset + limit < total,
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -1115,638 +1698,642 @@ sourcesRouter.get("/sources/branches/unmapped", requireAuth(), requireCompanyTyp
  *     security:
  *       - bearerAuth: []
  */
-sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    
-    // Load source and check approval
-    const source = await prisma.company.findUnique({
-      where: { id: sourceId },
-      select: {
-        id: true,
-        companyName: true,
-        type: true,
-        status: true,
-        approvalStatus: true,
-        emailVerified: true,
-        companyCode: true,
-        httpEndpoint: true,
-        branchEndpointUrl: true,
-        branchEndpointFormat: true,
-        branchDefaultCountryCode: true,
-        whitelistedDomains: true,
-      },
-    });
+sourcesRouter.post(
+	"/sources/import-branches",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
 
-    if (!source) {
-      return res.status(404).json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
-    }
+			// Load source and check approval
+			const source = await prisma.company.findUnique({
+				where: { id: sourceId },
+				select: {
+					id: true,
+					companyName: true,
+					type: true,
+					status: true,
+					approvalStatus: true,
+					emailVerified: true,
+					companyCode: true,
+					httpEndpoint: true,
+					branchEndpointUrl: true,
+					branchEndpointFormat: true,
+					branchDefaultCountryCode: true,
+					whitelistedDomains: true,
+				},
+			});
 
-    if (source.approvalStatus !== "APPROVED") {
-      return res.status(400).json({
-        error: "NOT_APPROVED",
-        message: "Source must be approved before importing branches",
-      });
-    }
+			if (!source) {
+				return res
+					.status(404)
+					.json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
+			}
 
-    if (!source.emailVerified) {
-      return res.status(400).json({
-        error: "EMAIL_NOT_VERIFIED",
-        message: "Source email must be verified",
-      });
-    }
+			if (source.approvalStatus !== "APPROVED") {
+				return res.status(400).json({
+					error: "NOT_APPROVED",
+					message: "Source must be approved before importing branches",
+				});
+			}
 
-    const subscriptionCheck = await requireActiveSubscription(sourceId);
-    if (subscriptionCheck) return res.status(subscriptionCheck.status).json(subscriptionCheck.body);
+			if (!source.emailVerified) {
+				return res.status(400).json({
+					error: "EMAIL_NOT_VERIFIED",
+					message: "Source email must be verified",
+				});
+			}
 
-    // Use configured branchEndpointUrl, or fallback to httpEndpoint, or default
-    const endpointUrl =
-      source.branchEndpointUrl ||
-      source.httpEndpoint ||
-      (source.type === "AGENT"
-        ? `http://localhost:9091`
-        : `http://localhost:9090`);
+			const subscriptionCheck = await requireActiveSubscription(sourceId);
+			if (subscriptionCheck)
+				return res
+					.status(subscriptionCheck.status)
+					.json(subscriptionCheck.body);
 
-    if (!endpointUrl) {
-      return res.status(400).json({
-        error: "ENDPOINT_NOT_CONFIGURED",
-        message: "Source branchEndpointUrl or httpEndpoint must be configured",
-      });
-    }
+			// Use configured branchEndpointUrl, or fallback to httpEndpoint, or default
+			const endpointUrl =
+				source.branchEndpointUrl ||
+				source.httpEndpoint ||
+				(source.type === "AGENT"
+					? `http://localhost:9091`
+					: `http://localhost:9090`);
 
-    // Get companyCode from authenticated user's company (automatically from source)
-    // companyCode is optional - if not set, validation will skip CompanyCode checks
-    const companyCode = source.companyCode || undefined;
+			if (!endpointUrl) {
+				return res.status(400).json({
+					error: "ENDPOINT_NOT_CONFIGURED",
+					message:
+						"Source branchEndpointUrl or httpEndpoint must be configured",
+				});
+			}
 
-    // Enforce whitelist check
-    const { enforceWhitelist } = await import("../../infra/whitelistEnforcement.js");
-    try {
-      await enforceWhitelist(sourceId, endpointUrl);
-    } catch (e: any) {
-      return res.status(403).json({
-        error: "WHITELIST_VIOLATION",
-        message: e.message || "Endpoint not whitelisted",
-      });
-    }
+			// Get companyCode from authenticated user's company (automatically from source)
+			// companyCode is optional - if not set, validation will skip CompanyCode checks
+			const companyCode = source.companyCode || undefined;
 
-    // Call supplier endpoint with Request-Type: LocationRq header
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+			// Enforce whitelist check
+			const { enforceWhitelist } = await import(
+				"../../infra/whitelistEnforcement.js"
+			);
+			try {
+				await enforceWhitelist(sourceId, endpointUrl);
+			} catch (e: any) {
+				return res.status(403).json({
+					error: "WHITELIST_VIOLATION",
+					message: e.message || "Endpoint not whitelisted",
+				});
+			}
 
-    // Ensure endpointUrl has a valid URL format
-    let finalEndpointUrl = endpointUrl.trim();
-    if (!finalEndpointUrl.startsWith('http://') && !finalEndpointUrl.startsWith('https://')) {
-      finalEndpointUrl = `http://${finalEndpointUrl}`;
-    }
+			// Call supplier endpoint with Request-Type: LocationRq header
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
-    try {
-      const fetchResponse = await fetch(finalEndpointUrl, {
-        method: "GET",
-        headers: {
-          "Request-Type": "LocationRq",
-          "Content-Type": "application/json",
-        },
-        signal: controller.signal,
-        timeout: 30000,
-      } as any);
+			// Ensure endpointUrl has a valid URL format
+			let finalEndpointUrl = endpointUrl.trim();
+			if (
+				!finalEndpointUrl.startsWith("http://") &&
+				!finalEndpointUrl.startsWith("https://")
+			) {
+				finalEndpointUrl = `http://${finalEndpointUrl}`;
+			}
 
-      clearTimeout(timeoutId);
+			try {
+				const fetchResponse = await fetch(finalEndpointUrl, {
+					method: "GET",
+					headers: {
+						"Request-Type": "LocationRq",
+						"Content-Type": "application/json",
+					},
+					signal: controller.signal,
+					timeout: 30000,
+				} as any);
 
-      if (!fetchResponse.ok) {
-        return res.status(fetchResponse.status).json({
-          error: "SUPPLIER_ERROR",
-          message: `Supplier endpoint returned ${fetchResponse.status}`,
-        });
-      }
+				clearTimeout(timeoutId);
 
-      const branchFormat = (source as any).branchEndpointFormat?.toUpperCase?.() || null;
-      const defaultCountryCode = (source as any).branchDefaultCountryCode?.trim?.() || null;
+				if (!fetchResponse.ok) {
+					return res.status(fetchResponse.status).json({
+						error: "SUPPLIER_ERROR",
+						message: `Supplier endpoint returned ${fetchResponse.status}`,
+					});
+				}
 
-      let responseText: string;
-      let data: any;
-      let branches: any[] = [];
+				const branchFormat =
+					(source as any).branchEndpointFormat?.toUpperCase?.() || null;
+				const defaultCountryCode =
+					(source as any).branchDefaultCountryCode?.trim?.() || null;
 
-      // EXCEL format: consume as buffer (must do before .text())
-      if (branchFormat === "EXCEL") {
-        const buffer = Buffer.from(await fetchResponse.arrayBuffer());
-        const { parseExcelToBranches } = await import("../../services/branchCsvExcelParser.js");
-        branches = await parseExcelToBranches(buffer, defaultCountryCode);
-        console.log(`[import-branches] Parsed ${branches.length} branches from Excel (format=EXCEL)`);
-        responseText = "";
-      } else {
-        responseText = await fetchResponse.text();
-      }
+				let responseText: string;
+				let data: any;
+				let branches: any[] = [];
 
-      // CSV format or auto-detect CSV (when not EXCEL)
-      if (branchFormat !== "EXCEL" && responseText) {
-        const { parseCsvToBranches, looksLikeCsv } = await import("../../services/branchCsvExcelParser.js");
-        if (branchFormat === "CSV" || looksLikeCsv(responseText)) {
-          const csvBranches = parseCsvToBranches(responseText, defaultCountryCode);
-          if (csvBranches.length > 0) {
-            branches = csvBranches;
-            console.log(`[import-branches] Parsed ${branches.length} branches from CSV`);
-          }
-        }
-      }
+				// EXCEL format: consume as buffer (must do before .text())
+				if (branchFormat === "EXCEL") {
+					const buffer = Buffer.from(await fetchResponse.arrayBuffer());
+					const { parseExcelToBranches } = await import(
+						"../../services/branchCsvExcelParser.js"
+					);
+					branches = await parseExcelToBranches(buffer, defaultCountryCode);
+					console.log(
+						`[import-branches] Parsed ${branches.length} branches from Excel (format=EXCEL)`,
+					);
+					responseText = "";
+				} else {
+					responseText = await fetchResponse.text();
+				}
 
-      // Clean HTML from response when we still need to parse JSON/PHP
-      if (branches.length === 0 && responseText) {
-        if (responseText.includes('<html') || responseText.includes('<!DOCTYPE')) {
-          console.log('[import-branches] Response appears to be HTML, attempting to extract text content');
-          const preMatch = responseText.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
-          if (preMatch) {
-            responseText = preMatch[1];
-          } else {
-            responseText = responseText.replace(/<[^>]+>/g, '');
-          }
-        }
-      }
+				// CSV format or auto-detect CSV (when not EXCEL)
+				if (branchFormat !== "EXCEL" && responseText) {
+					const { parseCsvToBranches, looksLikeCsv } = await import(
+						"../../services/branchCsvExcelParser.js"
+					);
+					if (branchFormat === "CSV" || looksLikeCsv(responseText)) {
+						const csvBranches = parseCsvToBranches(
+							responseText,
+							defaultCountryCode,
+						);
+						if (csvBranches.length > 0) {
+							branches = csvBranches;
+							console.log(
+								`[import-branches] Parsed ${branches.length} branches from CSV`,
+							);
+						}
+					}
+				}
 
-      // Try to parse as JSON/PHP only when we don't already have branches (e.g. from CSV/EXCEL)
-      if (branches.length === 0 && responseText) {
-        try {
-          data = JSON.parse(responseText);
-          console.log('[import-branches] Successfully parsed as JSON');
-        } catch (jsonError) {
-          // If JSON parsing fails, try to parse as PHP var_dump format
-          console.log('[import-branches] Response is not JSON, attempting PHP var_dump parsing');
-          try {
-            const gloriaResponse = convertPhpVarDumpToOta(responseText);
-            const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-            branches = extractBranchesFromGloria(gloriaResponse);
-            console.log(`[import-branches] Extracted ${branches.length} branches from PHP var_dump format`);
-          } catch (phpError: any) {
-            console.error('[import-branches] PHP parsing error:', phpError?.message);
-            return res.status(200).json({
-              message: "Failed to parse response, but import attempted",
-              imported: 0,
-              updated: 0,
-              skipped: 0,
-              total: 0,
-              summary: { total: 0, valid: 0, invalid: 0, imported: 0, updated: 0, skipped: 0 },
-              error: "INVALID_RESPONSE_FORMAT",
-              validationErrors: [{
-                index: 0,
-                branchCode: "UNKNOWN",
-                branchName: "UNKNOWN",
-                error: {
-                  error: `Failed to parse response. Expected XML, JSON, PHP var_dump, CSV, or Excel.`,
-                  fields: ["Response parsing failed"],
-                },
-              }],
-              warnings: ["Failed to parse supplier response. Check the endpoint URL and configured format (XML, JSON, PHP, CSV, Excel)."],
-            });
-          }
-        }
-      }
+				// Clean HTML from response when we still need to parse JSON/PHP
+				if (branches.length === 0 && responseText) {
+					if (
+						responseText.includes("<html") ||
+						responseText.includes("<!DOCTYPE")
+					) {
+						console.log(
+							"[import-branches] Response appears to be HTML, attempting to extract text content",
+						);
+						const preMatch = responseText.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+						if (preMatch) {
+							responseText = preMatch[1];
+						} else {
+							responseText = responseText.replace(/<[^>]+>/g, "");
+						}
+					}
+				}
 
-      // If we have parsed JSON (or still no branches), extract from JSON data
-      if (branches.length === 0 && data) {
-        // Handle JSON format - check for OTA/Gloria structure
-        if (data.OTA_VehLocSearchRS || data.gloria) {
-          // OTA/Gloria format
-          const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-          branches = extractBranchesFromGloria(data);
-          console.log(`[import-branches] Extracted ${branches.length} branches from OTA/Gloria format`);
-        } else {
-          // Standard JSON format - validate CompanyCode (warn but don't block)
-          const dataTyped = data as any;
-          if (dataTyped.CompanyCode && companyCode && dataTyped.CompanyCode !== companyCode) {
-            console.warn(`[import-branches] CompanyCode mismatch: expected ${companyCode}, got ${dataTyped.CompanyCode}, but proceeding with import`);
-            // Don't block - just log warning and continue
-          }
+				// Try to parse as JSON/PHP only when we don't already have branches (e.g. from CSV/EXCEL)
+				if (branches.length === 0 && responseText) {
+					try {
+						data = JSON.parse(responseText);
+						console.log("[import-branches] Successfully parsed as JSON");
+					} catch (jsonError) {
+						// If JSON parsing fails, try to parse as PHP var_dump format
+						console.log(
+							"[import-branches] Response is not JSON, attempting PHP var_dump parsing",
+						);
+						try {
+							const gloriaResponse = convertPhpVarDumpToOta(responseText);
+							const { extractBranchesFromGloria } = await import(
+								"../../services/xmlParser.js"
+							);
+							branches = extractBranchesFromGloria(gloriaResponse);
+							console.log(
+								`[import-branches] Extracted ${branches.length} branches from PHP var_dump format`,
+							);
+						} catch (phpError: any) {
+							console.error(
+								"[import-branches] PHP parsing error:",
+								phpError?.message,
+							);
+							return res.status(200).json({
+								message: "Failed to parse response, but import attempted",
+								imported: 0,
+								updated: 0,
+								skipped: 0,
+								total: 0,
+								summary: {
+									total: 0,
+									valid: 0,
+									invalid: 0,
+									imported: 0,
+									updated: 0,
+									skipped: 0,
+								},
+								error: "INVALID_RESPONSE_FORMAT",
+								validationErrors: [
+									{
+										index: 0,
+										branchCode: "UNKNOWN",
+										branchName: "UNKNOWN",
+										error: {
+											error: `Failed to parse response. Expected XML, JSON, PHP var_dump, CSV, or Excel.`,
+											fields: ["Response parsing failed"],
+										},
+									},
+								],
+								warnings: [
+									"Failed to parse supplier response. Check the endpoint URL and configured format (XML, JSON, PHP, CSV, Excel).",
+								],
+							});
+						}
+					}
+				}
 
-          // Extract branches (assume data.Branches or data is array)
-          branches = Array.isArray(dataTyped.Branches) ? dataTyped.Branches : (Array.isArray(data) ? data : []);
-        }
-      }
+				// If we have parsed JSON (or still no branches), extract from JSON data
+				if (branches.length === 0 && data) {
+					// Handle JSON format - check for OTA/Gloria structure
+					if (data.OTA_VehLocSearchRS || data.gloria) {
+						// OTA/Gloria format
+						const { extractBranchesFromGloria } = await import(
+							"../../services/xmlParser.js"
+						);
+						branches = extractBranchesFromGloria(data);
+						console.log(
+							`[import-branches] Extracted ${branches.length} branches from OTA/Gloria format`,
+						);
+					} else {
+						// Standard JSON format - validate CompanyCode (warn but don't block)
+						const dataTyped = data as any;
+						if (
+							dataTyped.CompanyCode &&
+							companyCode &&
+							dataTyped.CompanyCode !== companyCode
+						) {
+							console.warn(
+								`[import-branches] CompanyCode mismatch: expected ${companyCode}, got ${dataTyped.CompanyCode}, but proceeding with import`,
+							);
+							// Don't block - just log warning and continue
+						}
 
-      // Allow import even if no branches found (log warning but don't block)
-      if (branches.length === 0) {
-        console.warn('[import-branches] No branches found in supplier response, but allowing request to complete');
-        // Don't return 422 - return 200 with empty result
-        return res.status(200).json({
-          message: "No branches found in supplier response",
-          imported: 0,
-          updated: 0,
-          skipped: 0,
-          total: 0,
-          summary: {
-            total: 0,
-            valid: 0,
-            invalid: 0,
-            imported: 0,
-            updated: 0,
-            skipped: 0,
-          },
-          warnings: ["No branches found in supplier response. Please check the endpoint URL and response format."],
-        });
-      }
+						// Extract branches (assume data.Branches or data is array)
+						branches = Array.isArray(dataTyped.Branches)
+							? dataTyped.Branches
+							: Array.isArray(data)
+								? data
+								: [];
+					}
+				}
 
-      // Debug: Log branches before validation
-      console.log(`[import-branches] About to validate ${branches.length} branches`);
-      if (branches.length > 0) {
-        const firstBranch = branches[0];
-        console.log('[import-branches] First branch before validation:', {
-          Branchcode: firstBranch.Branchcode,
-          Name: firstBranch.Name,
-          AtAirport: firstBranch.AtAirport,
-          LocationType: firstBranch.LocationType,
-          CollectionType: firstBranch.CollectionType,
-          Latitude: firstBranch.Latitude,
-          Longitude: firstBranch.Longitude,
-          EmailAddress: firstBranch.EmailAddress,
-          PhoneNumber: firstBranch.Telephone?.attr?.PhoneNumber,
-          CountryCode: firstBranch.Address?.CountryName?.attr?.Code,
-          HasOpening: !!firstBranch.Opening,
-          OpeningKeys: firstBranch.Opening ? Object.keys(firstBranch.Opening) : [],
-          FullBranch: JSON.stringify(firstBranch, null, 2).substring(0, 3000)
-        });
-        
-        // Check if branch has required fields
-        if (!firstBranch.Branchcode || !firstBranch.Name || !firstBranch.AtAirport) {
-          console.error('[import-branches] CRITICAL: Branch missing required fields!');
-          console.error('[import-branches] Branch structure:', Object.keys(firstBranch));
-          console.error('[import-branches] Full branch object:', JSON.stringify(firstBranch, null, 2));
-        }
-      }
+				// Allow import even if no branches found (log warning but don't block)
+				if (branches.length === 0) {
+					console.warn(
+						"[import-branches] No branches found in supplier response, but allowing request to complete",
+					);
+					// Don't return 422 - return 200 with empty result
+					return res.status(200).json({
+						message: "No branches found in supplier response",
+						imported: 0,
+						updated: 0,
+						skipped: 0,
+						total: 0,
+						summary: {
+							total: 0,
+							valid: 0,
+							invalid: 0,
+							imported: 0,
+							updated: 0,
+							skipped: 0,
+						},
+						warnings: [
+							"No branches found in supplier response. Please check the endpoint URL and response format.",
+						],
+					});
+				}
 
-      // Validate all branches - but allow import even if validation fails (client requirement)
-      // Use companyCode from authenticated user's company (automatically from source)
-      // Convert null to undefined for validation (companyCode is optional)
-      const { validateLocationArray } = await import("../../services/locationValidation.js");
-      const validation = validateLocationArray(branches, companyCode);
-      
-      console.log(`[import-branches] Validation result: valid=${validation.valid}, errors=${validation.errors.length}`);
-      
-      // Log validation errors but don't block import (client wants to store data even if validation fails)
-      if (validation.errors.length > 0) {
-        console.warn(`[import-branches] ${validation.errors.length} branch(es) have validation issues, but proceeding with import as requested`);
-        validation.errors.forEach((err: any, idx: number) => {
-          const branch = branches[err.index];
-          console.warn(`[import-branches] Validation issue ${idx + 1}:`, {
-            index: err.index,
-            branchCode: branch?.Branchcode || branch?.Code || 'UNKNOWN',
-            branchName: branch?.Name || 'UNKNOWN',
-            error: err.error,
-          });
-        });
-      }
+				// Debug: Log branches before validation
+				console.log(
+					`[import-branches] About to validate ${branches.length} branches`,
+				);
+				if (branches.length > 0) {
+					const firstBranch = branches[0];
+					console.log("[import-branches] First branch before validation:", {
+						Branchcode: firstBranch.Branchcode,
+						Name: firstBranch.Name,
+						AtAirport: firstBranch.AtAirport,
+						LocationType: firstBranch.LocationType,
+						CollectionType: firstBranch.CollectionType,
+						Latitude: firstBranch.Latitude,
+						Longitude: firstBranch.Longitude,
+						EmailAddress: firstBranch.EmailAddress,
+						PhoneNumber: firstBranch.Telephone?.attr?.PhoneNumber,
+						CountryCode: firstBranch.Address?.CountryName?.attr?.Code,
+						HasOpening: !!firstBranch.Opening,
+						OpeningKeys: firstBranch.Opening
+							? Object.keys(firstBranch.Opening)
+							: [],
+						FullBranch: JSON.stringify(firstBranch, null, 2).substring(0, 3000),
+					});
 
-      const subWithPlan = await prisma.sourceSubscription.findUnique({
-        where: { sourceId },
-        include: { plan: true },
-      });
-      if (subWithPlan?.plan) {
-        const limitCheck = await checkBranchQuota(sourceId, subWithPlan.subscribedBranchCount, branches.length, 0);
-        if (limitCheck) return res.status(limitCheck.status).json(limitCheck.body);
-      }
+					// Check if branch has required fields
+					if (
+						!firstBranch.Branchcode ||
+						!firstBranch.Name ||
+						!firstBranch.AtAirport
+					) {
+						console.error(
+							"[import-branches] CRITICAL: Branch missing required fields!",
+						);
+						console.error(
+							"[import-branches] Branch structure:",
+							Object.keys(firstBranch),
+						);
+						console.error(
+							"[import-branches] Full branch object:",
+							JSON.stringify(firstBranch, null, 2),
+						);
+					}
+				}
 
-      // Upsert branches - extract all available fields, use defaults for missing ones
-      let imported = 0;
-      let updated = 0;
-      let skipped = 0;
+				branches = branches.map((branch) =>
+					standardizeBranchPayload(branch, defaultCountryCode),
+				);
 
-      for (const branch of branches) {
-        // Extract branch code - try multiple possible fields and nested structures
-        let branchCode = branch.Branchcode || 
-                        branch.Code || 
-                        branch.attr?.Code || 
-                        branch.attr?.BranchType ||
-                        (branch as any).LocationDetail?.attr?.Code ||
-                        (branch as any).LocationDetail?.attr?.BranchType ||
-                        '';
-        
-        // If still no code, try to extract from raw structure
-        if (!branchCode && branch.rawJson) {
-          branchCode = branch.rawJson.Code || 
-                      branch.rawJson.BranchType ||
-                      branch.rawJson.attr?.Code ||
-                      branch.rawJson.attr?.BranchType ||
-                      '';
-        }
-        
-        // Generate a branch code if missing (don't skip - user can fix later)
-        if (!branchCode) {
-          console.warn(`[import-branches] No branch code found, generating one:`, {
-            branchKeys: Object.keys(branch),
-            branchSample: JSON.stringify(branch, null, 2).substring(0, 1000)
-          });
-          // Generate a unique code based on name or timestamp
-          const nameForCode = branch.Name || branch.attr?.Name || (branch as any).LocationDetail?.attr?.Name || 'BRANCH';
-          branchCode = `${nameForCode}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`.toUpperCase().replace(/[^A-Z0-9_]/g, '_').substring(0, 50);
-          console.warn(`[import-branches] Generated branch code: ${branchCode}`);
-        }
+				// Validate all branches - but allow import even if validation fails (client requirement)
+				// Use companyCode from authenticated user's company (automatically from source)
+				// Convert null to undefined for validation (companyCode is optional)
+				const { validateLocationArray } = await import(
+					"../../services/locationValidation.js"
+				);
+				const validation = validateLocationArray(branches, companyCode);
 
-        // Extract name - try multiple sources, use null if missing (user can fill later)
-        const name = branch.Name || 
-                    branch.attr?.Name || 
-                    (branch as any).LocationDetail?.attr?.Name ||
-                    branch.rawJson?.Name ||
-                    branch.rawJson?.attr?.Name ||
-                    null; // Store as null if missing
-        
-        // Extract coordinates - handle both number and string formats, try multiple sources
-        // Store as null if missing (user can fill later)
-        let latitude: number | null = null;
-        let longitude: number | null = null;
-        
-        // Try multiple sources for latitude
-        const latValue = branch.Latitude || 
-                        branch.attr?.Latitude || 
-                        (branch as any).LocationDetail?.attr?.Latitude ||
-                        branch.rawJson?.Latitude ||
-                        branch.rawJson?.attr?.Latitude;
-        
-        if (latValue !== undefined && latValue !== null && latValue !== '') {
-          const lat = typeof latValue === 'number' ? latValue : parseFloat(String(latValue));
-          if (!isNaN(lat)) latitude = lat;
-        }
-        
-        // Try multiple sources for longitude
-        const lonValue = branch.Longitude || 
-                        branch.attr?.Longitude || 
-                        (branch as any).LocationDetail?.attr?.Longitude ||
-                        branch.rawJson?.Longitude ||
-                        branch.rawJson?.attr?.Longitude;
-        
-        if (lonValue !== undefined && lonValue !== null && lonValue !== '') {
-          const lon = typeof lonValue === 'number' ? lonValue : parseFloat(String(lonValue));
-          if (!isNaN(lon)) longitude = lon;
-        }
+				console.log(
+					`[import-branches] Validation result: valid=${validation.valid}, errors=${validation.errors.length}`,
+				);
 
-        // Extract AtAirport - try multiple sources, use null if missing
-        const atAirportValue = branch.AtAirport || 
-                              branch.attr?.AtAirport || 
-                              (branch as any).LocationDetail?.attr?.AtAirport ||
-                              branch.rawJson?.AtAirport ||
-                              branch.rawJson?.attr?.AtAirport;
-        // Store as null if missing, otherwise convert to string
-        const atAirport = atAirportValue === undefined || atAirportValue === null || atAirportValue === '' 
-          ? null 
-          : (atAirportValue === 'true' || atAirportValue === true ? 'true' : 'false');
+				// Log validation errors but don't block import (client wants to store data even if validation fails)
+				if (validation.errors.length > 0) {
+					console.warn(
+						`[import-branches] ${validation.errors.length} branch(es) have validation issues, but proceeding with import as requested`,
+					);
+					validation.errors.forEach((err: any, idx: number) => {
+						const branch = branches[err.index];
+						console.warn(`[import-branches] Validation issue ${idx + 1}:`, {
+							index: err.index,
+							branchCode: branch?.Branchcode || branch?.Code || "UNKNOWN",
+							branchName: branch?.Name || "UNKNOWN",
+							error: err.error,
+						});
+					});
+				}
 
-        // Extract location type - try multiple sources, use null if missing
-        const locationType = branch.LocationType || 
-                            branch.attr?.LocationType || 
-                            (branch as any).LocationDetail?.attr?.LocationType ||
-                            branch.rawJson?.LocationType ||
-                            branch.rawJson?.attr?.LocationType ||
-                            null;
-        
-        // Extract collection type - try multiple sources, derive from AtAirport if possible
-        const collectionType = branch.CollectionType || 
-                              branch.attr?.CollectionType || 
-                              (branch as any).LocationDetail?.attr?.CollectionType ||
-                              branch.rawJson?.CollectionType ||
-                              branch.rawJson?.attr?.CollectionType ||
-                              (atAirport === 'true' ? 'AIRPORT' : (atAirport === 'false' ? 'CITY' : null));
+				const subWithPlan = await prisma.sourceSubscription.findUnique({
+					where: { sourceId },
+					include: { plan: true },
+				});
+				if (subWithPlan?.plan) {
+					const limitCheck = await checkBranchQuota(
+						sourceId,
+						subWithPlan.subscribedBranchCount,
+						branches.length,
+						0,
+					);
+					if (limitCheck)
+						return res.status(limitCheck.status).json(limitCheck.body);
+				}
 
-        // Extract phone - handle multiple formats, use null if missing
-        const phone = branch.Telephone?.attr?.PhoneNumber || 
-                     branch.Telephone?.PhoneNumber ||
-                     branch.phone ||
-                     null;
+				// Upsert branches - extract all available fields, use defaults for missing ones
+				let imported = 0;
+				let updated = 0;
+				const skipped = 0;
 
-        // Extract email - use null if missing
-        const email = branch.EmailAddress || branch.email || null;
+				for (const branch of branches) {
+					const normalized = normalizeBranchForDb(branch, defaultCountryCode);
+					const branchCode = normalized.branchCode;
 
-      // Extract address components, normalising nested { value } objects to plain strings
-      const rawAddressLine = branch.Address?.AddressLine ?? branch.addressLine ?? null;
-      const rawCity = branch.Address?.CityName ?? branch.city ?? null;
-      const rawPostalCode = branch.Address?.PostalCode ?? branch.postalCode ?? null;
-      const rawCountry = branch.Address?.CountryName ?? branch.country ?? null;
+					const existing = await prisma.branch.findUnique({
+						where: {
+							sourceId_branchCode: {
+								sourceId: source.id,
+								branchCode,
+							},
+						},
+					});
 
-      const addressLine =
-        typeof rawAddressLine === "string"
-          ? rawAddressLine
-          : typeof rawAddressLine === "object" && rawAddressLine !== null && "value" in rawAddressLine
-          ? (rawAddressLine as any).value
-          : null;
+					let natoLocode = normalized.natoLocode;
+					if (!natoLocode && normalized.countryCode && normalized.city) {
+						natoLocode = await autoAssignLocode(
+							normalized.countryCode,
+							normalized.city,
+						);
+					}
+					if (!natoLocode && existing?.natoLocode) {
+						natoLocode = existing.natoLocode;
+					}
 
-      const city =
-        typeof rawCity === "string"
-          ? rawCity
-          : typeof rawCity === "object" && rawCity !== null && "value" in rawCity
-          ? (rawCity as any).value
-          : null;
+					let agreementId = normalized.agreementId;
+					if (agreementId) {
+						const agreement = await prisma.agreement.findFirst({
+							where: { id: agreementId, sourceId: source.id },
+							select: { id: true },
+						});
+						if (!agreement) agreementId = null;
+					}
 
-      const postalCode =
-        typeof rawPostalCode === "string"
-          ? rawPostalCode
-          : typeof rawPostalCode === "object" && rawPostalCode !== null && "value" in rawPostalCode
-          ? (rawPostalCode as any).value
-          : null;
+					const branchData = {
+						sourceId: source.id,
+						branchCode,
+						name: normalized.name || branchCode,
+						status: normalized.status,
+						locationType: normalized.locationType,
+						collectionType: normalized.collectionType,
+						email: normalized.email,
+						phone: normalized.phone,
+						latitude: normalized.latitude,
+						longitude: normalized.longitude,
+						addressLine: normalized.addressLine,
+						city: normalized.city,
+						postalCode: normalized.postalCode,
+						country: normalized.country,
+						countryCode: normalized.countryCode,
+						natoLocode,
+						agreementId,
+						rawJson: normalized.rawJson,
+					};
 
-      const country =
-        typeof rawCountry === "string"
-          ? rawCountry
-          : typeof rawCountry === "object" && rawCountry !== null && "value" in rawCountry
-          ? (rawCountry as any).value
-          : null;
-        
-        let countryCode = branch.Address?.CountryName?.attr?.Code ||
-                           branch.Address?.CountryName?.Code ||
-                           branch.countryCode ||
-                           null;
-        if (!countryCode && defaultCountryCode) {
-          countryCode = defaultCountryCode;
-        }
+					if (existing) {
+						await prisma.branch.update({
+							where: { id: existing.id },
+							data: branchData,
+						});
+						updated++;
+					} else {
+						await prisma.branch.create({
+							data: branchData,
+						});
+						imported++;
+					}
+				}
 
-        const existing = await prisma.branch.findUnique({
-          where: {
-            sourceId_branchCode: {
-              sourceId: source.id,
-              branchCode: branchCode, // Use extracted branchCode, not branch.Branchcode
-            },
-          },
-        });
+				// Return success even if validation had issues (client requirement)
+				// Always return 200 status, never block import due to validation
+				const message = validation.valid
+					? "Branches imported successfully"
+					: `Branches imported successfully. ${validation.errors.length} branch(es) had validation issues but were still imported.`;
 
-        // Explicit code from feed > auto-assign > keep DB value if feed left mapping empty
-        let natoLocode = explicitNatoFromBranch(branch as Record<string, unknown>);
-        if (!natoLocode && countryCode && city) {
-          natoLocode = await autoAssignLocode(countryCode, city);
-        }
-        if (!natoLocode && existing?.natoLocode) {
-          natoLocode = existing.natoLocode;
-        }
+				// Enhance validation errors with detailed information
+				const enhancedValidationErrors = validation.errors.map((err: any) => {
+					const branch = branches[err.index];
+					const errorDetails = err.error || {};
 
-        // Build branch data - store missing fields as null (user can fill later)
-        const branchData = {
-          sourceId: source.id,
-          branchCode: branchCode,
-          name: name || null,
-          status: branch.Status || 'ACTIVE',
-          locationType: locationType || null,
-          collectionType: collectionType || null,
-          email: email || null,
-          phone: phone || null,
-          latitude: latitude || null,
-          longitude: longitude || null,
-          addressLine: addressLine || null,
-          city: city || null,
-          postalCode: postalCode || null,
-          country: country || null,
-          countryCode: countryCode || null,
-          natoLocode,
-          rawJson: branch,
-        };
+					// Extract missing fields and validation errors separately
+					const allFields = errorDetails.fields || [];
+					const missingFields = allFields.filter(
+						(f: string) => !f.includes(":") && !f.includes("Invalid"),
+					);
+					const validationErrorMessages = allFields.filter(
+						(f: string) => f.includes(":") || f.includes("Invalid"),
+					);
 
-        if (existing) {
-          await prisma.branch.update({
-            where: { id: existing.id },
-            data: branchData,
-          });
-          updated++;
-        } else {
-          await prisma.branch.create({
-            data: branchData,
-          });
-          imported++;
-        }
-      }
+					// Get branch code and name from multiple possible locations
+					const branchCode =
+						branch?.Branchcode ||
+						branch?.Code ||
+						branch?.attr?.Code ||
+						branch?.attr?.BranchType ||
+						(branch as any)?.LocationDetail?.attr?.Code ||
+						(branch as any)?.LocationDetail?.attr?.BranchType ||
+						"UNKNOWN";
 
-      // Return success even if validation had issues (client requirement)
-      // Always return 200 status, never block import due to validation
-      const message = validation.valid 
-        ? "Branches imported successfully"
-        : `Branches imported successfully. ${validation.errors.length} branch(es) had validation issues but were still imported.`;
+					const branchName =
+						branch?.Name ||
+						branch?.attr?.Name ||
+						(branch as any)?.LocationDetail?.attr?.Name ||
+						"UNKNOWN";
 
-      // Enhance validation errors with detailed information
-      const enhancedValidationErrors = validation.errors.map((err: any) => {
-        const branch = branches[err.index];
-        const errorDetails = err.error || {};
-        
-        // Extract missing fields and validation errors separately
-        const allFields = errorDetails.fields || [];
-        const missingFields = allFields.filter((f: string) => !f.includes(':') && !f.includes('Invalid'));
-        const validationErrorMessages = allFields.filter((f: string) => f.includes(':') || f.includes('Invalid'));
-        
-        // Get branch code and name from multiple possible locations
-        const branchCode = branch?.Branchcode || 
-                          branch?.Code || 
-                          branch?.attr?.Code || 
-                          branch?.attr?.BranchType ||
-                          (branch as any)?.LocationDetail?.attr?.Code ||
-                          (branch as any)?.LocationDetail?.attr?.BranchType ||
-                          'UNKNOWN';
-        
-        const branchName = branch?.Name || 
-                          branch?.attr?.Name || 
-                          (branch as any)?.LocationDetail?.attr?.Name ||
-                          'UNKNOWN';
-        
-        // Show what fields ARE present for debugging
-        const presentFields = branch ? Object.keys(branch).filter(key => {
-          const value = (branch as any)[key];
-          return value !== undefined && value !== null && value !== '' && 
-                 !Array.isArray(value) || (Array.isArray(value) && value.length > 0);
-        }) : [];
-        
-        // Create detailed error message
-        const errorMessage = errorDetails.error || "Location validation failed";
-        let detailedMessage = errorMessage;
-        
-        if (missingFields.length > 0) {
-          detailedMessage += ` Missing fields: ${missingFields.join(', ')}.`;
-        }
-        
-        if (validationErrorMessages.length > 0) {
-          detailedMessage += ` Validation issues: ${validationErrorMessages.join('; ')}.`;
-        }
-        
-        if (errorDetails.days && errorDetails.days.length > 0) {
-          detailedMessage += ` Invalid opening hours for: ${errorDetails.days.join(', ')}.`;
-        }
-        
-        return {
-          index: err.index,
-          branchCode: branchCode,
-          branchName: branchName,
-          error: {
-            error: detailedMessage,
-            message: detailedMessage,
-            fields: errorDetails.fields || [],
-            days: errorDetails.days,
-            missingFields: missingFields.length > 0 ? missingFields : undefined,
-            validationErrors: validationErrorMessages.length > 0 ? validationErrorMessages : undefined,
-            invalidDays: errorDetails.days,
-            details: errorDetails.details || {
-              missingFields: missingFields.length > 0 ? missingFields : undefined,
-              validationErrors: validationErrorMessages.length > 0 ? validationErrorMessages : undefined,
-              invalidDays: errorDetails.days,
-            },
-            // Debugging info
-            presentFields: presentFields,
-            branchStructure: branch ? {
-              hasBranchcode: !!branch.Branchcode,
-              hasCode: !!branch.Code,
-              hasAttr: !!branch.attr,
-              hasLocationDetail: !!(branch as any).LocationDetail,
-              topLevelKeys: Object.keys(branch),
-            } : null,
-          },
-        };
-      });
+					// Show what fields ARE present for debugging
+					const presentFields = branch
+						? Object.keys(branch).filter((key) => {
+								const value = (branch as any)[key];
+								return (
+									(value !== undefined &&
+										value !== null &&
+										value !== "" &&
+										!Array.isArray(value)) ||
+									(Array.isArray(value) && value.length > 0)
+								);
+							})
+						: [];
 
-      // Always return 200 (success) even if validation fails - client wants to store data
-      // Include detailed validation information in response
-      const uploadResponse: any = {
-        message,
-        imported,
-        updated,
-        skipped,
-        total: branches.length,
-        summary: {
-          total: branches.length,
-          valid: branches.length - validation.errors.length,
-          invalid: validation.errors.length,
-          imported,
-          updated,
-          skipped,
-        },
-      };
-      
-      // Add validation errors if any
-      if (validation.errors.length > 0) {
-        uploadResponse.validationErrors = enhancedValidationErrors;
-        uploadResponse.invalidDetails = enhancedValidationErrors;
-        uploadResponse.warnings = [
-          `${validation.errors.length} branch(es) had validation issues but were still imported.`,
-          'Check the validationErrors array for detailed information about what fields are missing or invalid.'
-        ];
-      }
-      
-      res.status(200).json(uploadResponse);
-    } catch (fetchError: any) {
-      clearTimeout(timeoutId);
-      if (fetchError.name === "AbortError" || fetchError.code === "ETIMEDOUT") {
-        return res.status(504).json({
-          error: "TIMEOUT",
-          message: `Supplier endpoint timeout after 30s: ${finalEndpointUrl || endpointUrl}`,
-        });
-      }
-      
-      // Handle fetch connection errors
-      if (fetchError.message?.includes("fetch failed") || fetchError.code === "ECONNREFUSED" || fetchError.code === "ENOTFOUND") {
-        return res.status(503).json({
-          error: "CONNECTION_ERROR",
-          message: `Cannot connect to supplier endpoint: ${finalEndpointUrl || endpointUrl}. Please ensure the source backend is running and accessible.`,
-          details: fetchError.message || fetchError.code,
-        });
-      }
-      
-      // Handle other fetch errors
-      return res.status(500).json({
-        error: "FETCH_ERROR",
-        message: `Failed to fetch from supplier endpoint: ${finalEndpointUrl || endpointUrl}`,
-        details: fetchError.message || String(fetchError),
-      });
-    }
-  } catch (e) {
-    next(e);
-  }
-});
+					// Create detailed error message
+					const errorMessage =
+						errorDetails.error || "Location validation failed";
+					let detailedMessage = errorMessage;
+
+					if (missingFields.length > 0) {
+						detailedMessage += ` Missing fields: ${missingFields.join(", ")}.`;
+					}
+
+					if (validationErrorMessages.length > 0) {
+						detailedMessage += ` Validation issues: ${validationErrorMessages.join("; ")}.`;
+					}
+
+					if (errorDetails.days && errorDetails.days.length > 0) {
+						detailedMessage += ` Invalid opening hours for: ${errorDetails.days.join(", ")}.`;
+					}
+
+					return {
+						index: err.index,
+						branchCode: branchCode,
+						branchName: branchName,
+						error: {
+							error: detailedMessage,
+							message: detailedMessage,
+							fields: errorDetails.fields || [],
+							days: errorDetails.days,
+							missingFields:
+								missingFields.length > 0 ? missingFields : undefined,
+							validationErrors:
+								validationErrorMessages.length > 0
+									? validationErrorMessages
+									: undefined,
+							invalidDays: errorDetails.days,
+							details: errorDetails.details || {
+								missingFields:
+									missingFields.length > 0 ? missingFields : undefined,
+								validationErrors:
+									validationErrorMessages.length > 0
+										? validationErrorMessages
+										: undefined,
+								invalidDays: errorDetails.days,
+							},
+							// Debugging info
+							presentFields: presentFields,
+							branchStructure: branch
+								? {
+										hasBranchcode: !!branch.Branchcode,
+										hasCode: !!branch.Code,
+										hasAttr: !!branch.attr,
+										hasLocationDetail: !!(branch as any).LocationDetail,
+										topLevelKeys: Object.keys(branch),
+									}
+								: null,
+						},
+					};
+				});
+
+				// Always return 200 (success) even if validation fails - client wants to store data
+				// Include detailed validation information in response
+				const uploadResponse: any = {
+					message,
+					imported,
+					updated,
+					skipped,
+					total: branches.length,
+					summary: {
+						total: branches.length,
+						valid: branches.length - validation.errors.length,
+						invalid: validation.errors.length,
+						imported,
+						updated,
+						skipped,
+					},
+				};
+
+				// Add validation errors if any
+				if (validation.errors.length > 0) {
+					uploadResponse.validationErrors = enhancedValidationErrors;
+					uploadResponse.invalidDetails = enhancedValidationErrors;
+					uploadResponse.warnings = [
+						`${validation.errors.length} branch(es) had validation issues but were still imported.`,
+						"Check the validationErrors array for detailed information about what fields are missing or invalid.",
+					];
+				}
+
+				res.status(200).json(uploadResponse);
+			} catch (fetchError: any) {
+				clearTimeout(timeoutId);
+				if (
+					fetchError.name === "AbortError" ||
+					fetchError.code === "ETIMEDOUT"
+				) {
+					return res.status(504).json({
+						error: "TIMEOUT",
+						message: `Supplier endpoint timeout after 30s: ${finalEndpointUrl || endpointUrl}`,
+					});
+				}
+
+				// Handle fetch connection errors
+				if (
+					fetchError.message?.includes("fetch failed") ||
+					fetchError.code === "ECONNREFUSED" ||
+					fetchError.code === "ENOTFOUND"
+				) {
+					return res.status(503).json({
+						error: "CONNECTION_ERROR",
+						message: `Cannot connect to supplier endpoint: ${finalEndpointUrl || endpointUrl}. Please ensure the source backend is running and accessible.`,
+						details: fetchError.message || fetchError.code,
+					});
+				}
+
+				// Handle other fetch errors
+				return res.status(500).json({
+					error: "FETCH_ERROR",
+					message: `Failed to fetch from supplier endpoint: ${finalEndpointUrl || endpointUrl}`,
+					details: fetchError.message || String(fetchError),
+				});
+			}
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -1774,603 +2361,767 @@ sourcesRouter.post("/sources/import-branches", requireAuth(), requireCompanyType
  *                 items:
  *                   type: object
  */
-sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    
-    // Load source and check approval
-    const source = await prisma.company.findUnique({
-      where: { id: sourceId },
-      select: {
-        id: true,
-        companyName: true,
-        type: true,
-        status: true,
-        approvalStatus: true,
-        emailVerified: true,
-        companyCode: true,
-        httpEndpoint: true,
-        branchDefaultCountryCode: true,
-        whitelistedDomains: true,
-      },
-    });
+sourcesRouter.post(
+	"/sources/upload-branches",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
 
-    if (!source) {
-      return res.status(404).json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
-    }
+			// Load source and check approval
+			const source = await prisma.company.findUnique({
+				where: { id: sourceId },
+				select: {
+					id: true,
+					companyName: true,
+					type: true,
+					status: true,
+					approvalStatus: true,
+					emailVerified: true,
+					companyCode: true,
+					httpEndpoint: true,
+					branchDefaultCountryCode: true,
+					whitelistedDomains: true,
+				},
+			});
 
-    if (source.approvalStatus !== "APPROVED") {
-      return res.status(400).json({
-        error: "NOT_APPROVED",
-        message: "Source must be approved before uploading branches",
-      });
-    }
+			if (!source) {
+				return res
+					.status(404)
+					.json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
+			}
 
-    if (!source.emailVerified) {
-      return res.status(400).json({
-        error: "EMAIL_NOT_VERIFIED",
-        message: "Source email must be verified",
-      });
-    }
+			if (source.approvalStatus !== "APPROVED") {
+				return res.status(400).json({
+					error: "NOT_APPROVED",
+					message: "Source must be approved before uploading branches",
+				});
+			}
 
-    const subscriptionCheckUpload = await requireActiveSubscription(sourceId);
-    if (subscriptionCheckUpload) return res.status(subscriptionCheckUpload.status).json(subscriptionCheckUpload.body);
+			if (!source.emailVerified) {
+				return res.status(400).json({
+					error: "EMAIL_NOT_VERIFIED",
+					message: "Source email must be verified",
+				});
+			}
 
-    // Get companyCode from authenticated user's company (automatically from source)
-    // companyCode is optional - if not set, validation will skip CompanyCode checks
-    const companyCode = source.companyCode || undefined;
+			const subscriptionCheckUpload = await requireActiveSubscription(sourceId);
+			if (subscriptionCheckUpload)
+				return res
+					.status(subscriptionCheckUpload.status)
+					.json(subscriptionCheckUpload.body);
 
-    const data = req.body;
+			// Get companyCode from authenticated user's company (automatically from source)
+			// companyCode is optional - if not set, validation will skip CompanyCode checks
+			const companyCode = source.companyCode || undefined;
 
-    if (!data) {
-      return res.status(400).json({
-        error: "INVALID_REQUEST",
-        message: "Request body is required",
-      });
-    }
+			const data = req.body;
 
-    console.log('[upload-branches] Received data type:', typeof data);
-    console.log('[upload-branches] Data keys:', data && typeof data === 'object' ? Object.keys(data) : 'N/A');
-    if (data && typeof data === 'object' && (data as any).rawContent) {
-      console.log('[upload-branches] Found rawContent, length:', (data as any).rawContent?.length || 0);
-      console.log('[upload-branches] rawContent preview:', (data as any).rawContent?.substring(0, 200) || 'N/A');
-    }
+			if (!data) {
+				return res.status(400).json({
+					error: "INVALID_REQUEST",
+					message: "Request body is required",
+				});
+			}
 
-    const uploadFormat = (data as any)?.format?.toUpperCase?.() || null;
-    const uploadDefaultCountry = (data as any)?.defaultCountryCode?.trim?.() || (source as any).branchDefaultCountryCode?.trim?.() || null;
+			console.log("[upload-branches] Received data type:", typeof data);
+			console.log(
+				"[upload-branches] Data keys:",
+				data && typeof data === "object" ? Object.keys(data) : "N/A",
+			);
+			if (data && typeof data === "object" && (data as any).rawContent) {
+				console.log(
+					"[upload-branches] Found rawContent, length:",
+					(data as any).rawContent?.length || 0,
+				);
+				console.log(
+					"[upload-branches] rawContent preview:",
+					(data as any).rawContent?.substring(0, 200) || "N/A",
+				);
+			}
 
-    let branches: any[] = [];
+			const uploadFormat = (data as any)?.format?.toUpperCase?.() || null;
+			const uploadDefaultCountry =
+				(data as any)?.defaultCountryCode?.trim?.() ||
+				(source as any).branchDefaultCountryCode?.trim?.() ||
+				null;
 
-    // CSV or Excel upload: rawContent contains CSV text or base64-encoded Excel
-    if (data && typeof data === 'object' && (data as any).rawContent && typeof (data as any).rawContent === 'string') {
-      const rawValue = (data as any).rawContent.trim();
-      const { parseCsvToBranches, looksLikeCsv, parseExcelToBranches } = await import("../../services/branchCsvExcelParser.js");
-      if (uploadFormat === 'CSV' || (uploadFormat !== 'EXCEL' && looksLikeCsv(rawValue))) {
-        branches = parseCsvToBranches(rawValue, uploadDefaultCountry);
-        console.log(`[upload-branches] Parsed ${branches.length} branches from CSV`);
-      } else if (uploadFormat === 'EXCEL') {
-        try {
-          const buffer = Buffer.from(rawValue, 'base64');
-          branches = await parseExcelToBranches(buffer, uploadDefaultCountry);
-          console.log(`[upload-branches] Parsed ${branches.length} branches from Excel`);
-        } catch (exErr: any) {
-          console.warn('[upload-branches] Excel parse failed:', exErr?.message);
-        }
-      }
-    }
+			let branches: any[] = [];
 
-    // Check if data is a string (pasted PHP var_dump or XML)
-    let content: string | null = null;
-    if (branches.length === 0 && data && typeof data === 'object' && (data as any).rawContent && typeof (data as any).rawContent === 'string') {
-      const rawValue = (data as any).rawContent;
-      if (rawValue.includes('array(') || rawValue.includes('OTA_VehLocSearchRS') || rawValue.includes('<')) {
-        content = rawValue.trim();
-      }
-    }
-    
-    // If not found in rawContent, check if it's already a string (Express parsed the JSON-stringified string)
-    if (!content && typeof data === 'string') {
-      content = data.trim();
-      console.log('[upload-branches] Data is string, using directly, length:', content.length);
-    } else if (!content && data && typeof data === 'object') {
-      // Check if it's wrapped in an object (e.g., { data: "..." })
-      const keys = Object.keys(data);
-      if (keys.length === 1) {
-        const value = (data as any)[keys[0]];
-        if (typeof value === 'string' && (value.includes('array(') || value.includes('OTA_VehLocSearchRS') || value.includes('<'))) {
-          content = value.trim();
-          console.log('[upload-branches] Found string in single-key object, length:', content.length);
-        }
-      }
-      
-      // Also try to detect if the entire object stringifies to a PHP var_dump pattern
-      const dataStr = JSON.stringify(data);
-      // If it's a JSON-stringified string (starts and ends with quotes), unwrap it
-      if (dataStr.startsWith('"') && dataStr.endsWith('"') && dataStr.length > 2) {
-        try {
-          const unwrapped = JSON.parse(dataStr);
-          if (typeof unwrapped === 'string' && (unwrapped.includes('array(') || unwrapped.includes('OTA_VehLocSearchRS'))) {
-            content = unwrapped.trim();
-            console.log('[upload-branches] Unwrapped JSON string, length:', content.length);
-          }
-        } catch (e) {
-          // Not a JSON string
-        }
-      }
-    }
-    
-    // If we found content as a string (PHP var_dump or XML), process it
-    // Also process if content is empty but data might be PHP format
-    if (content && typeof content === 'string') {
-      console.log(`[upload-branches] Processing string content, length: ${content.length}, includes array(: ${content.includes('array(')}, includes OTA_VehLocSearchRS: ${content.includes('OTA_VehLocSearchRS')}`);
-      console.log(`[upload-branches] Content first 200 chars:`, content.substring(0, 200));
-      
-      // Check if it's PHP var_dump format
-      if (content.includes('array(') && content.includes('OTA_VehLocSearchRS')) {
-        try {
-          console.log('[upload-branches] Detected PHP var_dump format, parsing...');
-          // Parse PHP var_dump format
-          const gloriaResponse = convertPhpVarDumpToOta(content);
-          console.log('[upload-branches] PHP var_dump parsed, gloriaResponse structure:', {
-            hasOTA: !!gloriaResponse.OTA_VehLocSearchRS,
-            hasGloria: !!gloriaResponse.gloria,
-            otaKeys: gloriaResponse.OTA_VehLocSearchRS ? Object.keys(gloriaResponse.OTA_VehLocSearchRS) : [],
-            vehMatchedLocsCount: gloriaResponse.OTA_VehLocSearchRS?.VehMatchedLocs?.length || gloriaResponse.gloria?.VehMatchedLocs?.length || 0,
-          });
-          const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-          branches = extractBranchesFromGloria(gloriaResponse);
-          console.log(`[upload-branches] Extracted ${branches.length} branches from PHP var_dump format`);
-          
-          // If extraction failed, try manual extraction as fallback
-          if (branches.length === 0) {
-            console.warn('[upload-branches] extractBranchesFromGloria returned 0 branches, attempting manual extraction...');
-            const root = gloriaResponse.gloria || gloriaResponse.OTA_VehLocSearchRS;
-            if (root && root.VehMatchedLocs && root.VehMatchedLocs.length > 0) {
-              console.warn(`[upload-branches] Found ${root.VehMatchedLocs.length} VehMatchedLocs, extracting manually...`);
-              try {
-                // Manually extract branches from the structure
-                for (const loc of root.VehMatchedLocs) {
-                  const locationDetail = loc.VehMatchedLoc?.LocationDetail;
-                  if (locationDetail && locationDetail.attr) {
-                    // Create a normalized branch directly
-                    const attr = locationDetail.attr;
-                    const branchCode = attr.Code || attr.BranchType || `BRANCH_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-                    
-                    // Extract address components
-                    const address = locationDetail.Address || {};
-                    const addressLine = address.AddressLine?.value || address.AddressLine || '';
-                    const cityName = address.CityName?.value || address.CityName || '';
-                    const postalCode = address.PostalCode?.value || address.PostalCode || '';
-                    const countryName = address.CountryName?.value || address.CountryName || '';
-                    const countryCode = address.CountryName?.attr?.Code || address.CountryName?.Code || '';
-                    
-                    // Extract phone
-                    const phoneNumber = locationDetail.Telephone?.attr?.PhoneNumber || locationDetail.Telephone?.PhoneNumber || '';
-                    
-                    // Extract opening hours
-                    const opening = locationDetail.Opening || {};
-                    
-                    const normalizedBranch = {
-                      Branchcode: branchCode,
-                      Name: attr.Name || null,
-                      AtAirport: attr.AtAirport === 'true' || attr.AtAirport === true ? 'true' : (attr.AtAirport === 'false' || attr.AtAirport === false ? 'false' : null),
-                      LocationType: attr.LocationType || null,
-                      CollectionType: attr.CollectionType || (attr.AtAirport === 'true' ? 'AIRPORT' : (attr.AtAirport === 'false' ? 'CITY' : null)),
-                      Latitude: attr.Latitude ? parseFloat(String(attr.Latitude)) : undefined,
-                      Longitude: attr.Longitude ? parseFloat(String(attr.Longitude)) : undefined,
-                      EmailAddress: locationDetail.EmailAddress || `branch-${branchCode}@example.com`,
-                      Telephone: phoneNumber ? {
-                        attr: {
-                          PhoneNumber: phoneNumber
-                        }
-                      } : {
-                        attr: {
-                          PhoneNumber: '+00000000000'
-                        }
-                      },
-                      Address: {
-                        AddressLine: { value: addressLine || '' },
-                        CityName: { value: cityName || '' },
-                        PostalCode: { value: postalCode || '' },
-                        CountryName: { 
-                          value: countryName || '',
-                          attr: { Code: countryCode || '' }
-                        }
-                      },
-                      Opening: opening || {},
-                      Status: 'ACTIVE',
-                    };
-                    branches.push(normalizedBranch);
-                    console.log(`[upload-branches] Manually extracted branch: ${branchCode} (${attr.Name || 'UNNAMED'})`);
-                  }
-                }
-                console.log(`[upload-branches] Manual extraction resulted in ${branches.length} branches`);
-              } catch (manualError: any) {
-                console.error('[upload-branches] Manual extraction failed:', manualError);
-                console.error('[upload-branches] Manual extraction error stack:', manualError.stack);
-              }
-            } else {
-              console.error('[upload-branches] No root or VehMatchedLocs found for manual extraction');
-              console.error('[upload-branches] Gloria response structure:', JSON.stringify(gloriaResponse, null, 2).substring(0, 2000));
-            }
-          }
-          
-          if (branches.length > 0) {
-            console.log('[upload-branches] First branch sample:', {
-              Branchcode: branches[0].Branchcode,
-              Name: branches[0].Name,
-              AtAirport: branches[0].AtAirport,
-              LocationType: branches[0].LocationType,
-              keys: Object.keys(branches[0]),
-            });
-          }
-        } catch (phpError: any) {
-          console.error('[upload-branches] PHP parsing error:', phpError);
-          return res.status(200).json({
-            message: "Failed to parse PHP var_dump format",
-            imported: 0,
-            updated: 0,
-            skipped: 0,
-            total: 0,
-            summary: {
-              total: 0,
-              valid: 0,
-              invalid: 0,
-              imported: 0,
-              updated: 0,
-              skipped: 0,
-            },
-            error: "INVALID_RESPONSE_FORMAT",
-            validationErrors: [{
-              index: 0,
-              branchCode: "UNKNOWN",
-              branchName: "UNKNOWN",
-              error: {
-                error: `Failed to parse PHP var_dump format: ${phpError.message || String(phpError)}`,
-                fields: ["PHP parsing failed"],
-              },
-            }],
-            warnings: [`Failed to parse PHP var_dump format. Please check the data format.`],
-          });
-        }
-      } else {
-        // Try to parse as JSON string
-        try {
-          const jsonData = JSON.parse(content);
-          if (jsonData.OTA_VehLocSearchRS || jsonData.gloria) {
-            const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-            branches = extractBranchesFromGloria(jsonData);
-          } else {
-            branches = Array.isArray(jsonData.Branches) ? jsonData.Branches : (Array.isArray(jsonData) ? jsonData : []);
-          }
-        } catch (jsonError) {
-          return res.status(200).json({
-            message: "Failed to parse data",
-            imported: 0,
-            updated: 0,
-            skipped: 0,
-            total: 0,
-            summary: {
-              total: 0,
-              valid: 0,
-              invalid: 0,
-              imported: 0,
-              updated: 0,
-              skipped: 0,
-            },
-            error: "INVALID_FORMAT",
-            validationErrors: [{
-              index: 0,
-              branchCode: "UNKNOWN",
-              branchName: "UNKNOWN",
-              error: {
-                error: "Could not parse data. Expected JSON, PHP var_dump, or XML format.",
-                fields: ["Data parsing failed"],
-              },
-            }],
-            warnings: [`Could not parse the provided data. Please check the format.`],
-          });
-        }
-      }
-    }
-    
-    // If we still don't have branches and data is an object (not processed as string), try to extract from it
-    if (branches.length === 0 && data && typeof data === 'object' && !content) {
-      const dataTyped = data as any;
-      console.log('[upload-branches] Processing as JSON object (no content extracted), keys:', Object.keys(dataTyped));
-      
-      // Check if it has OTA structure directly
-      if (dataTyped.OTA_VehLocSearchRS || dataTyped.gloria) {
-        console.log('[upload-branches] Found OTA structure in object, extracting branches...');
-        const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-        branches = extractBranchesFromGloria(dataTyped);
-        console.log(`[upload-branches] Extracted ${branches.length} branches from OTA structure`);
-      } else {
-        // Try standard JSON format
-        branches = Array.isArray(dataTyped.Branches) ? dataTyped.Branches : (Array.isArray(data) ? data : []);
-        console.log(`[upload-branches] Extracted ${branches.length} branches from JSON structure`);
-      }
-      
-      // Validate CompanyCode if present (but don't block)
-      // Use companyCode from authenticated user's company (automatically from source)
-      if (dataTyped.CompanyCode && companyCode && dataTyped.CompanyCode !== companyCode) {
-        console.warn(`[upload-branches] CompanyCode mismatch: expected ${companyCode}, got ${dataTyped.CompanyCode}, but proceeding with upload`);
-      }
-    }
+			// CSV or Excel upload: rawContent contains CSV text or base64-encoded Excel
+			if (
+				data &&
+				typeof data === "object" &&
+				(data as any).rawContent &&
+				typeof (data as any).rawContent === "string"
+			) {
+				const rawValue = (data as any).rawContent.trim();
+				const { parseCsvToBranches, looksLikeCsv, parseExcelToBranches } =
+					await import("../../services/branchCsvExcelParser.js");
+				if (
+					uploadFormat === "CSV" ||
+					(uploadFormat !== "EXCEL" && looksLikeCsv(rawValue))
+				) {
+					branches = parseCsvToBranches(rawValue, uploadDefaultCountry);
+					console.log(
+						`[upload-branches] Parsed ${branches.length} branches from CSV`,
+					);
+				} else if (uploadFormat === "EXCEL") {
+					try {
+						const buffer = Buffer.from(rawValue, "base64");
+						branches = await parseExcelToBranches(buffer, uploadDefaultCountry);
+						console.log(
+							`[upload-branches] Parsed ${branches.length} branches from Excel`,
+						);
+					} catch (exErr: any) {
+						console.warn(
+							"[upload-branches] Excel parse failed:",
+							exErr?.message,
+						);
+					}
+				}
+			}
 
-    // Log final branch count before checking
-    console.log(`[upload-branches] Final branch count: ${branches.length}`);
-    if (branches.length === 0) {
-      console.warn('[upload-branches] No branches extracted. Data type:', typeof data);
-      console.warn('[upload-branches] Data structure:', data && typeof data === 'object' ? Object.keys(data) : 'N/A');
-      if (content) {
-        console.warn('[upload-branches] Content preview (first 500 chars):', content.substring(0, 500));
-        console.warn('[upload-branches] Content preview (last 500 chars):', content.substring(Math.max(0, content.length - 500)));
-        // Try one more time to parse if we have content but no branches
-        if (content.includes('array(') && content.includes('OTA_VehLocSearchRS')) {
-          console.warn('[upload-branches] Retrying PHP parsing with full content...');
-          try {
-            const gloriaResponse = convertPhpVarDumpToOta(content);
-            const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-            branches = extractBranchesFromGloria(gloriaResponse);
-            console.warn(`[upload-branches] Retry extracted ${branches.length} branches`);
-          } catch (retryError: any) {
-            console.error('[upload-branches] Retry parsing failed:', retryError);
-          }
-        }
-      }
-    }
-    
-    // Allow upload even if no branches found (return 200 with empty result)
-    // NEVER return 422 - always return 200 with detailed info
-    if (branches.length === 0) {
-      return res.status(200).json({
-        message: "No branches found in uploaded data. Please check the data format.",
-        imported: 0,
-        updated: 0,
-        skipped: 0,
-        total: 0,
-        summary: {
-          total: 0,
-          valid: 0,
-          invalid: 0,
-          imported: 0,
-          updated: 0,
-          skipped: 0,
-        },
-        error: "NO_BRANCHES",
-        warnings: [
-          "No branches found in uploaded data.",
-          "Expected format: { CompanyCode: string, Branches: [...] } or array of branches, or PHP var_dump/XML with OTA_VehLocSearchRS structure.",
-          content ? `Content received (${content.length} chars) but could not extract branches. Please check the format matches the expected PHP var_dump structure.` : "No content was extracted from the request. Please ensure you're sending the data correctly."
-        ],
-      });
-    }
+			// Check if data is a string (pasted PHP var_dump or XML)
+			let content: string | null = null;
+			if (
+				branches.length === 0 &&
+				data &&
+				typeof data === "object" &&
+				(data as any).rawContent &&
+				typeof (data as any).rawContent === "string"
+			) {
+				const rawValue = (data as any).rawContent;
+				if (
+					rawValue.includes("array(") ||
+					rawValue.includes("OTA_VehLocSearchRS") ||
+					rawValue.includes("<")
+				) {
+					content = rawValue.trim();
+				}
+			}
 
-    // Validate all branches - but allow upload even if validation fails (client requirement)
-    // Use companyCode from authenticated user's company (automatically from source)
-    // Convert null to undefined for validation (companyCode is optional)
-    const { validateLocationArray } = await import("../../services/locationValidation.js");
-    const validation = validateLocationArray(branches, companyCode);
-    
-    console.log(`[upload-branches] Validation result: valid=${validation.valid}, errors=${validation.errors.length}`);
-    
-    // Log validation errors but don't block upload (client wants to store data even if validation fails)
-    if (validation.errors.length > 0) {
-      console.warn(`[upload-branches] ${validation.errors.length} branch(es) have validation issues, but proceeding with upload as requested`);
-    }
+			// If not found in rawContent, check if it's already a string (Express parsed the JSON-stringified string)
+			if (!content && typeof data === "string") {
+				content = data.trim();
+				console.log(
+					"[upload-branches] Data is string, using directly, length:",
+					content.length,
+				);
+			} else if (!content && data && typeof data === "object") {
+				// Check if it's wrapped in an object (e.g., { data: "..." })
+				const keys = Object.keys(data);
+				if (keys.length === 1) {
+					const value = (data as any)[keys[0]];
+					if (
+						typeof value === "string" &&
+						(value.includes("array(") ||
+							value.includes("OTA_VehLocSearchRS") ||
+							value.includes("<"))
+					) {
+						content = value.trim();
+						console.log(
+							"[upload-branches] Found string in single-key object, length:",
+							content.length,
+						);
+					}
+				}
 
-    const subUpload = await prisma.sourceSubscription.findUnique({
-      where: { sourceId },
-      include: { plan: true },
-    });
-    if (subUpload?.plan) {
-      const limitCheckUpload = await checkBranchQuota(sourceId, subUpload.subscribedBranchCount, branches.length, 0);
-      if (limitCheckUpload) return res.status(limitCheckUpload.status).json(limitCheckUpload.body);
-    }
+				// Also try to detect if the entire object stringifies to a PHP var_dump pattern
+				const dataStr = JSON.stringify(data);
+				// If it's a JSON-stringified string (starts and ends with quotes), unwrap it
+				if (
+					dataStr.startsWith('"') &&
+					dataStr.endsWith('"') &&
+					dataStr.length > 2
+				) {
+					try {
+						const unwrapped = JSON.parse(dataStr);
+						if (
+							typeof unwrapped === "string" &&
+							(unwrapped.includes("array(") ||
+								unwrapped.includes("OTA_VehLocSearchRS"))
+						) {
+							content = unwrapped.trim();
+							console.log(
+								"[upload-branches] Unwrapped JSON string, length:",
+								content.length,
+							);
+						}
+					} catch (e) {
+						// Not a JSON string
+					}
+				}
+			}
 
-    // Upsert branches - extract all available fields, use null for missing ones
-    let imported = 0;
-    let updated = 0;
-    let skipped = 0;
+			// If we found content as a string (PHP var_dump or XML), process it
+			// Also process if content is empty but data might be PHP format
+			if (content && typeof content === "string") {
+				console.log(
+					`[upload-branches] Processing string content, length: ${content.length}, includes array(: ${content.includes("array(")}, includes OTA_VehLocSearchRS: ${content.includes("OTA_VehLocSearchRS")}`,
+				);
+				console.log(
+					`[upload-branches] Content first 200 chars:`,
+					content.substring(0, 200),
+				);
 
-    for (const branch of branches) {
-      // Extract branch code - try multiple possible fields and nested structures
-      let branchCode = branch.Branchcode || 
-                      branch.Code || 
-                      branch.attr?.Code || 
-                      branch.attr?.BranchType ||
-                      (branch as any).LocationDetail?.attr?.Code ||
-                      (branch as any).LocationDetail?.attr?.BranchType ||
-                      '';
-      
-      // Generate a branch code if missing (don't skip - user can fix later)
-      if (!branchCode) {
-        const nameForCode = branch.Name || branch.attr?.Name || (branch as any).LocationDetail?.attr?.Name || 'BRANCH';
-        branchCode = `${nameForCode}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`.toUpperCase().replace(/[^A-Z0-9_]/g, '_').substring(0, 50);
-        console.warn(`[upload-branches] Generated branch code: ${branchCode}`);
-      }
+				// Check if it's PHP var_dump format
+				if (
+					content.includes("array(") &&
+					content.includes("OTA_VehLocSearchRS")
+				) {
+					try {
+						console.log(
+							"[upload-branches] Detected PHP var_dump format, parsing...",
+						);
+						// Parse PHP var_dump format
+						const gloriaResponse = convertPhpVarDumpToOta(content);
+						console.log(
+							"[upload-branches] PHP var_dump parsed, gloriaResponse structure:",
+							{
+								hasOTA: !!gloriaResponse.OTA_VehLocSearchRS,
+								hasGloria: !!gloriaResponse.gloria,
+								otaKeys: gloriaResponse.OTA_VehLocSearchRS
+									? Object.keys(gloriaResponse.OTA_VehLocSearchRS)
+									: [],
+								vehMatchedLocsCount:
+									gloriaResponse.OTA_VehLocSearchRS?.VehMatchedLocs?.length ||
+									gloriaResponse.gloria?.VehMatchedLocs?.length ||
+									0,
+							},
+						);
+						const { extractBranchesFromGloria } = await import(
+							"../../services/xmlParser.js"
+						);
+						branches = extractBranchesFromGloria(gloriaResponse);
+						console.log(
+							`[upload-branches] Extracted ${branches.length} branches from PHP var_dump format`,
+						);
 
-      // Extract all fields - use null if missing (user can fill later)
-      const name = branch.Name || branch.attr?.Name || (branch as any).LocationDetail?.attr?.Name || null;
-      
-      // Extract coordinates
-      let latitude: number | null = null;
-      let longitude: number | null = null;
-      const latValue = branch.Latitude || branch.attr?.Latitude || (branch as any).LocationDetail?.attr?.Latitude;
-      const lonValue = branch.Longitude || branch.attr?.Longitude || (branch as any).LocationDetail?.attr?.Longitude;
-      if (latValue !== undefined && latValue !== null && latValue !== '') {
-        const lat = typeof latValue === 'number' ? latValue : parseFloat(String(latValue));
-        if (!isNaN(lat)) latitude = lat;
-      }
-      if (lonValue !== undefined && lonValue !== null && lonValue !== '') {
-        const lon = typeof lonValue === 'number' ? lonValue : parseFloat(String(lonValue));
-        if (!isNaN(lon)) longitude = lon;
-      }
+						// If extraction failed, try manual extraction as fallback
+						if (branches.length === 0) {
+							console.warn(
+								"[upload-branches] extractBranchesFromGloria returned 0 branches, attempting manual extraction...",
+							);
+							const root =
+								gloriaResponse.gloria || gloriaResponse.OTA_VehLocSearchRS;
+							if (
+								root &&
+								root.VehMatchedLocs &&
+								root.VehMatchedLocs.length > 0
+							) {
+								console.warn(
+									`[upload-branches] Found ${root.VehMatchedLocs.length} VehMatchedLocs, extracting manually...`,
+								);
+								try {
+									// Manually extract branches from the structure
+									for (const loc of root.VehMatchedLocs) {
+										const locationDetail = loc.VehMatchedLoc?.LocationDetail;
+										if (locationDetail && locationDetail.attr) {
+											// Create a normalized branch directly
+											const attr = locationDetail.attr;
+											const branchCode =
+												attr.Code ||
+												attr.BranchType ||
+												`BRANCH_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 
-      // Extract AtAirport
-      const atAirportValue = branch.AtAirport || branch.attr?.AtAirport || (branch as any).LocationDetail?.attr?.AtAirport;
-      const atAirport = atAirportValue === undefined || atAirportValue === null || atAirportValue === '' 
-        ? null 
-        : (atAirportValue === 'true' || atAirportValue === true ? 'true' : 'false');
+											// Extract address components
+											const address = locationDetail.Address || {};
+											const addressLine =
+												address.AddressLine?.value || address.AddressLine || "";
+											const cityName =
+												address.CityName?.value || address.CityName || "";
+											const postalCode =
+												address.PostalCode?.value || address.PostalCode || "";
+											const countryName =
+												address.CountryName?.value || address.CountryName || "";
+											const countryCode =
+												address.CountryName?.attr?.Code ||
+												address.CountryName?.Code ||
+												"";
 
-      // Extract location and collection types
-      const locationType = branch.LocationType || branch.attr?.LocationType || (branch as any).LocationDetail?.attr?.LocationType || null;
-      const collectionType = branch.CollectionType || 
-                           branch.attr?.CollectionType || 
-                           (branch as any).LocationDetail?.attr?.CollectionType ||
-                           (atAirport === 'true' ? 'AIRPORT' : (atAirport === 'false' ? 'CITY' : null));
+											// Extract phone
+											const phoneNumber =
+												locationDetail.Telephone?.attr?.PhoneNumber ||
+												locationDetail.Telephone?.PhoneNumber ||
+												"";
 
-      // Extract phone and email
-      const phone = branch.Telephone?.attr?.PhoneNumber || branch.Telephone?.PhoneNumber || null;
-      const email = branch.EmailAddress || null;
+											// Extract opening hours
+											const opening = locationDetail.Opening || {};
 
-      // Extract address components, normalising nested { value } objects to plain strings
-      const rawAddressLine = branch.Address?.AddressLine ?? null;
-      const rawCity = branch.Address?.CityName ?? null;
-      const rawPostalCode = branch.Address?.PostalCode ?? null;
-      const rawCountry = branch.Address?.CountryName ?? null;
+											const normalizedBranch = {
+												Branchcode: branchCode,
+												Name: attr.Name || null,
+												AtAirport:
+													attr.AtAirport === "true" || attr.AtAirport === true
+														? "true"
+														: attr.AtAirport === "false" ||
+																attr.AtAirport === false
+															? "false"
+															: null,
+												LocationType: attr.LocationType || null,
+												CollectionType:
+													attr.CollectionType ||
+													(attr.AtAirport === "true"
+														? "AIRPORT"
+														: attr.AtAirport === "false"
+															? "CITY"
+															: null),
+												Latitude: attr.Latitude
+													? parseFloat(String(attr.Latitude))
+													: undefined,
+												Longitude: attr.Longitude
+													? parseFloat(String(attr.Longitude))
+													: undefined,
+												EmailAddress:
+													locationDetail.EmailAddress ||
+													`branch-${branchCode}@example.com`,
+												Telephone: phoneNumber
+													? {
+															attr: {
+																PhoneNumber: phoneNumber,
+															},
+														}
+													: {
+															attr: {
+																PhoneNumber: "+00000000000",
+															},
+														},
+												Address: {
+													AddressLine: { value: addressLine || "" },
+													CityName: { value: cityName || "" },
+													PostalCode: { value: postalCode || "" },
+													CountryName: {
+														value: countryName || "",
+														attr: { Code: countryCode || "" },
+													},
+												},
+												Opening: opening || {},
+												Status: "ACTIVE",
+											};
+											branches.push(normalizedBranch);
+											console.log(
+												`[upload-branches] Manually extracted branch: ${branchCode} (${attr.Name || "UNNAMED"})`,
+											);
+										}
+									}
+									console.log(
+										`[upload-branches] Manual extraction resulted in ${branches.length} branches`,
+									);
+								} catch (manualError: any) {
+									console.error(
+										"[upload-branches] Manual extraction failed:",
+										manualError,
+									);
+									console.error(
+										"[upload-branches] Manual extraction error stack:",
+										manualError.stack,
+									);
+								}
+							} else {
+								console.error(
+									"[upload-branches] No root or VehMatchedLocs found for manual extraction",
+								);
+								console.error(
+									"[upload-branches] Gloria response structure:",
+									JSON.stringify(gloriaResponse, null, 2).substring(0, 2000),
+								);
+							}
+						}
 
-      const addressLine =
-        typeof rawAddressLine === "string"
-          ? rawAddressLine
-          : typeof rawAddressLine === "object" && rawAddressLine !== null && "value" in rawAddressLine
-          ? (rawAddressLine as any).value
-          : null;
+						if (branches.length > 0) {
+							console.log("[upload-branches] First branch sample:", {
+								Branchcode: branches[0].Branchcode,
+								Name: branches[0].Name,
+								AtAirport: branches[0].AtAirport,
+								LocationType: branches[0].LocationType,
+								keys: Object.keys(branches[0]),
+							});
+						}
+					} catch (phpError: any) {
+						console.error("[upload-branches] PHP parsing error:", phpError);
+						return res.status(200).json({
+							message: "Failed to parse PHP var_dump format",
+							imported: 0,
+							updated: 0,
+							skipped: 0,
+							total: 0,
+							summary: {
+								total: 0,
+								valid: 0,
+								invalid: 0,
+								imported: 0,
+								updated: 0,
+								skipped: 0,
+							},
+							error: "INVALID_RESPONSE_FORMAT",
+							validationErrors: [
+								{
+									index: 0,
+									branchCode: "UNKNOWN",
+									branchName: "UNKNOWN",
+									error: {
+										error: `Failed to parse PHP var_dump format: ${phpError.message || String(phpError)}`,
+										fields: ["PHP parsing failed"],
+									},
+								},
+							],
+							warnings: [
+								`Failed to parse PHP var_dump format. Please check the data format.`,
+							],
+						});
+					}
+				} else {
+					// Try to parse as JSON string
+					try {
+						const jsonData = JSON.parse(content);
+						if (jsonData.OTA_VehLocSearchRS || jsonData.gloria) {
+							const { extractBranchesFromGloria } = await import(
+								"../../services/xmlParser.js"
+							);
+							branches = extractBranchesFromGloria(jsonData);
+						} else {
+							branches = Array.isArray(jsonData.Branches)
+								? jsonData.Branches
+								: Array.isArray(jsonData)
+									? jsonData
+									: [];
+						}
+					} catch (jsonError) {
+						return res.status(200).json({
+							message: "Failed to parse data",
+							imported: 0,
+							updated: 0,
+							skipped: 0,
+							total: 0,
+							summary: {
+								total: 0,
+								valid: 0,
+								invalid: 0,
+								imported: 0,
+								updated: 0,
+								skipped: 0,
+							},
+							error: "INVALID_FORMAT",
+							validationErrors: [
+								{
+									index: 0,
+									branchCode: "UNKNOWN",
+									branchName: "UNKNOWN",
+									error: {
+										error:
+											"Could not parse data. Expected JSON, PHP var_dump, or XML format.",
+										fields: ["Data parsing failed"],
+									},
+								},
+							],
+							warnings: [
+								`Could not parse the provided data. Please check the format.`,
+							],
+						});
+					}
+				}
+			}
 
-      const city =
-        typeof rawCity === "string"
-          ? rawCity
-          : typeof rawCity === "object" && rawCity !== null && "value" in rawCity
-          ? (rawCity as any).value
-          : null;
+			// If we still don't have branches and data is an object (not processed as string), try to extract from it
+			if (
+				branches.length === 0 &&
+				data &&
+				typeof data === "object" &&
+				!content
+			) {
+				const dataTyped = data as any;
+				console.log(
+					"[upload-branches] Processing as JSON object (no content extracted), keys:",
+					Object.keys(dataTyped),
+				);
 
-      const postalCode =
-        typeof rawPostalCode === "string"
-          ? rawPostalCode
-          : typeof rawPostalCode === "object" && rawPostalCode !== null && "value" in rawPostalCode
-          ? (rawPostalCode as any).value
-          : null;
+				// Check if it has OTA structure directly
+				if (dataTyped.OTA_VehLocSearchRS || dataTyped.gloria) {
+					console.log(
+						"[upload-branches] Found OTA structure in object, extracting branches...",
+					);
+					const { extractBranchesFromGloria } = await import(
+						"../../services/xmlParser.js"
+					);
+					branches = extractBranchesFromGloria(dataTyped);
+					console.log(
+						`[upload-branches] Extracted ${branches.length} branches from OTA structure`,
+					);
+				} else {
+					// Try standard JSON format
+					branches = Array.isArray(dataTyped.Branches)
+						? dataTyped.Branches
+						: Array.isArray(data)
+							? data
+							: [];
+					console.log(
+						`[upload-branches] Extracted ${branches.length} branches from JSON structure`,
+					);
+				}
 
-      const country =
-        typeof rawCountry === "string"
-          ? rawCountry
-          : typeof rawCountry === "object" && rawCountry !== null && "value" in rawCountry
-          ? (rawCountry as any).value
-          : null;
-      let countryCode = branch.Address?.CountryName?.attr?.Code || branch.Address?.CountryName?.Code || branch.countryCode || null;
-      if (!countryCode && uploadDefaultCountry) {
-        countryCode = uploadDefaultCountry;
-      }
+				// Validate CompanyCode if present (but don't block)
+				// Use companyCode from authenticated user's company (automatically from source)
+				if (
+					dataTyped.CompanyCode &&
+					companyCode &&
+					dataTyped.CompanyCode !== companyCode
+				) {
+					console.warn(
+						`[upload-branches] CompanyCode mismatch: expected ${companyCode}, got ${dataTyped.CompanyCode}, but proceeding with upload`,
+					);
+				}
+			}
 
-      const existing = await prisma.branch.findUnique({
-        where: {
-          sourceId_branchCode: {
-            sourceId: source.id,
-            branchCode: branchCode, // Use the extracted branchCode, not branch.Branchcode
-          },
-        },
-      });
+			// Log final branch count before checking
+			console.log(`[upload-branches] Final branch count: ${branches.length}`);
+			if (branches.length === 0) {
+				console.warn(
+					"[upload-branches] No branches extracted. Data type:",
+					typeof data,
+				);
+				console.warn(
+					"[upload-branches] Data structure:",
+					data && typeof data === "object" ? Object.keys(data) : "N/A",
+				);
+				if (content) {
+					console.warn(
+						"[upload-branches] Content preview (first 500 chars):",
+						content.substring(0, 500),
+					);
+					console.warn(
+						"[upload-branches] Content preview (last 500 chars):",
+						content.substring(Math.max(0, content.length - 500)),
+					);
+					// Try one more time to parse if we have content but no branches
+					if (
+						content.includes("array(") &&
+						content.includes("OTA_VehLocSearchRS")
+					) {
+						console.warn(
+							"[upload-branches] Retrying PHP parsing with full content...",
+						);
+						try {
+							const gloriaResponse = convertPhpVarDumpToOta(content);
+							const { extractBranchesFromGloria } = await import(
+								"../../services/xmlParser.js"
+							);
+							branches = extractBranchesFromGloria(gloriaResponse);
+							console.warn(
+								`[upload-branches] Retry extracted ${branches.length} branches`,
+							);
+						} catch (retryError: any) {
+							console.error(
+								"[upload-branches] Retry parsing failed:",
+								retryError,
+							);
+						}
+					}
+				}
+			}
 
-      let natoLocode = explicitNatoFromBranch(branch as Record<string, unknown>);
-      if (!natoLocode && countryCode && city) {
-        natoLocode = await autoAssignLocode(countryCode, city);
-      }
-      if (!natoLocode && existing?.natoLocode) {
-        natoLocode = existing.natoLocode;
-      }
+			// Allow upload even if no branches found (return 200 with empty result)
+			// NEVER return 422 - always return 200 with detailed info
+			if (branches.length === 0) {
+				return res.status(200).json({
+					message:
+						"No branches found in uploaded data. Please check the data format.",
+					imported: 0,
+					updated: 0,
+					skipped: 0,
+					total: 0,
+					summary: {
+						total: 0,
+						valid: 0,
+						invalid: 0,
+						imported: 0,
+						updated: 0,
+						skipped: 0,
+					},
+					error: "NO_BRANCHES",
+					warnings: [
+						"No branches found in uploaded data.",
+						"Expected format: { CompanyCode: string, Branches: [...] } or array of branches, or PHP var_dump/XML with OTA_VehLocSearchRS structure.",
+						content
+							? `Content received (${content.length} chars) but could not extract branches. Please check the format matches the expected PHP var_dump structure.`
+							: "No content was extracted from the request. Please ensure you're sending the data correctly.",
+					],
+				});
+			}
 
-      const branchData = {
-        sourceId: source.id,
-        branchCode: branchCode,
-        name: name || null,
-        status: branch.Status || 'ACTIVE',
-        locationType: locationType || null,
-        collectionType: collectionType || null,
-        email: email || null,
-        phone: phone || null,
-        latitude: latitude || null,
-        longitude: longitude || null,
-        addressLine: addressLine || null,
-        city: city || null,
-        postalCode: postalCode || null,
-        country: country || null,
-        countryCode: countryCode || null,
-        natoLocode,
-        rawJson: branch,
-      };
+			branches = branches.map((branch) =>
+				standardizeBranchPayload(branch, uploadDefaultCountry),
+			);
 
-      if (existing) {
-        await prisma.branch.update({
-          where: { id: existing.id },
-          data: branchData,
-        });
-        updated++;
-      } else {
-        await prisma.branch.create({
-          data: branchData,
-        });
-        imported++;
-      }
-    }
+			// Validate all branches - but allow upload even if validation fails (client requirement)
+			// Use companyCode from authenticated user's company (automatically from source)
+			// Convert null to undefined for validation (companyCode is optional)
+			const { validateLocationArray } = await import(
+				"../../services/locationValidation.js"
+			);
+			const validation = validateLocationArray(branches, companyCode);
 
-    // Always return 200 (success) even if validation fails - client wants to store data
-    const message = validation.valid 
-      ? "Branches uploaded successfully"
-      : `Branches uploaded successfully. ${validation.errors.length} branch(es) had validation issues but were still imported.`;
+			console.log(
+				`[upload-branches] Validation result: valid=${validation.valid}, errors=${validation.errors.length}`,
+			);
 
-    // Enhance validation errors with detailed information
-    const enhancedValidationErrors = validation.errors.map((err: any) => {
-      const branch = branches[err.index];
-      const errorDetails = err.error || {};
-      
-      const branchCode = branch?.Branchcode || branch?.Code || branch?.attr?.Code || 'UNKNOWN';
-      const branchName = branch?.Name || branch?.attr?.Name || 'UNKNOWN';
-      
-      return {
-        index: err.index,
-        branchCode: branchCode,
-        branchName: branchName,
-        error: {
-          error: errorDetails.error || "Location validation failed",
-          fields: errorDetails.fields || [],
-          days: errorDetails.days,
-          details: errorDetails.details || {},
-        },
-      };
-    });
+			// Log validation errors but don't block upload (client wants to store data even if validation fails)
+			if (validation.errors.length > 0) {
+				console.warn(
+					`[upload-branches] ${validation.errors.length} branch(es) have validation issues, but proceeding with upload as requested`,
+				);
+			}
 
-    const response: any = {
-      message,
-      imported,
-      updated,
-      skipped,
-      total: branches.length,
-      summary: {
-        total: branches.length,
-        valid: branches.length - validation.errors.length,
-        invalid: validation.errors.length,
-        imported,
-        updated,
-        skipped,
-      },
-    };
-    
-    // Add validation errors if any
-    if (validation.errors.length > 0) {
-      response.validationErrors = enhancedValidationErrors;
-      response.invalidDetails = enhancedValidationErrors;
-      response.warnings = [
-        `${validation.errors.length} branch(es) had validation issues but were still imported.`,
-        'Check the validationErrors array for detailed information about what fields are missing or invalid.'
-      ];
-    }
+			const subUpload = await prisma.sourceSubscription.findUnique({
+				where: { sourceId },
+				include: { plan: true },
+			});
+			if (subUpload?.plan) {
+				const limitCheckUpload = await checkBranchQuota(
+					sourceId,
+					subUpload.subscribedBranchCount,
+					branches.length,
+					0,
+				);
+				if (limitCheckUpload)
+					return res
+						.status(limitCheckUpload.status)
+						.json(limitCheckUpload.body);
+			}
 
-    res.status(200).json(response);
-  } catch (e) {
-    next(e);
-  }
-});
+			// Upsert branches - extract all available fields, use null for missing ones
+			let imported = 0;
+			let updated = 0;
+			const skipped = 0;
+
+			for (const branch of branches) {
+				const normalized = normalizeBranchForDb(branch, uploadDefaultCountry);
+				const branchCode = normalized.branchCode;
+
+				const existing = await prisma.branch.findUnique({
+					where: {
+						sourceId_branchCode: {
+							sourceId: source.id,
+							branchCode,
+						},
+					},
+				});
+
+				let natoLocode = normalized.natoLocode;
+				if (!natoLocode && normalized.countryCode && normalized.city) {
+					natoLocode = await autoAssignLocode(
+						normalized.countryCode,
+						normalized.city,
+					);
+				}
+				if (!natoLocode && existing?.natoLocode) {
+					natoLocode = existing.natoLocode;
+				}
+
+				let agreementId = normalized.agreementId;
+				if (agreementId) {
+					const agreement = await prisma.agreement.findFirst({
+						where: { id: agreementId, sourceId: source.id },
+						select: { id: true },
+					});
+					if (!agreement) agreementId = null;
+				}
+
+				const branchData = {
+					sourceId: source.id,
+					branchCode,
+					name: normalized.name || branchCode,
+					status: normalized.status,
+					locationType: normalized.locationType,
+					collectionType: normalized.collectionType,
+					email: normalized.email,
+					phone: normalized.phone,
+					latitude: normalized.latitude,
+					longitude: normalized.longitude,
+					addressLine: normalized.addressLine,
+					city: normalized.city,
+					postalCode: normalized.postalCode,
+					country: normalized.country,
+					countryCode: normalized.countryCode,
+					natoLocode,
+					agreementId,
+					rawJson: normalized.rawJson,
+				};
+
+				if (existing) {
+					await prisma.branch.update({
+						where: { id: existing.id },
+						data: branchData,
+					});
+					updated++;
+				} else {
+					await prisma.branch.create({
+						data: branchData,
+					});
+					imported++;
+				}
+			}
+
+			// Always return 200 (success) even if validation fails - client wants to store data
+			const message = validation.valid
+				? "Branches uploaded successfully"
+				: `Branches uploaded successfully. ${validation.errors.length} branch(es) had validation issues but were still imported.`;
+
+			// Enhance validation errors with detailed information
+			const enhancedValidationErrors = validation.errors.map((err: any) => {
+				const branch = branches[err.index];
+				const errorDetails = err.error || {};
+
+				const branchCode =
+					branch?.Branchcode || branch?.Code || branch?.attr?.Code || "UNKNOWN";
+				const branchName = branch?.Name || branch?.attr?.Name || "UNKNOWN";
+
+				return {
+					index: err.index,
+					branchCode: branchCode,
+					branchName: branchName,
+					error: {
+						error: errorDetails.error || "Location validation failed",
+						fields: errorDetails.fields || [],
+						days: errorDetails.days,
+						details: errorDetails.details || {},
+					},
+				};
+			});
+
+			const response: any = {
+				message,
+				imported,
+				updated,
+				skipped,
+				total: branches.length,
+				summary: {
+					total: branches.length,
+					valid: branches.length - validation.errors.length,
+					invalid: validation.errors.length,
+					imported,
+					updated,
+					skipped,
+				},
+			};
+
+			// Add validation errors if any
+			if (validation.errors.length > 0) {
+				response.validationErrors = enhancedValidationErrors;
+				response.invalidDetails = enhancedValidationErrors;
+				response.warnings = [
+					`${validation.errors.length} branch(es) had validation issues but were still imported.`,
+					"Check the validationErrors array for detailed information about what fields are missing or invalid.",
+				];
+			}
+
+			res.status(200).json(response);
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 // ============================================================================
 // Source Location Management Endpoints
@@ -2396,50 +3147,55 @@ sourcesRouter.post("/sources/upload-branches", requireAuth(), requireCompanyType
  *         name: cursor
  *         schema: { type: string }
  */
-sourcesRouter.get("/sources/locations/search", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const query = String(req.query.query || "").trim();
-    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
-    const cursor = String(req.query.cursor || "");
+sourcesRouter.get(
+	"/sources/locations/search",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const query = String(req.query.query || "").trim();
+			const limit = Math.max(1, Math.min(100, Number(req.query.limit || 25)));
+			const cursor = String(req.query.cursor || "");
 
-    const where: any = query
-      ? {
-          OR: [
-            { unlocode: { contains: query } },
-            { country: { contains: query } },
-            { place: { contains: query } },
-            { iataCode: { contains: query } },
-          ],
-        }
-      : {};
+			const where: any = query
+				? {
+						OR: [
+							{ unlocode: { contains: query } },
+							{ country: { contains: query } },
+							{ place: { contains: query } },
+							{ iataCode: { contains: query } },
+						],
+					}
+				: {};
 
-    const rows = await prisma.uNLocode.findMany({
-      where,
-      take: limit + 1,
-      ...(cursor ? { cursor: { unlocode: cursor }, skip: 1 } : {}),
-      orderBy: { unlocode: "asc" },
-    });
+			const rows = await prisma.uNLocode.findMany({
+				where,
+				take: limit + 1,
+				...(cursor ? { cursor: { unlocode: cursor }, skip: 1 } : {}),
+				orderBy: { unlocode: "asc" },
+			});
 
-    const hasMore = rows.length > limit;
-    const items = rows.slice(0, limit).map((r) => ({
-      unlocode: r.unlocode,
-      country: r.country,
-      place: r.place,
-      iata_code: r.iataCode || "",
-      latitude: r.latitude || 0,
-      longitude: r.longitude || 0,
-    }));
-    const next_cursor = hasMore ? rows[limit].unlocode : "";
+			const hasMore = rows.length > limit;
+			const items = rows.slice(0, limit).map((r) => ({
+				unlocode: r.unlocode,
+				country: r.country,
+				place: r.place,
+				iata_code: r.iataCode || "",
+				latitude: r.latitude || 0,
+				longitude: r.longitude || 0,
+			}));
+			const next_cursor = hasMore ? rows[limit].unlocode : "";
 
-    res.json({
-      items,
-      next_cursor,
-      has_more: hasMore,
-    });
-  } catch (e) {
-    next(e);
-  }
-});
+			res.json({
+				items,
+				next_cursor,
+				has_more: hasMore,
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -2463,79 +3219,84 @@ sourcesRouter.get("/sources/locations/search", requireAuth(), requireCompanyType
  *                 description: UN/LOCODE (e.g., GBMAN)
  */
 const addLocationSchema = z.object({
-  unlocode: z.string().min(1, "UN/LOCODE is required"),
+	unlocode: z.string().min(1, "UN/LOCODE is required"),
 });
 
-sourcesRouter.post("/sources/locations", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const body = addLocationSchema.parse(req.body);
-    const { unlocode } = body;
+sourcesRouter.post(
+	"/sources/locations",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const body = addLocationSchema.parse(req.body);
+			const { unlocode } = body;
 
-    // Verify the UN/LOCODE exists in the database
-    const unlocodeEntry = await prisma.uNLocode.findUnique({
-      where: { unlocode: unlocode.toUpperCase() },
-    });
+			// Verify the UN/LOCODE exists in the database
+			const unlocodeEntry = await prisma.uNLocode.findUnique({
+				where: { unlocode: unlocode.toUpperCase() },
+			});
 
-    if (!unlocodeEntry) {
-      return res.status(404).json({
-        error: "UNLOCODE_NOT_FOUND",
-        message: `UN/LOCODE "${unlocode}" not found in database`,
-      });
-    }
+			if (!unlocodeEntry) {
+				return res.status(404).json({
+					error: "UNLOCODE_NOT_FOUND",
+					message: `UN/LOCODE "${unlocode}" not found in database`,
+				});
+			}
 
-    // Check if location is already added
-    const existing = await prisma.sourceLocation.findUnique({
-      where: {
-        sourceId_unlocode: {
-          sourceId,
-          unlocode: unlocode.toUpperCase(),
-        },
-      },
-    });
+			// Check if location is already added
+			const existing = await prisma.sourceLocation.findUnique({
+				where: {
+					sourceId_unlocode: {
+						sourceId,
+						unlocode: unlocode.toUpperCase(),
+					},
+				},
+			});
 
-    if (existing) {
-      return res.status(409).json({
-        error: "LOCATION_ALREADY_ADDED",
-        message: `Location "${unlocode}" is already in your coverage`,
-      });
-    }
+			if (existing) {
+				return res.status(409).json({
+					error: "LOCATION_ALREADY_ADDED",
+					message: `Location "${unlocode}" is already in your coverage`,
+				});
+			}
 
-    // Add location to source coverage
-    const sourceLocation = await prisma.sourceLocation.create({
-      data: {
-        sourceId,
-        unlocode: unlocode.toUpperCase(),
-      },
-      include: {
-        loc: {
-          select: {
-            unlocode: true,
-            country: true,
-            place: true,
-            iataCode: true,
-            latitude: true,
-            longitude: true,
-          },
-        },
-      },
-    });
+			// Add location to source coverage
+			const sourceLocation = await prisma.sourceLocation.create({
+				data: {
+					sourceId,
+					unlocode: unlocode.toUpperCase(),
+				},
+				include: {
+					loc: {
+						select: {
+							unlocode: true,
+							country: true,
+							place: true,
+							iataCode: true,
+							latitude: true,
+							longitude: true,
+						},
+					},
+				},
+			});
 
-    res.status(201).json({
-      message: "Location added successfully",
-      location: {
-        unlocode: sourceLocation.loc.unlocode,
-        country: sourceLocation.loc.country,
-        place: sourceLocation.loc.place,
-        iata_code: sourceLocation.loc.iataCode || "",
-        latitude: sourceLocation.loc.latitude || 0,
-        longitude: sourceLocation.loc.longitude || 0,
-      },
-    });
-  } catch (e) {
-    next(e);
-  }
-});
+			res.status(201).json({
+				message: "Location added successfully",
+				location: {
+					unlocode: sourceLocation.loc.unlocode,
+					country: sourceLocation.loc.country,
+					place: sourceLocation.loc.place,
+					iata_code: sourceLocation.loc.iataCode || "",
+					latitude: sourceLocation.loc.latitude || 0,
+					longitude: sourceLocation.loc.longitude || 0,
+				},
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -2552,53 +3313,60 @@ sourcesRouter.post("/sources/locations", requireAuth(), requireCompanyType("SOUR
  *         schema:
  *           type: string
  */
-sourcesRouter.delete("/sources/locations/:unlocode", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const unlocode = String(req.params.unlocode || "").toUpperCase().trim();
+sourcesRouter.delete(
+	"/sources/locations/:unlocode",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const unlocode = String(req.params.unlocode || "")
+				.toUpperCase()
+				.trim();
 
-    if (!unlocode) {
-      return res.status(400).json({
-        error: "BAD_REQUEST",
-        message: "UN/LOCODE is required",
-      });
-    }
+			if (!unlocode) {
+				return res.status(400).json({
+					error: "BAD_REQUEST",
+					message: "UN/LOCODE is required",
+				});
+			}
 
-    // Check if location exists in source coverage
-    const sourceLocation = await prisma.sourceLocation.findUnique({
-      where: {
-        sourceId_unlocode: {
-          sourceId,
-          unlocode,
-        },
-      },
-    });
+			// Check if location exists in source coverage
+			const sourceLocation = await prisma.sourceLocation.findUnique({
+				where: {
+					sourceId_unlocode: {
+						sourceId,
+						unlocode,
+					},
+				},
+			});
 
-    if (!sourceLocation) {
-      return res.status(404).json({
-        error: "LOCATION_NOT_FOUND",
-        message: `Location "${unlocode}" is not in your coverage`,
-      });
-    }
+			if (!sourceLocation) {
+				return res.status(404).json({
+					error: "LOCATION_NOT_FOUND",
+					message: `Location "${unlocode}" is not in your coverage`,
+				});
+			}
 
-    // Remove location from source coverage
-    await prisma.sourceLocation.delete({
-      where: {
-        sourceId_unlocode: {
-          sourceId,
-          unlocode,
-        },
-      },
-    });
+			// Remove location from source coverage
+			await prisma.sourceLocation.delete({
+				where: {
+					sourceId_unlocode: {
+						sourceId,
+						unlocode,
+					},
+				},
+			});
 
-    res.json({
-      message: "Location removed successfully",
-      unlocode,
-    });
-  } catch (e) {
-    next(e);
-  }
-});
+			res.json({
+				message: "Location removed successfully",
+				unlocode,
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * @openapi
@@ -2612,2648 +3380,3599 @@ sourcesRouter.delete("/sources/locations/:unlocode", requireAuth(), requireCompa
  *     security:
  *       - bearerAuth: []
  */
-sourcesRouter.post("/sources/import-locations", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    
-    // Load source and check approval
-    const source = await prisma.company.findUnique({
-      where: { id: sourceId },
-      select: {
-        id: true,
-        companyName: true,
-        type: true,
-        status: true,
-        approvalStatus: true,
-        emailVerified: true,
-        companyCode: true,
-        httpEndpoint: true,
-        locationEndpointUrl: true,
-        whitelistedDomains: true,
-      },
-    });
+sourcesRouter.post(
+	"/sources/import-locations",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
 
-    if (!source) {
-      return res.status(404).json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
-    }
+			// Load source and check approval
+			const source = await prisma.company.findUnique({
+				where: { id: sourceId },
+				select: {
+					id: true,
+					companyName: true,
+					type: true,
+					status: true,
+					approvalStatus: true,
+					emailVerified: true,
+					companyCode: true,
+					httpEndpoint: true,
+					locationEndpointUrl: true,
+					whitelistedDomains: true,
+				},
+			});
 
-    if (source.approvalStatus !== "APPROVED") {
-      return res.status(400).json({
-        error: "NOT_APPROVED",
-        message: "Source must be approved before importing locations",
-      });
-    }
+			if (!source) {
+				return res
+					.status(404)
+					.json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
+			}
 
-    if (!source.emailVerified) {
-      return res.status(400).json({
-        error: "EMAIL_NOT_VERIFIED",
-        message: "Source email must be verified",
-      });
-    }
+			if (source.approvalStatus !== "APPROVED") {
+				return res.status(400).json({
+					error: "NOT_APPROVED",
+					message: "Source must be approved before importing locations",
+				});
+			}
 
-    const subscriptionCheckLoc = await requireActiveSubscription(sourceId);
-    if (subscriptionCheckLoc) return res.status(subscriptionCheckLoc.status).json(subscriptionCheckLoc.body);
+			if (!source.emailVerified) {
+				return res.status(400).json({
+					error: "EMAIL_NOT_VERIFIED",
+					message: "Source email must be verified",
+				});
+			}
 
-    // Use configured locationEndpointUrl, or fallback to httpEndpoint
-    const endpointUrl =
-      source.locationEndpointUrl ||
-      source.httpEndpoint ||
-      `http://localhost:9090`;
+			const subscriptionCheckLoc = await requireActiveSubscription(sourceId);
+			if (subscriptionCheckLoc)
+				return res
+					.status(subscriptionCheckLoc.status)
+					.json(subscriptionCheckLoc.body);
 
-    if (!endpointUrl) {
-      return res.status(400).json({
-        error: "ENDPOINT_NOT_CONFIGURED",
-        message: "Source locationEndpointUrl or httpEndpoint must be configured",
-      });
-    }
+			// Use configured locationEndpointUrl, or fallback to httpEndpoint
+			const endpointUrl =
+				source.locationEndpointUrl ||
+				source.httpEndpoint ||
+				`http://localhost:9090`;
 
-    // Enforce whitelist check
-    const { enforceWhitelist } = await import("../../infra/whitelistEnforcement.js");
-    try {
-      await enforceWhitelist(sourceId, endpointUrl);
-    } catch (e: any) {
-      return res.status(403).json({
-        error: "WHITELIST_VIOLATION",
-        message: e.message || "Endpoint not whitelisted",
-      });
-    }
+			if (!endpointUrl) {
+				return res.status(400).json({
+					error: "ENDPOINT_NOT_CONFIGURED",
+					message:
+						"Source locationEndpointUrl or httpEndpoint must be configured",
+				});
+			}
 
-    // Call supplier endpoint with Request-Type: LocationRq header
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+			// Enforce whitelist check
+			const { enforceWhitelist } = await import(
+				"../../infra/whitelistEnforcement.js"
+			);
+			try {
+				await enforceWhitelist(sourceId, endpointUrl);
+			} catch (e: any) {
+				return res.status(403).json({
+					error: "WHITELIST_VIOLATION",
+					message: e.message || "Endpoint not whitelisted",
+				});
+			}
 
-    let finalEndpointUrl = endpointUrl.trim();
-    if (!finalEndpointUrl.startsWith('http://') && !finalEndpointUrl.startsWith('https://')) {
-      finalEndpointUrl = `http://${finalEndpointUrl}`;
-    }
+			// Call supplier endpoint with Request-Type: LocationRq header
+			const controller = new AbortController();
+			const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
-    try {
-      const fetchResponse = await fetch(finalEndpointUrl, {
-        method: "GET",
-        headers: {
-          "Request-Type": "LocationRq",
-          "Content-Type": "application/json",
-        },
-        signal: controller.signal,
-        timeout: 30000,
-      } as any);
+			let finalEndpointUrl = endpointUrl.trim();
+			if (
+				!finalEndpointUrl.startsWith("http://") &&
+				!finalEndpointUrl.startsWith("https://")
+			) {
+				finalEndpointUrl = `http://${finalEndpointUrl}`;
+			}
 
-      clearTimeout(timeoutId);
+			try {
+				const fetchResponse = await fetch(finalEndpointUrl, {
+					method: "GET",
+					headers: {
+						"Request-Type": "LocationRq",
+						"Content-Type": "application/json",
+					},
+					signal: controller.signal,
+					timeout: 30000,
+				} as any);
 
-      if (!fetchResponse.ok) {
-        return res.status(fetchResponse.status).json({
-          error: "SUPPLIER_ERROR",
-          message: `Supplier endpoint returned ${fetchResponse.status}`,
-        });
-      }
+				clearTimeout(timeoutId);
 
-      // Get response text first to handle both JSON and XML formats
-      let responseText = await fetchResponse.text();
-      
-      // Clean up response text - remove HTML tags if present
-      if (responseText.includes('<html') || responseText.includes('<!DOCTYPE')) {
-        console.log('[import-locations] Response appears to be HTML, attempting to extract text content');
-        const preMatch = responseText.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
-        if (preMatch) {
-          responseText = preMatch[1];
-        } else {
-          responseText = responseText.replace(/<[^>]+>/g, '');
-        }
-      }
-      // Decode HTML entities that might escape brackets (e.g. &quot; or [)
-      responseText = responseText.replace(/&quot;/g, '"').replace(/&#91;/g, '[').replace(/&#93;/g, ']');
-      
-      // Strip trailing PHP string dump (e.g. final string(3961) " ... ") so it doesn't break brace matching.
-      // Strategy: Find the closing braces of the main OTA structure, then look for string( patterns after that.
-      if (responseText.includes('OTA_VehLocSearchRS')) {
-        const originalLength = responseText.length;
-        const hadVehMatchedLocs = responseText.includes('["VehMatchedLocs"]') || responseText.includes("['VehMatchedLocs']");
-        
-        // Find the end of the main array structure: array(1) { ["OTA_VehLocSearchRS"]=> ... }
-        // Look for pattern: } } } followed by optional whitespace/newlines and then string(
-        const trailingDumpMatch = responseText.match(/\}\s*\}\s*\}\s*[\r\n\s]*string\s*\(/);
-        if (trailingDumpMatch && typeof trailingDumpMatch.index === 'number') {
-          // Find the start of the string( pattern
-          const stringStart = responseText.indexOf('string(', trailingDumpMatch.index);
-          if (stringStart !== -1) {
-            const beforeStrip = responseText;
-            responseText = responseText.substring(0, stringStart);
-            // Safety check: ensure VehMatchedLocs is still present after stripping
-            if (!responseText.includes('["VehMatchedLocs"]') && !responseText.includes("['VehMatchedLocs']")) {
-              console.warn('[import-locations] WARNING: Stripping removed VehMatchedLocs, reverting. String start was at:', stringStart);
-              responseText = beforeStrip; // Revert if we removed too much
-            } else {
-              console.log('[import-locations] Stripped trailing PHP string dump, response length:', originalLength, '->', responseText.length);
-            }
-          }
-        } else {
-          // Fallback: if pattern not found, try finding string( patterns that appear after multiple closing braces
-          // This handles cases where the structure might be slightly different
-          const closingBracesMatch = responseText.match(/\}\s*\}\s*\}\s*\}\s*[\r\n\s]*string\s*\(/);
-          if (closingBracesMatch && typeof closingBracesMatch.index === 'number') {
-            const stringStart = responseText.indexOf('string(', closingBracesMatch.index);
-            if (stringStart !== -1) {
-              const beforeStrip = responseText;
-              responseText = responseText.substring(0, stringStart);
-              // Safety check: ensure VehMatchedLocs is still present after stripping
-              if (!responseText.includes('["VehMatchedLocs"]') && !responseText.includes("['VehMatchedLocs']")) {
-                console.warn('[import-locations] WARNING: Fallback stripping removed VehMatchedLocs, reverting.');
-                responseText = beforeStrip; // Revert if we removed too much
-              } else {
-                console.log('[import-locations] Stripped trailing PHP string dump (fallback), response length:', originalLength, '->', responseText.length);
-              }
-            }
-          }
-        }
-        
-        // Final check: Log if VehMatchedLocs is missing
-        if (!responseText.includes('["VehMatchedLocs"]') && !responseText.includes("['VehMatchedLocs']")) {
-          console.error('[import-locations] ERROR: VehMatchedLocs not found after processing. Had it before:', hadVehMatchedLocs);
-          console.error('[import-locations] Response preview (last 500 chars):', responseText.substring(Math.max(0, responseText.length - 500)));
-          console.error('[import-locations] Response length:', responseText.length, 'Contains OTA_VehLocSearchRS:', responseText.includes('OTA_VehLocSearchRS'));
-        }
-      }
-      
-      let data: any;
-      let locations: any[] = [];
+				if (!fetchResponse.ok) {
+					return res.status(fetchResponse.status).json({
+						error: "SUPPLIER_ERROR",
+						message: `Supplier endpoint returned ${fetchResponse.status}`,
+					});
+				}
 
-      // Check if it's PHP var_dump format with OTA_VehLocSearchRS
-      if (responseText.includes('array(') && responseText.includes('OTA_VehLocSearchRS')) {
-        console.log('[import-locations] Detected PHP var_dump format with OTA_VehLocSearchRS, parsing...');
-        try {
-          const gloriaResponse = convertPhpVarDumpToOta(responseText);
-          console.log('[import-locations] PHP var_dump parsed, extracting locations from OTA structure');
-          
-          // Extract locations from OTA_VehLocSearchRS.VehMatchedLocs
-          const root = gloriaResponse.gloria || gloriaResponse.OTA_VehLocSearchRS;
-          if (root && root.VehMatchedLocs && Array.isArray(root.VehMatchedLocs)) {
-            // Extract location data from each VehMatchedLoc.LocationDetail
-            for (const loc of root.VehMatchedLocs) {
-              const locationDetail = loc.VehMatchedLoc?.LocationDetail;
-              if (locationDetail) {
-                const attrs = locationDetail.attr || {};
-                const address = locationDetail.Address || {};
-                const countryName = address.CountryName || {};
-                
-                // Extract country code first
-                const countryCode = (countryName.attr?.Code || attrs.CountryCode || '').toString().toUpperCase().trim();
-                
-                // Extract unlocode - try multiple sources
-                let unlocode: string | null = null;
-                
-                // 1. Try explicit NatoLocode field
-                if (locationDetail.NatoLocode) {
-                  unlocode = String(locationDetail.NatoLocode).toUpperCase().trim();
-                } else if (attrs.NatoLocode) {
-                  unlocode = String(attrs.NatoLocode).toUpperCase().trim();
-                }
-                
-                // 2. Check if Code itself is a valid UN/LOCODE (5 chars, starts with country code)
-                if (!unlocode && attrs.Code) {
-                  const code = String(attrs.Code).toUpperCase().trim();
-                  if (code.length === 5 && countryCode && code.startsWith(countryCode)) {
-                    unlocode = code;
-                  }
-                }
-                // 3. When Code/BranchType is 6 chars (e.g. DXBA02), use country + first 3 chars for AEDXB-style (prefer over AEA02)
-                if (!unlocode && countryCode && (attrs.Code || attrs.BranchType)) {
-                  const code = String(attrs.Code || attrs.BranchType).toUpperCase().trim();
-                  if (code.length === 6) {
-                    unlocode = `${countryCode}${code.substring(0, 3)}`;
-                  }
-                }
-                // 4. Derive from country code + location identifier (last 3 chars for 5-char UN/LOCODE)
-                if (!unlocode && countryCode && attrs.Code) {
-                  const code = String(attrs.Code).toUpperCase().trim();
-                  const locationSuffix = code.length >= 3 ? code.substring(code.length - 3) : code;
-                  unlocode = `${countryCode}${locationSuffix}`;
-                }
-                // 5. Fallback: country + first 3 chars of code
-                if (!unlocode && countryCode && (attrs.Code || attrs.BranchType)) {
-                  const code = String(attrs.Code || attrs.BranchType).toUpperCase().trim();
-                  if (code.length >= 3) {
-                    const locPart = code.length >= 5 ? code.substring(0, 3) : code;
-                    unlocode = `${countryCode}${locPart}`;
-                  }
-                }
-                
-                // Extract location fields
-                const extractedLocation: any = {
-                  unlocode: unlocode,
-                  country: countryCode || (unlocode ? unlocode.substring(0, 2) : ''),
-                  place: (attrs.Name || locationDetail.Name || '').toString().trim(),
-                  iataCode: (attrs.IataCode || locationDetail.IataCode || '').toString().trim() || null,
-                  latitude: attrs.Latitude ? parseFloat(String(attrs.Latitude)) : 
-                           (locationDetail.Latitude ? parseFloat(String(locationDetail.Latitude)) : null),
-                  longitude: attrs.Longitude ? parseFloat(String(attrs.Longitude)) : 
-                            (locationDetail.Longitude ? parseFloat(String(locationDetail.Longitude)) : null),
-                };
-                
-                if (extractedLocation.unlocode) {
-                  locations.push(extractedLocation);
-                }
-              }
-            }
-            console.log(`[import-locations] Extracted ${locations.length} locations from OTA_VehLocSearchRS format`);
-          }
-        } catch (phpError: any) {
-          console.error('[import-locations] Error parsing PHP var_dump:', phpError);
-          return res.status(400).json({
-            error: "INVALID_RESPONSE_FORMAT",
-            message: `Failed to parse PHP var_dump format: ${phpError.message || String(phpError)}`,
-          });
-        }
-      } else {
-        // Try to parse as JSON first
-        try {
-          data = JSON.parse(responseText);
-          console.log('[import-locations] Successfully parsed as JSON');
-        } catch (jsonError) {
-          // If JSON parsing fails, try to parse as XML
-          console.log('[import-locations] Response is not JSON, attempting XML parsing');
-          try {
-            const { XMLParser } = await import('fast-xml-parser');
-            const xmlParser = new XMLParser({
-              ignoreAttributes: false,
-              attributeNamePrefix: '@_',
-              textNodeName: 'value',
-              parseAttributeValue: true,
-              trimValues: true,
-            });
-            data = xmlParser.parse(responseText);
-            console.log('[import-locations] Successfully parsed as XML');
-          } catch (xmlError: any) {
-            return res.status(400).json({
-              error: "INVALID_RESPONSE_FORMAT",
-              message: `Failed to parse response: ${xmlError.message || String(xmlError)}. Expected JSON, XML, or PHP var_dump format.`,
-            });
-          }
-        }
+				// Get response text first to handle both JSON and XML formats
+				let responseText = await fetchResponse.text();
 
-        // Extract locations from response
-        // Expected formats:
-        // 1. JSON: { Locations: [...] } or { items: [...] } or array
-        // 2. XML: <Locations><Location>...</Location></Locations>
-        // 3. OTA_VehLocSearchRS: { OTA_VehLocSearchRS: { VehMatchedLocs: [...] } }
-        if (data.OTA_VehLocSearchRS || data.gloria) {
-          // Handle OTA_VehLocSearchRS format (JSON/XML parsed)
-          console.log('[import-locations] Detected OTA_VehLocSearchRS format in parsed data');
-          const root = data.gloria || data.OTA_VehLocSearchRS;
-          if (root && root.VehMatchedLocs && Array.isArray(root.VehMatchedLocs)) {
-            for (const loc of root.VehMatchedLocs) {
-              const locationDetail = loc.VehMatchedLoc?.LocationDetail || loc.LocationDetail;
-              if (locationDetail) {
-                const attrs = locationDetail.attr || locationDetail['@_'] || {};
-                const address = locationDetail.Address || {};
-                const countryName = address.CountryName || {};
-                
-                // Extract country code
-                const countryCode = (countryName.attr?.Code || countryName['@_Code'] || attrs.CountryCode || '').toString().toUpperCase().trim();
-                
-                // Extract unlocode - try multiple sources
-                let unlocode: string | null = null;
-                
-                // 1. Try explicit NatoLocode field
-                if (locationDetail.NatoLocode) {
-                  unlocode = String(locationDetail.NatoLocode).toUpperCase().trim();
-                } else if (attrs.NatoLocode) {
-                  unlocode = String(attrs.NatoLocode).toUpperCase().trim();
-                }
-                
-                // 2. Check if Code itself is a valid UN/LOCODE (5 chars, starts with country code)
-                if (!unlocode && attrs.Code) {
-                  const code = String(attrs.Code).toUpperCase().trim();
-                  if (code.length === 5 && countryCode && code.startsWith(countryCode)) {
-                    unlocode = code;
-                  }
-                }
-                
-                // 3. Derive from country code + location identifier
-                if (!unlocode && countryCode && attrs.Code) {
-                  const code = String(attrs.Code).toUpperCase().trim();
-                  const locationSuffix = code.length >= 3 ? code.substring(code.length - 3) : code;
-                  unlocode = `${countryCode}${locationSuffix}`;
-                }
-                // 4. When Code/BranchType is 6 chars, use country + first 3 chars (e.g. AEDXB)
-                if (!unlocode && countryCode && (attrs.Code || attrs.BranchType)) {
-                  const code = String(attrs.Code || attrs.BranchType).toUpperCase().trim();
-                  if (code.length >= 3) {
-                    const locPart = code.length >= 5 ? code.substring(0, 3) : code;
-                    unlocode = `${countryCode}${locPart}`;
-                  }
-                }
-                
-                const extractedLocation: any = {
-                  unlocode: unlocode,
-                  country: countryCode || (unlocode ? unlocode.substring(0, 2) : ''),
-                  place: (attrs.Name || locationDetail.Name || '').toString().trim(),
-                  iataCode: (attrs.IataCode || locationDetail.IataCode || '').toString().trim() || null,
-                  latitude: attrs.Latitude ? parseFloat(String(attrs.Latitude)) : 
-                           (locationDetail.Latitude ? parseFloat(String(locationDetail.Latitude)) : null),
-                  longitude: attrs.Longitude ? parseFloat(String(attrs.Longitude)) : 
-                            (locationDetail.Longitude ? parseFloat(String(locationDetail.Longitude)) : null),
-                };
-                
-                if (extractedLocation.unlocode) {
-                  locations.push(extractedLocation);
-                }
-              }
-            }
-            console.log(`[import-locations] Extracted ${locations.length} locations from OTA_VehLocSearchRS format`);
-          }
-        } else if (Array.isArray(data)) {
-          locations = data;
-        } else if (data.Locations && Array.isArray(data.Locations)) {
-          locations = data.Locations;
-        } else if (data.items && Array.isArray(data.items)) {
-          locations = data.items;
-        } else if (data.Location && Array.isArray(data.Location)) {
-          locations = data.Location;
-        } else if (data.Location) {
-          locations = [data.Location];
-        } else {
-          // Provide detailed error message showing what was received
-          const receivedKeys = data && typeof data === 'object' ? Object.keys(data).slice(0, 10) : [];
-          const dataPreview = JSON.stringify(data, null, 2).substring(0, 500);
-          
-          return res.status(400).json({
-            error: "INVALID_FORMAT",
-            message: "Response must contain Locations array, items array, or OTA_VehLocSearchRS structure",
-            details: {
-              receivedKeys: receivedKeys,
-              dataPreview: dataPreview,
-              expectedFormats: [
-                "JSON: { Locations: [...] }",
-                "JSON: { items: [...] }",
-                "JSON: [location1, location2, ...]",
-                "JSON: { OTA_VehLocSearchRS: { VehMatchedLocs: [...] } }",
-                "XML: <Locations><Location>...</Location></Locations>",
-                "XML: <OTA_VehLocSearchRS><VehMatchedLocs>...</VehMatchedLocs></OTA_VehLocSearchRS>",
-                "PHP var_dump: array(1) { [\"OTA_VehLocSearchRS\"]=> ... }"
-              ],
-              help: "Your endpoint should return location data in one of the supported formats. Each location should have: unlocode (required), country, place, iataCode, latitude, longitude. For OTA format, locations are extracted from VehMatchedLocs[].VehMatchedLoc.LocationDetail"
-            },
-          });
-        }
-      }
+				// Clean up response text - remove HTML tags if present
+				if (
+					responseText.includes("<html") ||
+					responseText.includes("<!DOCTYPE")
+				) {
+					console.log(
+						"[import-locations] Response appears to be HTML, attempting to extract text content",
+					);
+					const preMatch = responseText.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+					if (preMatch) {
+						responseText = preMatch[1];
+					} else {
+						responseText = responseText.replace(/<[^>]+>/g, "");
+					}
+				}
+				// Decode HTML entities that might escape brackets (e.g. &quot; or [)
+				responseText = responseText
+					.replace(/&quot;/g, '"')
+					.replace(/&#91;/g, "[")
+					.replace(/&#93;/g, "]");
 
-      console.log(`[import-locations] Extracted ${locations.length} locations`);
+				// Strip trailing PHP string dump (e.g. final string(3961) " ... ") so it doesn't break brace matching.
+				// Strategy: Find the closing braces of the main OTA structure, then look for string( patterns after that.
+				if (responseText.includes("OTA_VehLocSearchRS")) {
+					const originalLength = responseText.length;
+					const hadVehMatchedLocs =
+						responseText.includes('["VehMatchedLocs"]') ||
+						responseText.includes("['VehMatchedLocs']");
 
-      const subLoc = await prisma.sourceSubscription.findUnique({
-        where: { sourceId },
-        include: { plan: true },
-      });
-      if (subLoc?.plan) {
-        const limitCheckLoc = await checkBranchQuota(sourceId, subLoc.subscribedBranchCount, 0, locations.length);
-        if (limitCheckLoc) return res.status(limitCheckLoc.status).json(limitCheckLoc.body);
-      }
+					// Find the end of the main array structure: array(1) { ["OTA_VehLocSearchRS"]=> ... }
+					// Look for pattern: } } } followed by optional whitespace/newlines and then string(
+					const trailingDumpMatch = responseText.match(
+						/\}\s*\}\s*\}\s*[\r\n\s]*string\s*\(/,
+					);
+					if (
+						trailingDumpMatch &&
+						typeof trailingDumpMatch.index === "number"
+					) {
+						// Find the start of the string( pattern
+						const stringStart = responseText.indexOf(
+							"string(",
+							trailingDumpMatch.index,
+						);
+						if (stringStart !== -1) {
+							const beforeStrip = responseText;
+							responseText = responseText.substring(0, stringStart);
+							// Safety check: ensure VehMatchedLocs is still present after stripping
+							if (
+								!responseText.includes('["VehMatchedLocs"]') &&
+								!responseText.includes("['VehMatchedLocs']")
+							) {
+								console.warn(
+									"[import-locations] WARNING: Stripping removed VehMatchedLocs, reverting. String start was at:",
+									stringStart,
+								);
+								responseText = beforeStrip; // Revert if we removed too much
+							} else {
+								console.log(
+									"[import-locations] Stripped trailing PHP string dump, response length:",
+									originalLength,
+									"->",
+									responseText.length,
+								);
+							}
+						}
+					} else {
+						// Fallback: if pattern not found, try finding string( patterns that appear after multiple closing braces
+						// This handles cases where the structure might be slightly different
+						const closingBracesMatch = responseText.match(
+							/\}\s*\}\s*\}\s*\}\s*[\r\n\s]*string\s*\(/,
+						);
+						if (
+							closingBracesMatch &&
+							typeof closingBracesMatch.index === "number"
+						) {
+							const stringStart = responseText.indexOf(
+								"string(",
+								closingBracesMatch.index,
+							);
+							if (stringStart !== -1) {
+								const beforeStrip = responseText;
+								responseText = responseText.substring(0, stringStart);
+								// Safety check: ensure VehMatchedLocs is still present after stripping
+								if (
+									!responseText.includes('["VehMatchedLocs"]') &&
+									!responseText.includes("['VehMatchedLocs']")
+								) {
+									console.warn(
+										"[import-locations] WARNING: Fallback stripping removed VehMatchedLocs, reverting.",
+									);
+									responseText = beforeStrip; // Revert if we removed too much
+								} else {
+									console.log(
+										"[import-locations] Stripped trailing PHP string dump (fallback), response length:",
+										originalLength,
+										"->",
+										responseText.length,
+									);
+								}
+							}
+						}
+					}
 
-      let imported = 0;
-      let updated = 0;
-      let skipped = 0;
-      const errors: any[] = [];
+					// Final check: Log if VehMatchedLocs is missing
+					if (
+						!responseText.includes('["VehMatchedLocs"]') &&
+						!responseText.includes("['VehMatchedLocs']")
+					) {
+						console.error(
+							"[import-locations] ERROR: VehMatchedLocs not found after processing. Had it before:",
+							hadVehMatchedLocs,
+						);
+						console.error(
+							"[import-locations] Response preview (last 500 chars):",
+							responseText.substring(Math.max(0, responseText.length - 500)),
+						);
+						console.error(
+							"[import-locations] Response length:",
+							responseText.length,
+							"Contains OTA_VehLocSearchRS:",
+							responseText.includes("OTA_VehLocSearchRS"),
+						);
+					}
+				}
 
-      // Process each location
-      for (let i = 0; i < locations.length; i++) {
-        const loc = locations[i];
-        try {
-          // Extract location data - handle both object and nested structures
-          const unlocode = (loc.unlocode || loc.UnLocode || loc.code || loc.Code || '').toString().toUpperCase().trim();
-          const country = (loc.country || loc.Country || '').toString().trim();
-          const place = (loc.place || loc.Place || loc.name || loc.Name || '').toString().trim();
-          const iataCode = (loc.iataCode || loc.IataCode || loc.iata_code || loc.IATA || '').toString().trim() || null;
-          const latitude = loc.latitude || loc.Latitude ? parseFloat(String(loc.latitude || loc.Latitude)) : null;
-          const longitude = loc.longitude || loc.Longitude ? parseFloat(String(loc.longitude || loc.Longitude)) : null;
+				let data: any;
+				let locations: any[] = [];
 
-          if (!unlocode) {
-            errors.push({
-              index: i,
-              unlocode: (loc.unlocode || loc.code || loc.Code || loc.UnLocode || '').toString() || undefined,
-              error: "Missing unlocode (could not derive from Code/BranchType and country)",
-            });
-            skipped++;
-            continue;
-          }
+				// Check if it's PHP var_dump format with OTA_VehLocSearchRS
+				if (
+					responseText.includes("array(") &&
+					responseText.includes("OTA_VehLocSearchRS")
+				) {
+					console.log(
+						"[import-locations] Detected PHP var_dump format with OTA_VehLocSearchRS, parsing...",
+					);
+					try {
+						const gloriaResponse = convertPhpVarDumpToOta(responseText);
+						console.log(
+							"[import-locations] PHP var_dump parsed, extracting locations from OTA structure",
+						);
 
-          // Validate unlocode format (should be 5 characters: 2 letter country + 3 letter location)
-          if (unlocode.length < 4 || unlocode.length > 5) {
-            errors.push({
-              index: i,
-              unlocode,
-              error: `Invalid unlocode format: "${unlocode}" (must be 4–5 characters, e.g. AEDXB)`,
-            });
-            skipped++;
-            continue;
-          }
+						// Extract locations from OTA_VehLocSearchRS.VehMatchedLocs
+						const root =
+							gloriaResponse.gloria || gloriaResponse.OTA_VehLocSearchRS;
+						if (
+							root &&
+							root.VehMatchedLocs &&
+							Array.isArray(root.VehMatchedLocs)
+						) {
+							// Extract location data from each VehMatchedLoc.LocationDetail
+							for (const loc of root.VehMatchedLocs) {
+								const locationDetail = loc.VehMatchedLoc?.LocationDetail;
+								if (locationDetail) {
+									const attrs = locationDetail.attr || {};
+									const address = locationDetail.Address || {};
+									const countryName = address.CountryName || {};
 
-          // Extract country from unlocode if not provided
-          const finalCountry = country || unlocode.substring(0, 2).toUpperCase();
+									// Extract country code first
+									const countryCode = (
+										countryName.attr?.Code ||
+										attrs.CountryCode ||
+										""
+									)
+										.toString()
+										.toUpperCase()
+										.trim();
 
-          // Upsert UNLocode entry
-          const unlocodeEntry = await prisma.uNLocode.upsert({
-            where: { unlocode },
-            update: {
-              country: finalCountry,
-              place: place || unlocode,
-              iataCode: iataCode || null,
-              latitude: latitude && !isNaN(latitude) ? latitude : null,
-              longitude: longitude && !isNaN(longitude) ? longitude : null,
-            },
-            create: {
-              unlocode,
-              country: finalCountry,
-              place: place || unlocode,
-              iataCode: iataCode || null,
-              latitude: latitude && !isNaN(latitude) ? latitude : null,
-              longitude: longitude && !isNaN(longitude) ? longitude : null,
-            },
-          });
+									// Extract unlocode - try multiple sources
+									let unlocode: string | null = null;
 
-          // Check if location is already linked to source
-          const existingSourceLocation = await prisma.sourceLocation.findUnique({
-            where: {
-              sourceId_unlocode: {
-                sourceId,
-                unlocode,
-              },
-            },
-          });
+									// 1. Try explicit NatoLocode field
+									if (locationDetail.NatoLocode) {
+										unlocode = String(locationDetail.NatoLocode)
+											.toUpperCase()
+											.trim();
+									} else if (attrs.NatoLocode) {
+										unlocode = String(attrs.NatoLocode).toUpperCase().trim();
+									}
 
-          if (existingSourceLocation) {
-            updated++;
-          } else {
-            // Link location to source
-            await prisma.sourceLocation.create({
-              data: {
-                sourceId,
-                unlocode,
-                isMock: false, // Imported locations are not mock
-              },
-            });
-            imported++;
-          }
-        } catch (locError: any) {
-          console.error(`[import-locations] Error processing location ${i}:`, locError);
-          const locUnlocode = (loc?.unlocode || loc?.code || loc?.Code || loc?.UnLocode || '').toString() || undefined;
-          errors.push({
-            index: i,
-            unlocode: locUnlocode || undefined,
-            error: locError.message || String(locError),
-          });
-          skipped++;
-        }
-      }
+									// 2. Check if Code itself is a valid UN/LOCODE (5 chars, starts with country code)
+									if (!unlocode && attrs.Code) {
+										const code = String(attrs.Code).toUpperCase().trim();
+										if (
+											code.length === 5 &&
+											countryCode &&
+											code.startsWith(countryCode)
+										) {
+											unlocode = code;
+										}
+									}
+									// 3. When Code/BranchType is 6 chars (e.g. DXBA02), use country + first 3 chars for AEDXB-style (prefer over AEA02)
+									if (
+										!unlocode &&
+										countryCode &&
+										(attrs.Code || attrs.BranchType)
+									) {
+										const code = String(attrs.Code || attrs.BranchType)
+											.toUpperCase()
+											.trim();
+										if (code.length === 6) {
+											unlocode = `${countryCode}${code.substring(0, 3)}`;
+										}
+									}
+									// 4. Derive from country code + location identifier (last 3 chars for 5-char UN/LOCODE)
+									if (!unlocode && countryCode && attrs.Code) {
+										const code = String(attrs.Code).toUpperCase().trim();
+										const locationSuffix =
+											code.length >= 3 ? code.substring(code.length - 3) : code;
+										unlocode = `${countryCode}${locationSuffix}`;
+									}
+									// 5. Fallback: country + first 3 chars of code
+									if (
+										!unlocode &&
+										countryCode &&
+										(attrs.Code || attrs.BranchType)
+									) {
+										const code = String(attrs.Code || attrs.BranchType)
+											.toUpperCase()
+											.trim();
+										if (code.length >= 3) {
+											const locPart =
+												code.length >= 5 ? code.substring(0, 3) : code;
+											unlocode = `${countryCode}${locPart}`;
+										}
+									}
 
-      // Update lastLocationSyncAt
-      await prisma.company.update({
-        where: { id: sourceId },
-        data: { lastLocationSyncAt: new Date() },
-      });
+									// Extract location fields
+									const extractedLocation: any = {
+										unlocode: unlocode,
+										country:
+											countryCode || (unlocode ? unlocode.substring(0, 2) : ""),
+										place: (attrs.Name || locationDetail.Name || "")
+											.toString()
+											.trim(),
+										iataCode:
+											(attrs.IataCode || locationDetail.IataCode || "")
+												.toString()
+												.trim() || null,
+										latitude: attrs.Latitude
+											? parseFloat(String(attrs.Latitude))
+											: locationDetail.Latitude
+												? parseFloat(String(locationDetail.Latitude))
+												: null,
+										longitude: attrs.Longitude
+											? parseFloat(String(attrs.Longitude))
+											: locationDetail.Longitude
+												? parseFloat(String(locationDetail.Longitude))
+												: null,
+									};
 
-      res.json({
-        message: "Locations imported successfully",
-        imported,
-        updated,
-        skipped,
-        total: locations.length,
-        errors: errors.length > 0 ? errors : undefined,
-      });
-    } catch (fetchError: any) {
-      clearTimeout(timeoutId);
-      if (fetchError.name === 'AbortError' || fetchError.code === 'ETIMEDOUT') {
-        return res.status(504).json({
-          error: "TIMEOUT",
-          message: `Supplier endpoint timeout after 30s: ${finalEndpointUrl || endpointUrl}`,
-        });
-      }
-      
-      // Handle fetch connection errors
-      if (fetchError.message?.includes("fetch failed") || fetchError.code === "ECONNREFUSED" || fetchError.code === "ENOTFOUND") {
-        return res.status(503).json({
-          error: "ENDPOINT_CONNECTION_ERROR",
-          message: `Cannot connect to supplier endpoint: ${finalEndpointUrl || endpointUrl}. Please ensure the source backend is running and accessible.`,
-          details: fetchError.message || fetchError.code,
-          hint: "The supplier HTTP endpoint may not be running or may be unreachable",
-        });
-      }
-      
-      throw fetchError;
-    }
-  } catch (error: any) {
-    console.error('[import-locations] Error:', error);
-    next(error);
-  }
-});
+									if (extractedLocation.unlocode) {
+										locations.push(extractedLocation);
+									}
+								}
+							}
+							console.log(
+								`[import-locations] Extracted ${locations.length} locations from OTA_VehLocSearchRS format`,
+							);
+						}
+					} catch (phpError: any) {
+						console.error(
+							"[import-locations] Error parsing PHP var_dump:",
+							phpError,
+						);
+						return res.status(400).json({
+							error: "INVALID_RESPONSE_FORMAT",
+							message: `Failed to parse PHP var_dump format: ${phpError.message || String(phpError)}`,
+						});
+					}
+				} else {
+					// Try to parse as JSON first
+					try {
+						data = JSON.parse(responseText);
+						console.log("[import-locations] Successfully parsed as JSON");
+					} catch (jsonError) {
+						// If JSON parsing fails, try to parse as XML
+						console.log(
+							"[import-locations] Response is not JSON, attempting XML parsing",
+						);
+						try {
+							const { XMLParser } = await import("fast-xml-parser");
+							const xmlParser = new XMLParser({
+								ignoreAttributes: false,
+								attributeNamePrefix: "@_",
+								textNodeName: "value",
+								parseAttributeValue: true,
+								trimValues: true,
+							});
+							data = xmlParser.parse(responseText);
+							console.log("[import-locations] Successfully parsed as XML");
+						} catch (xmlError: any) {
+							return res.status(400).json({
+								error: "INVALID_RESPONSE_FORMAT",
+								message: `Failed to parse response: ${xmlError.message || String(xmlError)}. Expected JSON, XML, or PHP var_dump format.`,
+							});
+						}
+					}
+
+					// Extract locations from response
+					// Expected formats:
+					// 1. JSON: { Locations: [...] } or { items: [...] } or array
+					// 2. XML: <Locations><Location>...</Location></Locations>
+					// 3. OTA_VehLocSearchRS: { OTA_VehLocSearchRS: { VehMatchedLocs: [...] } }
+					if (data.OTA_VehLocSearchRS || data.gloria) {
+						// Handle OTA_VehLocSearchRS format (JSON/XML parsed)
+						console.log(
+							"[import-locations] Detected OTA_VehLocSearchRS format in parsed data",
+						);
+						const root = data.gloria || data.OTA_VehLocSearchRS;
+						if (
+							root &&
+							root.VehMatchedLocs &&
+							Array.isArray(root.VehMatchedLocs)
+						) {
+							for (const loc of root.VehMatchedLocs) {
+								const locationDetail =
+									loc.VehMatchedLoc?.LocationDetail || loc.LocationDetail;
+								if (locationDetail) {
+									const attrs =
+										locationDetail.attr || locationDetail["@_"] || {};
+									const address = locationDetail.Address || {};
+									const countryName = address.CountryName || {};
+
+									// Extract country code
+									const countryCode = (
+										countryName.attr?.Code ||
+										countryName["@_Code"] ||
+										attrs.CountryCode ||
+										""
+									)
+										.toString()
+										.toUpperCase()
+										.trim();
+
+									// Extract unlocode - try multiple sources
+									let unlocode: string | null = null;
+
+									// 1. Try explicit NatoLocode field
+									if (locationDetail.NatoLocode) {
+										unlocode = String(locationDetail.NatoLocode)
+											.toUpperCase()
+											.trim();
+									} else if (attrs.NatoLocode) {
+										unlocode = String(attrs.NatoLocode).toUpperCase().trim();
+									}
+
+									// 2. Check if Code itself is a valid UN/LOCODE (5 chars, starts with country code)
+									if (!unlocode && attrs.Code) {
+										const code = String(attrs.Code).toUpperCase().trim();
+										if (
+											code.length === 5 &&
+											countryCode &&
+											code.startsWith(countryCode)
+										) {
+											unlocode = code;
+										}
+									}
+
+									// 3. Derive from country code + location identifier
+									if (!unlocode && countryCode && attrs.Code) {
+										const code = String(attrs.Code).toUpperCase().trim();
+										const locationSuffix =
+											code.length >= 3 ? code.substring(code.length - 3) : code;
+										unlocode = `${countryCode}${locationSuffix}`;
+									}
+									// 4. When Code/BranchType is 6 chars, use country + first 3 chars (e.g. AEDXB)
+									if (
+										!unlocode &&
+										countryCode &&
+										(attrs.Code || attrs.BranchType)
+									) {
+										const code = String(attrs.Code || attrs.BranchType)
+											.toUpperCase()
+											.trim();
+										if (code.length >= 3) {
+											const locPart =
+												code.length >= 5 ? code.substring(0, 3) : code;
+											unlocode = `${countryCode}${locPart}`;
+										}
+									}
+
+									const extractedLocation: any = {
+										unlocode: unlocode,
+										country:
+											countryCode || (unlocode ? unlocode.substring(0, 2) : ""),
+										place: (attrs.Name || locationDetail.Name || "")
+											.toString()
+											.trim(),
+										iataCode:
+											(attrs.IataCode || locationDetail.IataCode || "")
+												.toString()
+												.trim() || null,
+										latitude: attrs.Latitude
+											? parseFloat(String(attrs.Latitude))
+											: locationDetail.Latitude
+												? parseFloat(String(locationDetail.Latitude))
+												: null,
+										longitude: attrs.Longitude
+											? parseFloat(String(attrs.Longitude))
+											: locationDetail.Longitude
+												? parseFloat(String(locationDetail.Longitude))
+												: null,
+									};
+
+									if (extractedLocation.unlocode) {
+										locations.push(extractedLocation);
+									}
+								}
+							}
+							console.log(
+								`[import-locations] Extracted ${locations.length} locations from OTA_VehLocSearchRS format`,
+							);
+						}
+					} else if (Array.isArray(data)) {
+						locations = data;
+					} else if (data.Locations && Array.isArray(data.Locations)) {
+						locations = data.Locations;
+					} else if (data.items && Array.isArray(data.items)) {
+						locations = data.items;
+					} else if (data.Location && Array.isArray(data.Location)) {
+						locations = data.Location;
+					} else if (data.Location) {
+						locations = [data.Location];
+					} else {
+						// Provide detailed error message showing what was received
+						const receivedKeys =
+							data && typeof data === "object"
+								? Object.keys(data).slice(0, 10)
+								: [];
+						const dataPreview = JSON.stringify(data, null, 2).substring(0, 500);
+
+						return res.status(400).json({
+							error: "INVALID_FORMAT",
+							message:
+								"Response must contain Locations array, items array, or OTA_VehLocSearchRS structure",
+							details: {
+								receivedKeys: receivedKeys,
+								dataPreview: dataPreview,
+								expectedFormats: [
+									"JSON: { Locations: [...] }",
+									"JSON: { items: [...] }",
+									"JSON: [location1, location2, ...]",
+									"JSON: { OTA_VehLocSearchRS: { VehMatchedLocs: [...] } }",
+									"XML: <Locations><Location>...</Location></Locations>",
+									"XML: <OTA_VehLocSearchRS><VehMatchedLocs>...</VehMatchedLocs></OTA_VehLocSearchRS>",
+									'PHP var_dump: array(1) { ["OTA_VehLocSearchRS"]=> ... }',
+								],
+								help: "Your endpoint should return location data in one of the supported formats. Each location should have: unlocode (required), country, place, iataCode, latitude, longitude. For OTA format, locations are extracted from VehMatchedLocs[].VehMatchedLoc.LocationDetail",
+							},
+						});
+					}
+				}
+
+				console.log(
+					`[import-locations] Extracted ${locations.length} locations`,
+				);
+
+				const subLoc = await prisma.sourceSubscription.findUnique({
+					where: { sourceId },
+					include: { plan: true },
+				});
+				if (subLoc?.plan) {
+					const limitCheckLoc = await checkBranchQuota(
+						sourceId,
+						subLoc.subscribedBranchCount,
+						0,
+						locations.length,
+					);
+					if (limitCheckLoc)
+						return res.status(limitCheckLoc.status).json(limitCheckLoc.body);
+				}
+
+				let imported = 0;
+				let updated = 0;
+				let skipped = 0;
+				const errors: any[] = [];
+
+				// Process each location
+				for (let i = 0; i < locations.length; i++) {
+					const loc = locations[i];
+					try {
+						// Extract location data - handle both object and nested structures
+						const unlocode = (
+							loc.unlocode ||
+							loc.UnLocode ||
+							loc.code ||
+							loc.Code ||
+							""
+						)
+							.toString()
+							.toUpperCase()
+							.trim();
+						const country = (loc.country || loc.Country || "")
+							.toString()
+							.trim();
+						const place = (loc.place || loc.Place || loc.name || loc.Name || "")
+							.toString()
+							.trim();
+						const iataCode =
+							(loc.iataCode || loc.IataCode || loc.iata_code || loc.IATA || "")
+								.toString()
+								.trim() || null;
+						const latitude =
+							loc.latitude || loc.Latitude
+								? parseFloat(String(loc.latitude || loc.Latitude))
+								: null;
+						const longitude =
+							loc.longitude || loc.Longitude
+								? parseFloat(String(loc.longitude || loc.Longitude))
+								: null;
+
+						if (!unlocode) {
+							errors.push({
+								index: i,
+								unlocode:
+									(
+										loc.unlocode ||
+										loc.code ||
+										loc.Code ||
+										loc.UnLocode ||
+										""
+									).toString() || undefined,
+								error:
+									"Missing unlocode (could not derive from Code/BranchType and country)",
+							});
+							skipped++;
+							continue;
+						}
+
+						// Validate unlocode format (should be 5 characters: 2 letter country + 3 letter location)
+						if (unlocode.length < 4 || unlocode.length > 5) {
+							errors.push({
+								index: i,
+								unlocode,
+								error: `Invalid unlocode format: "${unlocode}" (must be 4–5 characters, e.g. AEDXB)`,
+							});
+							skipped++;
+							continue;
+						}
+
+						// Extract country from unlocode if not provided
+						const finalCountry =
+							country || unlocode.substring(0, 2).toUpperCase();
+
+						// Upsert UNLocode entry
+						const unlocodeEntry = await prisma.uNLocode.upsert({
+							where: { unlocode },
+							update: {
+								country: finalCountry,
+								place: place || unlocode,
+								iataCode: iataCode || null,
+								latitude: latitude && !isNaN(latitude) ? latitude : null,
+								longitude: longitude && !isNaN(longitude) ? longitude : null,
+							},
+							create: {
+								unlocode,
+								country: finalCountry,
+								place: place || unlocode,
+								iataCode: iataCode || null,
+								latitude: latitude && !isNaN(latitude) ? latitude : null,
+								longitude: longitude && !isNaN(longitude) ? longitude : null,
+							},
+						});
+
+						// Check if location is already linked to source
+						const existingSourceLocation =
+							await prisma.sourceLocation.findUnique({
+								where: {
+									sourceId_unlocode: {
+										sourceId,
+										unlocode,
+									},
+								},
+							});
+
+						if (existingSourceLocation) {
+							updated++;
+						} else {
+							// Link location to source
+							await prisma.sourceLocation.create({
+								data: {
+									sourceId,
+									unlocode,
+									isMock: false, // Imported locations are not mock
+								},
+							});
+							imported++;
+						}
+					} catch (locError: any) {
+						console.error(
+							`[import-locations] Error processing location ${i}:`,
+							locError,
+						);
+						const locUnlocode =
+							(
+								loc?.unlocode ||
+								loc?.code ||
+								loc?.Code ||
+								loc?.UnLocode ||
+								""
+							).toString() || undefined;
+						errors.push({
+							index: i,
+							unlocode: locUnlocode || undefined,
+							error: locError.message || String(locError),
+						});
+						skipped++;
+					}
+				}
+
+				// Update lastLocationSyncAt
+				await prisma.company.update({
+					where: { id: sourceId },
+					data: { lastLocationSyncAt: new Date() },
+				});
+
+				res.json({
+					message: "Locations imported successfully",
+					imported,
+					updated,
+					skipped,
+					total: locations.length,
+					errors: errors.length > 0 ? errors : undefined,
+				});
+			} catch (fetchError: any) {
+				clearTimeout(timeoutId);
+				if (
+					fetchError.name === "AbortError" ||
+					fetchError.code === "ETIMEDOUT"
+				) {
+					return res.status(504).json({
+						error: "TIMEOUT",
+						message: `Supplier endpoint timeout after 30s: ${finalEndpointUrl || endpointUrl}`,
+					});
+				}
+
+				// Handle fetch connection errors
+				if (
+					fetchError.message?.includes("fetch failed") ||
+					fetchError.code === "ECONNREFUSED" ||
+					fetchError.code === "ENOTFOUND"
+				) {
+					return res.status(503).json({
+						error: "ENDPOINT_CONNECTION_ERROR",
+						message: `Cannot connect to supplier endpoint: ${finalEndpointUrl || endpointUrl}. Please ensure the source backend is running and accessible.`,
+						details: fetchError.message || fetchError.code,
+						hint: "The supplier HTTP endpoint may not be running or may be unreachable",
+					});
+				}
+
+				throw fetchError;
+			}
+		} catch (error: any) {
+			console.error("[import-locations] Error:", error);
+			next(error);
+		}
+	},
+);
 
 /**
  * POST /sources/import-location-list
  * Imports locations and branches from GLORIA location list endpoint (POST XML with configurable root).
  * Request body: XML with root e.g. GLORIA_locationlistrq; response: GLORIA_locationlistrs with Locs / location / LocationDetail.
  */
-sourcesRouter.post("/sources/import-location-list", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const source = await prisma.company.findUnique({
-      where: { id: sourceId },
-      select: {
-        id: true,
-        approvalStatus: true,
-        emailVerified: true,
-        locationListEndpointUrl: true,
-        locationListRequestRoot: true,
-        locationListAccountId: true,
-        locationListTransport: true,
-        locationEndpointUrl: true,
-        grpcEndpoint: true,
-        branchDefaultCountryCode: true,
-        whitelistedDomains: true,
-      },
-    });
-    if (!source) {
-      return res.status(404).json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
-    }
-    if (source.approvalStatus !== "APPROVED") {
-      return res.status(400).json({
-        error: "NOT_APPROVED",
-        message: "Source must be approved before importing location list",
-      });
-    }
-    if (!source.emailVerified) {
-      return res.status(400).json({
-        error: "EMAIL_NOT_VERIFIED",
-        message: "Source email must be verified",
-      });
-    }
-    const subscriptionCheck = await requireActiveSubscription(sourceId);
-    if (subscriptionCheck) return res.status(subscriptionCheck.status).json(subscriptionCheck.body);
+sourcesRouter.post(
+	"/sources/import-location-list",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const source = await prisma.company.findUnique({
+				where: { id: sourceId },
+				select: {
+					id: true,
+					approvalStatus: true,
+					emailVerified: true,
+					locationListEndpointUrl: true,
+					locationListRequestRoot: true,
+					locationListAccountId: true,
+					locationListTransport: true,
+					locationEndpointUrl: true,
+					grpcEndpoint: true,
+					branchDefaultCountryCode: true,
+					whitelistedDomains: true,
+				},
+			});
+			if (!source) {
+				return res
+					.status(404)
+					.json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
+			}
+			if (source.approvalStatus !== "APPROVED") {
+				return res.status(400).json({
+					error: "NOT_APPROVED",
+					message: "Source must be approved before importing location list",
+				});
+			}
+			if (!source.emailVerified) {
+				return res.status(400).json({
+					error: "EMAIL_NOT_VERIFIED",
+					message: "Source email must be verified",
+				});
+			}
+			const subscriptionCheck = await requireActiveSubscription(sourceId);
+			if (subscriptionCheck)
+				return res
+					.status(subscriptionCheck.status)
+					.json(subscriptionCheck.body);
 
-    const transport = String(source.locationListTransport || "http").toLowerCase();
-    const endpointUrl = source.locationListEndpointUrl || source.locationEndpointUrl || null;
-    if (transport !== "grpc" && !endpointUrl) {
-      return res.status(400).json({
-        error: "ENDPOINT_NOT_CONFIGURED",
-        message: "Configure location list endpoint URL (Location & Branches tab), or set transport to gRPC and configure gRPC endpoint.",
-      });
-    }
-    if (transport === "grpc" && !(source.grpcEndpoint || "").trim()) {
-      return res.status(400).json({
-        error: "GRPC_NOT_CONFIGURED",
-        message: "Set gRPC endpoint (host:port) in endpoint configuration to import locations via SourceProviderService.GetLocations.",
-      });
-    }
-    const { enforceWhitelist } = await import("../../infra/whitelistEnforcement.js");
-    const whitelistTarget =
-      transport === "grpc"
-        ? (() => {
-            const a = (source.grpcEndpoint || "").trim();
-            return /^https?:\/\//i.test(a) ? a : `http://${a.replace(/^grpc:\/\//i, "")}`;
-          })()
-        : String(endpointUrl);
-    try {
-      await enforceWhitelist(sourceId, whitelistTarget);
-    } catch (e: any) {
-      return res.status(403).json({
-        error: "WHITELIST_VIOLATION",
-        message: e.message || "Endpoint not whitelisted",
-      });
-    }
+			const transport = String(
+				source.locationListTransport || "http",
+			).toLowerCase();
+			const endpointUrl =
+				source.locationListEndpointUrl || source.locationEndpointUrl || null;
+			if (transport !== "grpc" && !endpointUrl) {
+				return res.status(400).json({
+					error: "ENDPOINT_NOT_CONFIGURED",
+					message:
+						"Configure location list endpoint URL (Location & Branches tab), or set transport to gRPC and configure gRPC endpoint.",
+				});
+			}
+			if (transport === "grpc" && !(source.grpcEndpoint || "").trim()) {
+				return res.status(400).json({
+					error: "GRPC_NOT_CONFIGURED",
+					message:
+						"Set gRPC endpoint (host:port) in endpoint configuration to import locations via SourceProviderService.GetLocations.",
+				});
+			}
+			const { enforceWhitelist } = await import(
+				"../../infra/whitelistEnforcement.js"
+			);
+			const whitelistTarget =
+				transport === "grpc"
+					? (() => {
+							const a = (source.grpcEndpoint || "").trim();
+							return /^https?:\/\//i.test(a)
+								? a
+								: `http://${a.replace(/^grpc:\/\//i, "")}`;
+						})()
+					: String(endpointUrl);
+			try {
+				await enforceWhitelist(sourceId, whitelistTarget);
+			} catch (e: any) {
+				return res.status(403).json({
+					error: "WHITELIST_VIOLATION",
+					message: e.message || "Endpoint not whitelisted",
+				});
+			}
 
-    let locations: any[] = [];
-    let branches: any[] = [];
-    let responseText = "";
-    let isXmlResponse = false;
-    const defaultCountryCode = source.branchDefaultCountryCode?.trim() || null;
+			const locations: any[] = [];
+			let branches: any[] = [];
+			let responseText = "";
+			let isXmlResponse = false;
+			const defaultCountryCode =
+				source.branchDefaultCountryCode?.trim() || null;
 
-    if (transport === "grpc") {
-      const addr = (source.grpcEndpoint || "").trim();
-      const { makeGrpcSourceAdapter } = await import("../../adapters/grpcSourceAdapter.js");
-      let grpcRes: any;
-      try {
-        grpcRes = await makeGrpcSourceAdapter(addr).locations();
-      } catch (grpcErr: any) {
-        console.error("[import-location-list] gRPC GetLocations failed:", grpcErr);
-        return res.status(502).json({
-          error: "GRPC_ERROR",
-          message: grpcErr?.message || String(grpcErr),
-        });
-      }
-      responseText = JSON.stringify(grpcRes != null ? grpcRes : {});
-      for (const l of grpcRes?.locations || []) {
-        const unlocode = (l.unlocode || "").toString().toUpperCase().trim();
-        if (!unlocode || unlocode.length < 4 || unlocode.length > 5) continue;
-        locations.push({
-          unlocode,
-          country: unlocode.substring(0, 2),
-          place: (l.name != null ? String(l.name) : "").trim() || unlocode,
-          iataCode: null,
-          latitude: null,
-          longitude: null,
-        });
-      }
-      branches = [];
-      console.log(`[import-location-list] gRPC GetLocations: ${locations.length} location(s) after UN/LOCODE filter`);
-    } else {
-    const httpListUrl = endpointUrl as string;
-    const requestRoot = (source.locationListRequestRoot || "GLORIA_locationlistrq").trim();
-    const accountId = (source.locationListAccountId || "Gloria001").trim();
-    const responseRoot = requestRoot.replace(/rq$/i, "rs") || "GLORIA_locationlistrs";
-    const ts = new Date().toISOString().slice(0, 19);
-    const xmlBody = `<?xml version="1.0" encoding="UTF-8"?><${requestRoot} TimeStamp="${ts}" Target="Production" Version="1.00"><ACC><Source><AccountID ID="${accountId}"/></Source></ACC></${requestRoot}>`;
+			if (transport === "grpc") {
+				const addr = (source.grpcEndpoint || "").trim();
+				const { makeGrpcSourceAdapter } = await import(
+					"../../adapters/grpcSourceAdapter.js"
+				);
+				let grpcRes: any;
+				try {
+					grpcRes = await makeGrpcSourceAdapter(addr).locations();
+				} catch (grpcErr: any) {
+					console.error(
+						"[import-location-list] gRPC GetLocations failed:",
+						grpcErr,
+					);
+					return res.status(502).json({
+						error: "GRPC_ERROR",
+						message: grpcErr?.message || String(grpcErr),
+					});
+				}
+				responseText = JSON.stringify(grpcRes != null ? grpcRes : {});
+				for (const l of grpcRes?.locations || []) {
+					const unlocode = (l.unlocode || "").toString().toUpperCase().trim();
+					if (!unlocode || unlocode.length < 4 || unlocode.length > 5) continue;
+					locations.push({
+						unlocode,
+						country: unlocode.substring(0, 2),
+						place: (l.name != null ? String(l.name) : "").trim() || unlocode,
+						iataCode: null,
+						latitude: null,
+						longitude: null,
+					});
+				}
+				branches = [];
+				console.log(
+					`[import-location-list] gRPC GetLocations: ${locations.length} location(s) after UN/LOCODE filter`,
+				);
+			} else {
+				const httpListUrl = endpointUrl as string;
+				const requestRoot = (
+					source.locationListRequestRoot || "GLORIA_locationlistrq"
+				).trim();
+				const accountId = (source.locationListAccountId || "Gloria001").trim();
+				const responseRoot =
+					requestRoot.replace(/rq$/i, "rs") || "GLORIA_locationlistrs";
+				const ts = new Date().toISOString().slice(0, 19);
+				const xmlBody = `<?xml version="1.0" encoding="UTF-8"?><${requestRoot} TimeStamp="${ts}" Target="Production" Version="1.00"><ACC><Source><AccountID ID="${accountId}"/></Source></ACC></${requestRoot}>`;
 
-    let finalUrl = httpListUrl.trim();
-    if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
-      finalUrl = `http://${finalUrl}`;
-    }
-    // Ensure trailing slash on path-like URLs to avoid POST→GET redirect issues
-    // e.g. /gloria → /gloria/ (servers often 301 redirect, which converts POST to GET)
-    try {
-      const parsed = new URL(finalUrl);
-      if (parsed.pathname && !parsed.pathname.endsWith("/") && !parsed.pathname.includes(".")) {
-        parsed.pathname += "/";
-        finalUrl = parsed.toString();
-        console.log(`[import-location-list] Normalized URL with trailing slash: ${finalUrl}`);
-      }
-    } catch {}
-    console.log(`[import-location-list] Request URL: ${finalUrl}, root: ${requestRoot}, accountId: ${accountId}`);
+				let finalUrl = httpListUrl.trim();
+				if (
+					!finalUrl.startsWith("http://") &&
+					!finalUrl.startsWith("https://")
+				) {
+					finalUrl = `http://${finalUrl}`;
+				}
+				// Ensure trailing slash on path-like URLs to avoid POST→GET redirect issues
+				// e.g. /gloria → /gloria/ (servers often 301 redirect, which converts POST to GET)
+				try {
+					const parsed = new URL(finalUrl);
+					if (
+						parsed.pathname &&
+						!parsed.pathname.endsWith("/") &&
+						!parsed.pathname.includes(".")
+					) {
+						parsed.pathname += "/";
+						finalUrl = parsed.toString();
+						console.log(
+							`[import-location-list] Normalized URL with trailing slash: ${finalUrl}`,
+						);
+					}
+				} catch {}
+				console.log(
+					`[import-location-list] Request URL: ${finalUrl}, root: ${requestRoot}, accountId: ${accountId}`,
+				);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
-    let responseText: string;
-    try {
-      // Use redirect:'manual' to prevent node-fetch from converting POST→GET on 301/302
-      let fetchResponse = await fetch(finalUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/xml" },
-        body: xmlBody,
-        signal: controller.signal,
-        redirect: "manual",
-      } as any);
+				const controller = new AbortController();
+				const timeoutId = setTimeout(() => controller.abort(), 60000);
+				let responseText: string;
+				try {
+					// Use redirect:'manual' to prevent node-fetch from converting POST→GET on 301/302
+					let fetchResponse = await fetch(finalUrl, {
+						method: "POST",
+						headers: { "Content-Type": "application/xml" },
+						body: xmlBody,
+						signal: controller.signal,
+						redirect: "manual",
+					} as any);
 
-      // Follow redirects manually, preserving POST method and body
-      let redirectCount = 0;
-      while ([301, 302, 303, 307, 308].includes(fetchResponse.status) && redirectCount < 5) {
-        const location = fetchResponse.headers.get("location");
-        if (!location) break;
-        const redirectUrl = new URL(location, finalUrl).toString();
-        console.log(`[import-location-list] Following redirect ${fetchResponse.status} from ${finalUrl} to ${redirectUrl}`);
-        finalUrl = redirectUrl;
-        redirectCount++;
-        fetchResponse = await fetch(finalUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/xml" },
-          body: xmlBody,
-          signal: controller.signal,
-          redirect: "manual",
-        } as any);
-      }
+					// Follow redirects manually, preserving POST method and body
+					let redirectCount = 0;
+					while (
+						[301, 302, 303, 307, 308].includes(fetchResponse.status) &&
+						redirectCount < 5
+					) {
+						const location = fetchResponse.headers.get("location");
+						if (!location) break;
+						const redirectUrl = new URL(location, finalUrl).toString();
+						console.log(
+							`[import-location-list] Following redirect ${fetchResponse.status} from ${finalUrl} to ${redirectUrl}`,
+						);
+						finalUrl = redirectUrl;
+						redirectCount++;
+						fetchResponse = await fetch(finalUrl, {
+							method: "POST",
+							headers: { "Content-Type": "application/xml" },
+							body: xmlBody,
+							signal: controller.signal,
+							redirect: "manual",
+						} as any);
+					}
 
-      clearTimeout(timeoutId);
-      if (!fetchResponse.ok) {
-        return res.status(fetchResponse.status).json({
-          error: "SUPPLIER_ERROR",
-          message: `Supplier returned ${fetchResponse.status}`,
-        });
-      }
-      responseText = await fetchResponse.text();
-      console.log(`[import-location-list] Response received: ${responseText.length} bytes from ${finalUrl}`);
+					clearTimeout(timeoutId);
+					if (!fetchResponse.ok) {
+						return res.status(fetchResponse.status).json({
+							error: "SUPPLIER_ERROR",
+							message: `Supplier returned ${fetchResponse.status}`,
+						});
+					}
+					responseText = await fetchResponse.text();
+					console.log(
+						`[import-location-list] Response received: ${responseText.length} bytes from ${finalUrl}`,
+					);
 
-      // If response is empty, it might be the endpoint requires a trailing slash
-      if (!responseText.trim() && !finalUrl.endsWith("/")) {
-        console.log(`[import-location-list] Empty response, retrying with trailing slash`);
-        const retryUrl = finalUrl + "/";
-        const retryResponse = await fetch(retryUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/xml" },
-          body: xmlBody,
-          redirect: "manual",
-        } as any);
-        // Follow any redirects on retry too
-        let retryFinal = retryResponse;
-        if ([301, 302, 303, 307, 308].includes(retryFinal.status)) {
-          const loc = retryFinal.headers.get("location");
-          if (loc) {
-            retryFinal = await fetch(new URL(loc, retryUrl).toString(), {
-              method: "POST",
-              headers: { "Content-Type": "application/xml" },
-              body: xmlBody,
-              redirect: "manual",
-            } as any);
-          }
-        }
-        if (retryFinal.ok) {
-          const retryText = await retryFinal.text();
-          if (retryText.trim()) {
-            responseText = retryText;
-            console.log(`[import-location-list] Trailing slash retry succeeded: ${responseText.length} bytes`);
-          }
-        }
-      }
-    } catch (fetchErr: any) {
-      clearTimeout(timeoutId);
-      if (fetchErr.name === "AbortError" || fetchErr.code === "ETIMEDOUT") {
-        return res.status(504).json({
-          error: "TIMEOUT",
-          message: `Endpoint timeout: ${finalUrl}`,
-        });
-      }
-      if (fetchErr.message?.includes("fetch failed") || fetchErr.code === "ECONNREFUSED" || fetchErr.code === "ENOTFOUND") {
-        return res.status(503).json({
-          error: "ENDPOINT_CONNECTION_ERROR",
-          message: "Cannot connect to endpoint",
-          details: fetchErr.message || fetchErr.code,
-        });
-      }
-      throw fetchErr;
-    }
+					// If response is empty, it might be the endpoint requires a trailing slash
+					if (!responseText.trim() && !finalUrl.endsWith("/")) {
+						console.log(
+							`[import-location-list] Empty response, retrying with trailing slash`,
+						);
+						const retryUrl = finalUrl + "/";
+						const retryResponse = await fetch(retryUrl, {
+							method: "POST",
+							headers: { "Content-Type": "application/xml" },
+							body: xmlBody,
+							redirect: "manual",
+						} as any);
+						// Follow any redirects on retry too
+						let retryFinal = retryResponse;
+						if ([301, 302, 303, 307, 308].includes(retryFinal.status)) {
+							const loc = retryFinal.headers.get("location");
+							if (loc) {
+								retryFinal = await fetch(new URL(loc, retryUrl).toString(), {
+									method: "POST",
+									headers: { "Content-Type": "application/xml" },
+									body: xmlBody,
+									redirect: "manual",
+								} as any);
+							}
+						}
+						if (retryFinal.ok) {
+							const retryText = await retryFinal.text();
+							if (retryText.trim()) {
+								responseText = retryText;
+								console.log(
+									`[import-location-list] Trailing slash retry succeeded: ${responseText.length} bytes`,
+								);
+							}
+						}
+					}
+				} catch (fetchErr: any) {
+					clearTimeout(timeoutId);
+					if (fetchErr.name === "AbortError" || fetchErr.code === "ETIMEDOUT") {
+						return res.status(504).json({
+							error: "TIMEOUT",
+							message: `Endpoint timeout: ${finalUrl}`,
+						});
+					}
+					if (
+						fetchErr.message?.includes("fetch failed") ||
+						fetchErr.code === "ECONNREFUSED" ||
+						fetchErr.code === "ENOTFOUND"
+					) {
+						return res.status(503).json({
+							error: "ENDPOINT_CONNECTION_ERROR",
+							message: "Cannot connect to endpoint",
+							details: fetchErr.message || fetchErr.code,
+						});
+					}
+					throw fetchErr;
+				}
 
-    // If still empty after all attempts, return a clear error
-    if (!responseText.trim()) {
-      return res.status(400).json({
-        error: "EMPTY_RESPONSE",
-        message: "Supplier returned an empty response. This may happen if the URL is incorrect or the endpoint requires a trailing slash. Check your endpoint URL.",
-        url: finalUrl,
-      });
-    }
+				// If still empty after all attempts, return a clear error
+				if (!responseText.trim()) {
+					return res.status(400).json({
+						error: "EMPTY_RESPONSE",
+						message:
+							"Supplier returned an empty response. This may happen if the URL is incorrect or the endpoint requires a trailing slash. Check your endpoint URL.",
+						url: finalUrl,
+					});
+				}
 
-    // If supplier wraps XML in an HTML page, try to extract the real payload
-    if (responseText.includes("<html") || responseText.includes("<!DOCTYPE")) {
-      // First, try to pull content from <pre> tags (common for PHP var_dump inside HTML)
-      const preMatch = responseText.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
-      if (preMatch) {
-        responseText = preMatch[1];
-      } else if (responseText.includes(`<${responseRoot}`) || responseText.includes("GLORIA_locationlist")) {
-        // The HTML page contains our XML root — extract the XML block instead of stripping all tags
-        const xmlStartTag = `<${responseRoot}`;
-        const xmlStart = responseText.indexOf(xmlStartTag);
-        if (xmlStart !== -1) {
-          const xmlEndTag = `</${responseRoot}>`;
-          const xmlEnd = responseText.indexOf(xmlEndTag, xmlStart);
-          if (xmlEnd !== -1) {
-            responseText = responseText.substring(xmlStart, xmlEnd + xmlEndTag.length);
-          } else {
-            // No closing tag — take everything from the start tag onward
-            responseText = responseText.substring(xmlStart);
-          }
-        }
-        // If no start tag found either, leave responseText as-is for the parsers to report
-      } else if (responseText.includes("array(")) {
-        // HTML wrapping a PHP var_dump — strip only HTML tags, keep the PHP output
-        const bodyMatch = responseText.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-        if (bodyMatch) responseText = bodyMatch[1].replace(/<[^>]+>/g, "").trim();
-        else responseText = responseText.replace(/<[^>]+>/g, "").trim();
-      } else {
-        // Truly an HTML error page with no relevant data
-        const bodyMatch = responseText.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-        const htmlText = bodyMatch ? bodyMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : responseText.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-        return res.status(400).json({
-          error: "INVALID_RESPONSE_FORMAT",
-          message: "Supplier returned an HTML page instead of XML/JSON. The endpoint may be misconfigured or returning an error page.",
-          supplierResponse: htmlText.substring(0, 800) || "(empty)",
-        });
-      }
-    }
-    responseText = responseText.replace(/&quot;/g, '"').replace(/&#91;/g, "[").replace(/&#93;/g, "]");
-    if (responseText.includes(responseRoot)) {
-      const trailingMatch = responseText.match(/\}\s*\}\s*\}\s*[\r\n\s]*string\s*\(/);
-      if (trailingMatch && typeof trailingMatch.index === "number") {
-        const stringStart = responseText.indexOf("string(", trailingMatch.index);
-        if (stringStart !== -1) {
-          const before = responseText;
-          responseText = responseText.substring(0, stringStart);
-          if (!responseText.includes('["Locs"]') && !responseText.includes("['Locs']")) responseText = before;
-        }
-      }
-    }
+				// If supplier wraps XML in an HTML page, try to extract the real payload
+				if (
+					responseText.includes("<html") ||
+					responseText.includes("<!DOCTYPE")
+				) {
+					// First, try to pull content from <pre> tags (common for PHP var_dump inside HTML)
+					const preMatch = responseText.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+					if (preMatch) {
+						responseText = preMatch[1];
+					} else if (
+						responseText.includes(`<${responseRoot}`) ||
+						responseText.includes("GLORIA_locationlist")
+					) {
+						// The HTML page contains our XML root — extract the XML block instead of stripping all tags
+						const xmlStartTag = `<${responseRoot}`;
+						const xmlStart = responseText.indexOf(xmlStartTag);
+						if (xmlStart !== -1) {
+							const xmlEndTag = `</${responseRoot}>`;
+							const xmlEnd = responseText.indexOf(xmlEndTag, xmlStart);
+							if (xmlEnd !== -1) {
+								responseText = responseText.substring(
+									xmlStart,
+									xmlEnd + xmlEndTag.length,
+								);
+							} else {
+								// No closing tag — take everything from the start tag onward
+								responseText = responseText.substring(xmlStart);
+							}
+						}
+						// If no start tag found either, leave responseText as-is for the parsers to report
+					} else if (responseText.includes("array(")) {
+						// HTML wrapping a PHP var_dump — strip only HTML tags, keep the PHP output
+						const bodyMatch = responseText.match(
+							/<body[^>]*>([\s\S]*?)<\/body>/i,
+						);
+						if (bodyMatch)
+							responseText = bodyMatch[1].replace(/<[^>]+>/g, "").trim();
+						else responseText = responseText.replace(/<[^>]+>/g, "").trim();
+					} else {
+						// Truly an HTML error page with no relevant data
+						const bodyMatch = responseText.match(
+							/<body[^>]*>([\s\S]*?)<\/body>/i,
+						);
+						const htmlText = bodyMatch
+							? bodyMatch[1]
+									.replace(/<[^>]+>/g, " ")
+									.replace(/\s+/g, " ")
+									.trim()
+							: responseText
+									.replace(/<[^>]+>/g, " ")
+									.replace(/\s+/g, " ")
+									.trim();
+						return res.status(400).json({
+							error: "INVALID_RESPONSE_FORMAT",
+							message:
+								"Supplier returned an HTML page instead of XML/JSON. The endpoint may be misconfigured or returning an error page.",
+							supplierResponse: htmlText.substring(0, 800) || "(empty)",
+						});
+					}
+				}
+				responseText = responseText
+					.replace(/&quot;/g, '"')
+					.replace(/&#91;/g, "[")
+					.replace(/&#93;/g, "]");
+				if (responseText.includes(responseRoot)) {
+					const trailingMatch = responseText.match(
+						/\}\s*\}\s*\}\s*[\r\n\s]*string\s*\(/,
+					);
+					if (trailingMatch && typeof trailingMatch.index === "number") {
+						const stringStart = responseText.indexOf(
+							"string(",
+							trailingMatch.index,
+						);
+						if (stringStart !== -1) {
+							const before = responseText;
+							responseText = responseText.substring(0, stringStart);
+							if (
+								!responseText.includes('["Locs"]') &&
+								!responseText.includes("['Locs']")
+							)
+								responseText = before;
+						}
+					}
+				}
 
-    // Helper: extract location + branch data from a normalized LocationDetail
-    // attrs = XML attributes (Code, Name, Latitude, Longitude, BranchType, etc.)
-    // countryCodeOverride = country code from parent Country element (for XML with CountryList)
-    function extractFromLocationDetail(locationDetail: any, countryCodeOverride?: string) {
-      // Handle both PHP var_dump (attrs in .attr sub-object) and XML (attrs as direct @_ prefixed or direct properties)
-      const attrs = locationDetail.attr || {};
-      const address = locationDetail.Address || {};
-      const countryName = address.CountryName || {};
-      // Country code: from CountryName.Code attribute, or from CountryName.attr.Code (PHP), or from parent Country element, or from attrs
-      let countryCode = "";
-      if (countryCodeOverride) {
-        countryCode = countryCodeOverride;
-      } else if (typeof countryName === "string") {
-        // no code
-      } else {
-        countryCode = (countryName["@_Code"] || countryName.attr?.Code || countryName.Code || attrs.CountryCode || "").toString().toUpperCase().trim();
-      }
-      const code = String(attrs.Code || attrs.BranchType || locationDetail.Code || locationDetail.BranchType || "").toUpperCase().trim();
-      const name = String(attrs.Name || locationDetail.Name || "").trim();
-      const latStr = attrs.Latitude ?? locationDetail.Latitude ?? locationDetail["@_Latitude"];
-      const lonStr = attrs.Longitude ?? locationDetail.Longitude ?? locationDetail["@_Longitude"];
-      const latitude = latStr != null ? parseFloat(String(latStr)) : null;
-      const longitude = lonStr != null ? parseFloat(String(lonStr)) : null;
+				// Helper: extract location + branch data from a normalized LocationDetail
+				// attrs = XML attributes (Code, Name, Latitude, Longitude, BranchType, etc.)
+				// countryCodeOverride = country code from parent Country element (for XML with CountryList)
+				function extractFromLocationDetail(
+					locationDetail: any,
+					countryCodeOverride?: string,
+				) {
+					// Handle both PHP var_dump (attrs in .attr sub-object) and XML (attrs as direct @_ prefixed or direct properties)
+					const attrs = locationDetail.attr || {};
+					const address = locationDetail.Address || {};
+					const countryName = address.CountryName || {};
+					// Country code: from CountryName.Code attribute, or from CountryName.attr.Code (PHP), or from parent Country element, or from attrs
+					let countryCode = "";
+					if (countryCodeOverride) {
+						countryCode = countryCodeOverride;
+					} else if (typeof countryName === "string") {
+						// no code
+					} else {
+						countryCode = (
+							countryName["@_Code"] ||
+							countryName.attr?.Code ||
+							countryName.Code ||
+							attrs.CountryCode ||
+							""
+						)
+							.toString()
+							.toUpperCase()
+							.trim();
+					}
+					const code = String(
+						attrs.Code ||
+							attrs.BranchType ||
+							locationDetail.Code ||
+							locationDetail.BranchType ||
+							"",
+					)
+						.toUpperCase()
+						.trim();
+					const name = String(attrs.Name || locationDetail.Name || "").trim();
+					const latStr =
+						attrs.Latitude ??
+						locationDetail.Latitude ??
+						locationDetail["@_Latitude"];
+					const lonStr =
+						attrs.Longitude ??
+						locationDetail.Longitude ??
+						locationDetail["@_Longitude"];
+					const latitude = latStr != null ? parseFloat(String(latStr)) : null;
+					const longitude = lonStr != null ? parseFloat(String(lonStr)) : null;
 
-      // Derive unlocode
-      let unlocode: string | null = null;
-      if (attrs.NatoLocode || locationDetail.NatoLocode) {
-        unlocode = String(attrs.NatoLocode || locationDetail.NatoLocode).toUpperCase().trim();
-      } else if (code && countryCode) {
-        if (code.length === 5 && code.startsWith(countryCode)) {
-          unlocode = code;
-        } else if (code.length === 6) {
-          unlocode = `${countryCode}${code.substring(0, 3)}`;
-        } else if (code.length >= 3) {
-          unlocode = `${countryCode}${code.substring(code.length - 3)}`;
-        } else {
-          unlocode = `${countryCode}${code}`;
-        }
-      }
+					// Derive unlocode
+					let unlocode: string | null = null;
+					if (attrs.NatoLocode || locationDetail.NatoLocode) {
+						unlocode = String(attrs.NatoLocode || locationDetail.NatoLocode)
+							.toUpperCase()
+							.trim();
+					} else if (code && countryCode) {
+						if (code.length === 5 && code.startsWith(countryCode)) {
+							unlocode = code;
+						} else if (code.length === 6) {
+							unlocode = `${countryCode}${code.substring(0, 3)}`;
+						} else if (code.length >= 3) {
+							unlocode = `${countryCode}${code.substring(code.length - 3)}`;
+						} else {
+							unlocode = `${countryCode}${code}`;
+						}
+					}
 
-      if (unlocode) {
-        locations.push({
-          unlocode,
-          country: countryCode || unlocode.substring(0, 2),
-          place: name,
-          iataCode: (attrs.IataCode || locationDetail.IataCode || "").toString().trim() || null,
-          latitude: latitude != null && !isNaN(latitude) ? latitude : null,
-          longitude: longitude != null && !isNaN(longitude) ? longitude : null,
-        });
-      }
-    }
+					if (unlocode) {
+						locations.push({
+							unlocode,
+							country: countryCode || unlocode.substring(0, 2),
+							place: name,
+							iataCode:
+								(attrs.IataCode || locationDetail.IataCode || "")
+									.toString()
+									.trim() || null,
+							latitude: latitude != null && !isNaN(latitude) ? latitude : null,
+							longitude:
+								longitude != null && !isNaN(longitude) ? longitude : null,
+						});
+					}
+				}
 
-    // ──── Strategy 1: Raw XML response (e.g. <GLORIA_locationlistrs ...>) ────
-    const trimmedResponse = responseText.trimStart();
-    isXmlResponse = trimmedResponse.startsWith("<?xml") || trimmedResponse.startsWith(`<${responseRoot}`) || (trimmedResponse.startsWith("<") && responseText.includes(responseRoot));
-    if (isXmlResponse && responseText.includes(responseRoot)) {
-      try {
-        // ── Helper: regex-based extraction of LocationDetail blocks from raw XML ──
-        function regexExtractLocations(xmlText: string): { regexLocs: any[]; regexBranches: any[] } {
-          const locationDetailRegex = /<LocationDetail\b([^>]*)>([\s\S]*?)<\/LocationDetail>/gi;
-          const attrRegex = /(\w+)\s*=\s*"([^"]*)"/g;
+				// ──── Strategy 1: Raw XML response (e.g. <GLORIA_locationlistrs ...>) ────
+				const trimmedResponse = responseText.trimStart();
+				isXmlResponse =
+					trimmedResponse.startsWith("<?xml") ||
+					trimmedResponse.startsWith(`<${responseRoot}`) ||
+					(trimmedResponse.startsWith("<") &&
+						responseText.includes(responseRoot));
+				if (isXmlResponse && responseText.includes(responseRoot)) {
+					try {
+						// ── Helper: regex-based extraction of LocationDetail blocks from raw XML ──
+						function regexExtractLocations(xmlText: string): {
+							regexLocs: any[];
+							regexBranches: any[];
+						} {
+							const locationDetailRegex =
+								/<LocationDetail\b([^>]*)>([\s\S]*?)<\/LocationDetail>/gi;
+							const attrRegex = /(\w+)\s*=\s*"([^"]*)"/g;
 
-          const countryBlockRegex = /<Country>([^<]*)<CountryCode>([^<]+)<\/CountryCode>/gi;
-          const countryBlocks: { name: string; code: string; startIdx: number }[] = [];
-          let cbMatch: RegExpExecArray | null;
-          while ((cbMatch = countryBlockRegex.exec(xmlText)) !== null) {
-            countryBlocks.push({ name: cbMatch[1].trim(), code: cbMatch[2].trim().toUpperCase(), startIdx: cbMatch.index });
-          }
-          console.log(`[import-location-list] Regex: found ${countryBlocks.length} country blocks`);
+							const countryBlockRegex =
+								/<Country>([^<]*)<CountryCode>([^<]+)<\/CountryCode>/gi;
+							const countryBlocks: {
+								name: string;
+								code: string;
+								startIdx: number;
+							}[] = [];
+							let cbMatch: RegExpExecArray | null;
+							while ((cbMatch = countryBlockRegex.exec(xmlText)) !== null) {
+								countryBlocks.push({
+									name: cbMatch[1].trim(),
+									code: cbMatch[2].trim().toUpperCase(),
+									startIdx: cbMatch.index,
+								});
+							}
+							console.log(
+								`[import-location-list] Regex: found ${countryBlocks.length} country blocks`,
+							);
 
-          let ldMatch: RegExpExecArray | null;
-          const regexLocs: any[] = [];
-          while ((ldMatch = locationDetailRegex.exec(xmlText)) !== null) {
-            const attrStr = ldMatch[1];
-            const innerXml = ldMatch[2];
-            const matchIdx = ldMatch.index;
+							let ldMatch: RegExpExecArray | null;
+							const regexLocs: any[] = [];
+							while ((ldMatch = locationDetailRegex.exec(xmlText)) !== null) {
+								const attrStr = ldMatch[1];
+								const innerXml = ldMatch[2];
+								const matchIdx = ldMatch.index;
 
-            const attrs: any = {};
-            let am: RegExpExecArray | null;
-            const attrRe = new RegExp(attrRegex.source, "g");
-            while ((am = attrRe.exec(attrStr)) !== null) {
-              attrs[am[1]] = am[2];
-            }
+								const attrs: any = {};
+								let am: RegExpExecArray | null;
+								const attrRe = new RegExp(attrRegex.source, "g");
+								while ((am = attrRe.exec(attrStr)) !== null) {
+									attrs[am[1]] = am[2];
+								}
 
-            let cc = "";
-            for (const cb of countryBlocks) {
-              if (cb.startIdx < matchIdx) cc = cb.code;
-              else break;
-            }
+								let cc = "";
+								for (const cb of countryBlocks) {
+									if (cb.startIdx < matchIdx) cc = cb.code;
+									else break;
+								}
 
-            const address: any = {};
-            const addressMatch = innerXml.match(/<Address>([\s\S]*?)<\/Address>/i);
-            if (addressMatch) {
-              const addrXml = addressMatch[1];
-              const alMatch = addrXml.match(/<AddressLine[^>]*>([\s\S]*?)<\/AddressLine>/i);
-              if (alMatch) address.AddressLine = { value: alMatch[1].trim() };
-              const cnMatch = addrXml.match(/<CityName[^>]*>([\s\S]*?)<\/CityName>/i);
-              if (cnMatch) address.CityName = { value: cnMatch[1].trim() };
-              const pcMatch = addrXml.match(/<PostalCode[^>]*>([\s\S]*?)<\/PostalCode>/i);
-              if (pcMatch) address.PostalCode = { value: pcMatch[1].trim() };
-              else if (addrXml.match(/<PostalCode\s*\/>/i)) address.PostalCode = { value: "" };
-              const countryNameMatch = addrXml.match(/<CountryName\s+([^>]*)>([\s\S]*?)<\/CountryName>/i);
-              if (countryNameMatch) {
-                const cnAttrs: any = {};
-                const cnAttrRe = new RegExp(attrRegex.source, "g");
-                let cnA: RegExpExecArray | null;
-                while ((cnA = cnAttrRe.exec(countryNameMatch[1])) !== null) cnAttrs[cnA[1]] = cnA[2];
-                address.CountryName = { value: countryNameMatch[2].trim(), attr: { Code: cnAttrs.Code || cc } };
-                if (cnAttrs.Code) cc = cnAttrs.Code.toUpperCase();
-              } else {
-                address.CountryName = { value: "", attr: { Code: cc } };
-              }
-            }
+								const address: any = {};
+								const addressMatch = innerXml.match(
+									/<Address>([\s\S]*?)<\/Address>/i,
+								);
+								if (addressMatch) {
+									const addrXml = addressMatch[1];
+									const alMatch = addrXml.match(
+										/<AddressLine[^>]*>([\s\S]*?)<\/AddressLine>/i,
+									);
+									if (alMatch)
+										address.AddressLine = { value: alMatch[1].trim() };
+									const cnMatch = addrXml.match(
+										/<CityName[^>]*>([\s\S]*?)<\/CityName>/i,
+									);
+									if (cnMatch) address.CityName = { value: cnMatch[1].trim() };
+									const pcMatch = addrXml.match(
+										/<PostalCode[^>]*>([\s\S]*?)<\/PostalCode>/i,
+									);
+									if (pcMatch)
+										address.PostalCode = { value: pcMatch[1].trim() };
+									else if (addrXml.match(/<PostalCode\s*\/>/i))
+										address.PostalCode = { value: "" };
+									const countryNameMatch = addrXml.match(
+										/<CountryName\s+([^>]*)>([\s\S]*?)<\/CountryName>/i,
+									);
+									if (countryNameMatch) {
+										const cnAttrs: any = {};
+										const cnAttrRe = new RegExp(attrRegex.source, "g");
+										let cnA: RegExpExecArray | null;
+										while ((cnA = cnAttrRe.exec(countryNameMatch[1])) !== null)
+											cnAttrs[cnA[1]] = cnA[2];
+										address.CountryName = {
+											value: countryNameMatch[2].trim(),
+											attr: { Code: cnAttrs.Code || cc },
+										};
+										if (cnAttrs.Code) cc = cnAttrs.Code.toUpperCase();
+									} else {
+										address.CountryName = { value: "", attr: { Code: cc } };
+									}
+								}
 
-            let phone = "";
-            const telMatch = innerXml.match(/<Telephone\s+([^/>]*)\/?\s*>/i);
-            if (telMatch) {
-              const phMatch = telMatch[1].match(/PhoneNumber\s*=\s*"([^"]*)"/i);
-              if (phMatch) phone = phMatch[1].trim();
-            }
+								let phone = "";
+								const telMatch = innerXml.match(
+									/<Telephone\s+([^/>]*)\/?\s*>/i,
+								);
+								if (telMatch) {
+									const phMatch = telMatch[1].match(
+										/PhoneNumber\s*=\s*"([^"]*)"/i,
+									);
+									if (phMatch) phone = phMatch[1].trim();
+								}
 
-            let pickup = "";
-            const piMatch = innerXml.match(/<PickupInstructions\s+([^/>]*)\/?\s*>/i);
-            if (piMatch) {
-              const pkMatch = piMatch[1].match(/Pickup\s*=\s*"([^"]*)"/i);
-              if (pkMatch) pickup = pkMatch[1].trim();
-            }
+								let pickup = "";
+								const piMatch = innerXml.match(
+									/<PickupInstructions\s+([^/>]*)\/?\s*>/i,
+								);
+								if (piMatch) {
+									const pkMatch = piMatch[1].match(/Pickup\s*=\s*"([^"]*)"/i);
+									if (pkMatch) pickup = pkMatch[1].trim();
+								}
 
-            const opening: any = {};
-            const days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-            for (const day of days) {
-              const dayRe = new RegExp(`<${day}\\s+([^/>]*)\\/?\\s*>`, "i");
-              const dayMatch = innerXml.match(dayRe);
-              if (dayMatch) {
-                const openMatch = dayMatch[1].match(/Open\s*=\s*"([^"]*)"/i);
-                if (openMatch) opening[day] = { attr: { Open: openMatch[1].replace(/\n/g, "").trim() } };
-              }
-            }
+								const opening: any = {};
+								const days = [
+									"monday",
+									"tuesday",
+									"wednesday",
+									"thursday",
+									"friday",
+									"saturday",
+									"sunday",
+								];
+								for (const day of days) {
+									const dayRe = new RegExp(`<${day}\\s+([^/>]*)\\/?\\s*>`, "i");
+									const dayMatch = innerXml.match(dayRe);
+									if (dayMatch) {
+										const openMatch =
+											dayMatch[1].match(/Open\s*=\s*"([^"]*)"/i);
+										if (openMatch)
+											opening[day] = {
+												attr: { Open: openMatch[1].replace(/\n/g, "").trim() },
+											};
+									}
+								}
 
-            const normalized: any = {
-              attr: attrs,
-              Address: Object.keys(address).length > 0 ? address : { CountryName: { value: "", attr: { Code: cc } } },
-              Telephone: phone ? { attr: { PhoneNumber: phone } } : undefined,
-              Opening: Object.keys(opening).length > 0 ? opening : undefined,
-              PickupInstructions: pickup ? { attr: { Pickup: pickup } } : undefined,
-            };
+								const normalized: any = {
+									attr: attrs,
+									Address:
+										Object.keys(address).length > 0
+											? address
+											: { CountryName: { value: "", attr: { Code: cc } } },
+									Telephone: phone
+										? { attr: { PhoneNumber: phone } }
+										: undefined,
+									Opening:
+										Object.keys(opening).length > 0 ? opening : undefined,
+									PickupInstructions: pickup
+										? { attr: { Pickup: pickup } }
+										: undefined,
+								};
 
-            extractFromLocationDetail({ ...normalized, ...attrs }, cc);
-            regexLocs.push({ VehMatchedLoc: { LocationDetail: normalized } });
-          }
+								extractFromLocationDetail({ ...normalized, ...attrs }, cc);
+								regexLocs.push({
+									VehMatchedLoc: { LocationDetail: normalized },
+								});
+							}
 
-          return { regexLocs, regexBranches: [] };
-        }
+							return { regexLocs, regexBranches: [] };
+						}
 
-        // ── Approach A: Try fast-xml-parser ──
-        let xmlParserExtracted = 0;
-        let xmlParserError: string | null = null;
-        let diagnostics: any = { responseLength: responseText.length, responseExcerpt: responseText.substring(0, 200) };
+						// ── Approach A: Try fast-xml-parser ──
+						let xmlParserExtracted = 0;
+						let xmlParserError: string | null = null;
+						const diagnostics: any = {
+							responseLength: responseText.length,
+							responseExcerpt: responseText.substring(0, 200),
+						};
 
-        try {
-          const { XMLParser } = await import("fast-xml-parser");
+						try {
+							const { XMLParser } = await import("fast-xml-parser");
 
-          const xmlParser = new XMLParser({
-            ignoreAttributes: false,
-            attributeNamePrefix: "@_",
-            textNodeName: "#text",
-            trimValues: true,
-            isArray: (name: string) => ["Country", "VehMatchedLoc", "VehMatchedLocs", "Code"].includes(name),
-            stopNodes: [],
-            processEntities: true,
-          });
+							const xmlParser = new XMLParser({
+								ignoreAttributes: false,
+								attributeNamePrefix: "@_",
+								textNodeName: "#text",
+								trimValues: true,
+								isArray: (name: string) =>
+									[
+										"Country",
+										"VehMatchedLoc",
+										"VehMatchedLocs",
+										"Code",
+									].includes(name),
+								stopNodes: [],
+								processEntities: true,
+							});
 
-          const parsed = xmlParser.parse(responseText);
-          diagnostics.parsedKeys = Object.keys(parsed || {});
-          console.log(`[import-location-list] fast-xml-parser parsed, top-level keys: ${diagnostics.parsedKeys.join(", ")}`);
+							const parsed = xmlParser.parse(responseText);
+							diagnostics.parsedKeys = Object.keys(parsed || {});
+							console.log(
+								`[import-location-list] fast-xml-parser parsed, top-level keys: ${diagnostics.parsedKeys.join(", ")}`,
+							);
 
-          const root = parsed[responseRoot] || parsed["GLORIA_locationlistrs"];
-          if (root) {
-            diagnostics.rootKeys = Object.keys(root);
-            console.log(`[import-location-list] Root element found, keys: ${diagnostics.rootKeys.join(", ")}`);
+							const root =
+								parsed[responseRoot] || parsed["GLORIA_locationlistrs"];
+							if (root) {
+								diagnostics.rootKeys = Object.keys(root);
+								console.log(
+									`[import-location-list] Root element found, keys: ${diagnostics.rootKeys.join(", ")}`,
+								);
 
-            const vehMatchedLocs: any[] = [];
-            const countryCodeMap = new Map<any, string>();
+								const vehMatchedLocs: any[] = [];
+								const countryCodeMap = new Map<any, string>();
 
-            const countryList = root.CountryList;
-            diagnostics.hasCountryList = !!countryList;
-            console.log(`[import-location-list] CountryList exists: ${!!countryList}`);
+								const countryList = root.CountryList;
+								diagnostics.hasCountryList = !!countryList;
+								console.log(
+									`[import-location-list] CountryList exists: ${!!countryList}`,
+								);
 
-            if (countryList) {
-              diagnostics.countryListType = typeof countryList;
-              diagnostics.countryListKeys = typeof countryList === "object" ? Object.keys(countryList) : [];
-              console.log(`[import-location-list] CountryList type: ${typeof countryList}, keys: ${diagnostics.countryListKeys?.join(", ")}`);
+								if (countryList) {
+									diagnostics.countryListType = typeof countryList;
+									diagnostics.countryListKeys =
+										typeof countryList === "object"
+											? Object.keys(countryList)
+											: [];
+									console.log(
+										`[import-location-list] CountryList type: ${typeof countryList}, keys: ${diagnostics.countryListKeys?.join(", ")}`,
+									);
 
-              const countries: any[] = [];
-              function collectCountries(node: any) {
-                if (!node) return;
-                if (Array.isArray(node)) {
-                  node.forEach(collectCountries);
-                  return;
-                }
-                if (node.CountryCode || node.VehMatchedLocs) {
-                  countries.push(node);
-                }
-                if (node.Country) {
-                  collectCountries(node.Country);
-                }
-                if (node.VehMatchedLocs) {
-                  const vmlArr = Array.isArray(node.VehMatchedLocs) ? node.VehMatchedLocs : [node.VehMatchedLocs];
-                  for (const vml of vmlArr) {
-                    if (vml.Country) collectCountries(vml.Country);
-                  }
-                }
-              }
+									const countries: any[] = [];
+									function collectCountries(node: any) {
+										if (!node) return;
+										if (Array.isArray(node)) {
+											node.forEach(collectCountries);
+											return;
+										}
+										if (node.CountryCode || node.VehMatchedLocs) {
+											countries.push(node);
+										}
+										if (node.Country) {
+											collectCountries(node.Country);
+										}
+										if (node.VehMatchedLocs) {
+											const vmlArr = Array.isArray(node.VehMatchedLocs)
+												? node.VehMatchedLocs
+												: [node.VehMatchedLocs];
+											for (const vml of vmlArr) {
+												if (vml.Country) collectCountries(vml.Country);
+											}
+										}
+									}
 
-              const startNode = countryList.Country || countryList;
-              diagnostics.collectStartIsArray = Array.isArray(startNode);
-              diagnostics.collectStartType = typeof startNode;
-              console.log(`[import-location-list] collectCountries start node: isArray=${Array.isArray(startNode)}, type=${typeof startNode}`);
+									const startNode = countryList.Country || countryList;
+									diagnostics.collectStartIsArray = Array.isArray(startNode);
+									diagnostics.collectStartType = typeof startNode;
+									console.log(
+										`[import-location-list] collectCountries start node: isArray=${Array.isArray(startNode)}, type=${typeof startNode}`,
+									);
 
-              collectCountries(startNode);
-              diagnostics.countriesFound = countries.length;
-              console.log(`[import-location-list] collectCountries found ${countries.length} countries`);
+									collectCountries(startNode);
+									diagnostics.countriesFound = countries.length;
+									console.log(
+										`[import-location-list] collectCountries found ${countries.length} countries`,
+									);
 
-              for (const country of countries) {
-                const cc = (country.CountryCode || country["#text"] || "").toString().toUpperCase().trim();
-                let matchedLocsArr = country.VehMatchedLocs;
-                if (!matchedLocsArr) {
-                  console.log(`[import-location-list] Country ${cc} has no VehMatchedLocs, skipping`);
-                  continue;
-                }
-                if (!Array.isArray(matchedLocsArr)) matchedLocsArr = [matchedLocsArr];
-                for (const matchedLocs of matchedLocsArr) {
-                  let locs = matchedLocs.VehMatchedLoc;
-                  if (!locs) {
-                    console.log(`[import-location-list] Country ${cc} VehMatchedLocs entry has no VehMatchedLoc`);
-                    continue;
-                  }
-                  if (!Array.isArray(locs)) locs = [locs];
-                  for (const loc of locs) {
-                    vehMatchedLocs.push(loc);
-                    if (loc.LocationDetail) countryCodeMap.set(loc.LocationDetail, cc);
-                  }
-                }
-              }
-            } else {
-              let vmlRoot = root.VehMatchedLocs;
-              if (vmlRoot) {
-                if (!Array.isArray(vmlRoot)) vmlRoot = [vmlRoot];
-                for (const vml of vmlRoot) {
-                  let directLocs = vml.VehMatchedLoc;
-                  if (!directLocs) continue;
-                  if (!Array.isArray(directLocs)) directLocs = [directLocs];
-                  for (const loc of directLocs) {
-                    vehMatchedLocs.push(loc);
-                  }
-                }
-              } else if (root.VehMatchedLoc) {
-                let directLocs = root.VehMatchedLoc;
-                if (!Array.isArray(directLocs)) directLocs = [directLocs];
-                for (const loc of directLocs) {
-                  vehMatchedLocs.push(loc);
-                }
-              }
-            }
+									for (const country of countries) {
+										const cc = (country.CountryCode || country["#text"] || "")
+											.toString()
+											.toUpperCase()
+											.trim();
+										let matchedLocsArr = country.VehMatchedLocs;
+										if (!matchedLocsArr) {
+											console.log(
+												`[import-location-list] Country ${cc} has no VehMatchedLocs, skipping`,
+											);
+											continue;
+										}
+										if (!Array.isArray(matchedLocsArr))
+											matchedLocsArr = [matchedLocsArr];
+										for (const matchedLocs of matchedLocsArr) {
+											let locs = matchedLocs.VehMatchedLoc;
+											if (!locs) {
+												console.log(
+													`[import-location-list] Country ${cc} VehMatchedLocs entry has no VehMatchedLoc`,
+												);
+												continue;
+											}
+											if (!Array.isArray(locs)) locs = [locs];
+											for (const loc of locs) {
+												vehMatchedLocs.push(loc);
+												if (loc.LocationDetail)
+													countryCodeMap.set(loc.LocationDetail, cc);
+											}
+										}
+									}
+								} else {
+									let vmlRoot = root.VehMatchedLocs;
+									if (vmlRoot) {
+										if (!Array.isArray(vmlRoot)) vmlRoot = [vmlRoot];
+										for (const vml of vmlRoot) {
+											let directLocs = vml.VehMatchedLoc;
+											if (!directLocs) continue;
+											if (!Array.isArray(directLocs)) directLocs = [directLocs];
+											for (const loc of directLocs) {
+												vehMatchedLocs.push(loc);
+											}
+										}
+									} else if (root.VehMatchedLoc) {
+										let directLocs = root.VehMatchedLoc;
+										if (!Array.isArray(directLocs)) directLocs = [directLocs];
+										for (const loc of directLocs) {
+											vehMatchedLocs.push(loc);
+										}
+									}
+								}
 
-            diagnostics.vehMatchedLocsCount = vehMatchedLocs.length;
-            diagnostics.countryCodeMapSize = countryCodeMap.size;
-            console.log(`[import-location-list] XML parser extracted ${vehMatchedLocs.length} VehMatchedLoc elements, countryCodeMap size: ${countryCodeMap.size}`);
+								diagnostics.vehMatchedLocsCount = vehMatchedLocs.length;
+								diagnostics.countryCodeMapSize = countryCodeMap.size;
+								console.log(
+									`[import-location-list] XML parser extracted ${vehMatchedLocs.length} VehMatchedLoc elements, countryCodeMap size: ${countryCodeMap.size}`,
+								);
 
-            if (vehMatchedLocs.length > 0) {
-              xmlParserExtracted = vehMatchedLocs.length;
+								if (vehMatchedLocs.length > 0) {
+									xmlParserExtracted = vehMatchedLocs.length;
 
-              const normalizedLocs = vehMatchedLocs.map((loc: any) => {
-                const ld = loc.LocationDetail || loc;
-                const attrs: any = {};
-                for (const key of Object.keys(ld)) {
-                  if (key.startsWith("@_")) {
-                    attrs[key.substring(2)] = ld[key];
-                  }
-                }
-                const normalized: any = { attr: attrs };
-                if (ld.Address) {
-                  const addr = ld.Address;
-                  normalized.Address = {
-                    AddressLine: typeof addr.AddressLine === "string" ? { value: addr.AddressLine } : addr.AddressLine,
-                    CityName: typeof addr.CityName === "string" ? { value: addr.CityName } : addr.CityName,
-                    PostalCode: typeof addr.PostalCode === "string" ? { value: (addr.PostalCode || "").toString() } : addr.PostalCode,
-                    CountryName: addr.CountryName ? {
-                      value: typeof addr.CountryName === "string" ? addr.CountryName : (addr.CountryName["#text"] || addr.CountryName.value || ""),
-                      attr: {
-                        Code: addr.CountryName?.["@_Code"] || addr.CountryName?.Code || countryCodeMap.get(ld) || "",
-                      },
-                    } : { value: "", attr: { Code: countryCodeMap.get(ld) || "" } },
-                  };
-                } else {
-                  normalized.Address = { CountryName: { value: "", attr: { Code: countryCodeMap.get(ld) || "" } } };
-                }
-                if (ld.Telephone) {
-                  normalized.Telephone = {
-                    attr: { PhoneNumber: ld.Telephone?.["@_PhoneNumber"] || ld.Telephone?.PhoneNumber || "" },
-                  };
-                }
-                if (ld.Opening) normalized.Opening = ld.Opening;
-                if (ld.PickupInstructions) normalized.PickupInstructions = ld.PickupInstructions;
-                if (ld.Cars) normalized.Cars = ld.Cars;
+									const normalizedLocs = vehMatchedLocs.map((loc: any) => {
+										const ld = loc.LocationDetail || loc;
+										const attrs: any = {};
+										for (const key of Object.keys(ld)) {
+											if (key.startsWith("@_")) {
+												attrs[key.substring(2)] = ld[key];
+											}
+										}
+										const normalized: any = { attr: attrs };
+										if (ld.Address) {
+											const addr = ld.Address;
+											normalized.Address = {
+												AddressLine:
+													typeof addr.AddressLine === "string"
+														? { value: addr.AddressLine }
+														: addr.AddressLine,
+												CityName:
+													typeof addr.CityName === "string"
+														? { value: addr.CityName }
+														: addr.CityName,
+												PostalCode:
+													typeof addr.PostalCode === "string"
+														? { value: (addr.PostalCode || "").toString() }
+														: addr.PostalCode,
+												CountryName: addr.CountryName
+													? {
+															value:
+																typeof addr.CountryName === "string"
+																	? addr.CountryName
+																	: addr.CountryName["#text"] ||
+																		addr.CountryName.value ||
+																		"",
+															attr: {
+																Code:
+																	addr.CountryName?.["@_Code"] ||
+																	addr.CountryName?.Code ||
+																	countryCodeMap.get(ld) ||
+																	"",
+															},
+														}
+													: {
+															value: "",
+															attr: { Code: countryCodeMap.get(ld) || "" },
+														},
+											};
+										} else {
+											normalized.Address = {
+												CountryName: {
+													value: "",
+													attr: { Code: countryCodeMap.get(ld) || "" },
+												},
+											};
+										}
+										if (ld.Telephone) {
+											normalized.Telephone = {
+												attr: {
+													PhoneNumber:
+														ld.Telephone?.["@_PhoneNumber"] ||
+														ld.Telephone?.PhoneNumber ||
+														"",
+												},
+											};
+										}
+										if (ld.Opening) normalized.Opening = ld.Opening;
+										if (ld.PickupInstructions)
+											normalized.PickupInstructions = ld.PickupInstructions;
+										if (ld.Cars) normalized.Cars = ld.Cars;
 
-                const cc = countryCodeMap.get(ld) || normalized.Address?.CountryName?.attr?.Code || "";
-                extractFromLocationDetail({ ...normalized, ...attrs }, cc);
+										const cc =
+											countryCodeMap.get(ld) ||
+											normalized.Address?.CountryName?.attr?.Code ||
+											"";
+										extractFromLocationDetail({ ...normalized, ...attrs }, cc);
 
-                return { VehMatchedLoc: { LocationDetail: normalized } };
-              });
+										return { VehMatchedLoc: { LocationDetail: normalized } };
+									});
 
-              const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-              branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: normalizedLocs }, gloria: { VehMatchedLocs: normalizedLocs } });
-              console.log(`[import-location-list] XML parser: locations=${locations.length}, branches=${branches.length}`);
-            } else {
-              console.log(`[import-location-list] XML parser found 0 VehMatchedLoc, will try regex fallback`);
-            }
-          } else {
-            xmlParserError = `Root element not found. Parsed keys: ${diagnostics.parsedKeys?.join(", ")}`;
-            console.log(`[import-location-list] ${xmlParserError}`);
-          }
-        } catch (xmlErr: any) {
-          xmlParserError = xmlErr.message || String(xmlErr);
-          console.warn(`[import-location-list] fast-xml-parser error: ${xmlParserError}`);
-        }
+									const { extractBranchesFromGloria } = await import(
+										"../../services/xmlParser.js"
+									);
+									branches = extractBranchesFromGloria({
+										OTA_VehLocSearchRS: { VehMatchedLocs: normalizedLocs },
+										gloria: { VehMatchedLocs: normalizedLocs },
+									});
+									console.log(
+										`[import-location-list] XML parser: locations=${locations.length}, branches=${branches.length}`,
+									);
+								} else {
+									console.log(
+										`[import-location-list] XML parser found 0 VehMatchedLoc, will try regex fallback`,
+									);
+								}
+							} else {
+								xmlParserError = `Root element not found. Parsed keys: ${diagnostics.parsedKeys?.join(", ")}`;
+								console.log(`[import-location-list] ${xmlParserError}`);
+							}
+						} catch (xmlErr: any) {
+							xmlParserError = xmlErr.message || String(xmlErr);
+							console.warn(
+								`[import-location-list] fast-xml-parser error: ${xmlParserError}`,
+							);
+						}
 
-        // ── Approach B: Regex fallback (if XML parser extracted 0 items) ──
-        if (xmlParserExtracted === 0) {
-          console.log(`[import-location-list] Using regex fallback (xmlParserExtracted=${xmlParserExtracted}, xmlParserError=${xmlParserError})`);
-          const { regexLocs } = regexExtractLocations(responseText);
-          console.log(`[import-location-list] Regex fallback extracted ${regexLocs.length} LocationDetail blocks, locations now: ${locations.length}`);
+						// ── Approach B: Regex fallback (if XML parser extracted 0 items) ──
+						if (xmlParserExtracted === 0) {
+							console.log(
+								`[import-location-list] Using regex fallback (xmlParserExtracted=${xmlParserExtracted}, xmlParserError=${xmlParserError})`,
+							);
+							const { regexLocs } = regexExtractLocations(responseText);
+							console.log(
+								`[import-location-list] Regex fallback extracted ${regexLocs.length} LocationDetail blocks, locations now: ${locations.length}`,
+							);
 
-          if (regexLocs.length > 0) {
-            const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-            branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: regexLocs }, gloria: { VehMatchedLocs: regexLocs } });
-            diagnostics.usedRegexFallback = true;
-            diagnostics.regexLocsCount = regexLocs.length;
-          } else if (locations.length === 0) {
-            return res.status(400).json({
-              error: "INVALID_RESPONSE_FORMAT",
-              message: `XML response contained <${responseRoot}> but no <LocationDetail> elements could be extracted. XML parser error: ${xmlParserError || "none"}`,
-              diagnostics,
-              details: responseText.substring(0, 800),
-            });
-          }
-        }
+							if (regexLocs.length > 0) {
+								const { extractBranchesFromGloria } = await import(
+									"../../services/xmlParser.js"
+								);
+								branches = extractBranchesFromGloria({
+									OTA_VehLocSearchRS: { VehMatchedLocs: regexLocs },
+									gloria: { VehMatchedLocs: regexLocs },
+								});
+								diagnostics.usedRegexFallback = true;
+								diagnostics.regexLocsCount = regexLocs.length;
+							} else if (locations.length === 0) {
+								return res.status(400).json({
+									error: "INVALID_RESPONSE_FORMAT",
+									message: `XML response contained <${responseRoot}> but no <LocationDetail> elements could be extracted. XML parser error: ${xmlParserError || "none"}`,
+									diagnostics,
+									details: responseText.substring(0, 800),
+								});
+							}
+						}
+					} catch (parseErr: any) {
+						console.error("[import-location-list] XML parse error:", parseErr);
+						return res.status(400).json({
+							error: "INVALID_RESPONSE_FORMAT",
+							message: `Failed to parse XML response: ${parseErr.message || String(parseErr)}`,
+							details: responseText.substring(0, 500),
+						});
+					}
+				}
+				// ──── Strategy 2: PHP var_dump response ────
+				else if (
+					responseText.includes("array(") &&
+					responseText.includes(responseRoot)
+				) {
+					try {
+						const gloriaList = convertPhpVarDumpToGloriaLocationList(
+							responseText,
+							responseRoot,
+						);
+						const vehMatchedLocs = gloriaList.VehMatchedLocs || [];
+						const gloriaResponse = {
+							OTA_VehLocSearchRS: { VehMatchedLocs: vehMatchedLocs },
+							gloria: { VehMatchedLocs: vehMatchedLocs },
+						};
+						const { extractBranchesFromGloria } = await import(
+							"../../services/xmlParser.js"
+						);
+						branches = extractBranchesFromGloria(gloriaResponse);
+						for (const loc of vehMatchedLocs) {
+							const locationDetail = loc.VehMatchedLoc?.LocationDetail;
+							if (!locationDetail) continue;
+							extractFromLocationDetail(locationDetail);
+						}
+					} catch (parseErr: any) {
+						console.error("[import-location-list] PHP parse error:", parseErr);
+						return res.status(400).json({
+							error: "INVALID_RESPONSE_FORMAT",
+							message: `Failed to parse PHP var_dump response: ${parseErr.message || String(parseErr)}`,
+						});
+					}
+				}
+				// ──── Strategy 3: JSON response ────
+				else {
+					try {
+						const data = JSON.parse(responseText);
+						const root = data[responseRoot] || data.GLORIA_locationlistrs;
+						const locs = root?.Locs || root?.CountryList || [];
+						if (Array.isArray(locs) && locs.length > 0) {
+							const { extractBranchesFromGloria } = await import(
+								"../../services/xmlParser.js"
+							);
+							const vehMatchedLocs = locs.map((item: any) => ({
+								VehMatchedLoc: {
+									LocationDetail:
+										item.location?.LocationDetail ||
+										item.LocationDetail ||
+										item,
+								},
+							}));
+							branches = extractBranchesFromGloria({
+								OTA_VehLocSearchRS: { VehMatchedLocs: vehMatchedLocs },
+								gloria: { VehMatchedLocs: vehMatchedLocs },
+							});
+							for (const item of locs) {
+								const locationDetail =
+									item.location?.LocationDetail || item.LocationDetail || item;
+								extractFromLocationDetail(locationDetail);
+							}
+						}
+					} catch (jsonErr: any) {
+						const preview = (responseText || "").substring(0, 600);
+						const detected = preview.startsWith("<")
+							? "XML-like"
+							: preview.startsWith("{") || preview.startsWith("[")
+								? "JSON-like"
+								: preview.includes("array(")
+									? "PHP var_dump"
+									: "unknown";
+						return res.status(400).json({
+							error: "INVALID_RESPONSE_FORMAT",
+							message: `Could not parse supplier response as JSON. Expected XML with <${responseRoot}>, PHP var_dump, or JSON.`,
+							detected,
+							parseError: jsonErr?.message || String(jsonErr),
+							responseLength: (responseText || "").length,
+							responseExcerpt: preview || "(empty response)",
+						});
+					}
+				}
+			}
 
-      } catch (parseErr: any) {
-        console.error("[import-location-list] XML parse error:", parseErr);
-        return res.status(400).json({
-          error: "INVALID_RESPONSE_FORMAT",
-          message: `Failed to parse XML response: ${parseErr.message || String(parseErr)}`,
-          details: responseText.substring(0, 500),
-        });
-      }
-    }
-    // ──── Strategy 2: PHP var_dump response ────
-    else if (responseText.includes("array(") && responseText.includes(responseRoot)) {
-      try {
-        const gloriaList = convertPhpVarDumpToGloriaLocationList(responseText, responseRoot);
-        const vehMatchedLocs = gloriaList.VehMatchedLocs || [];
-        const gloriaResponse = { OTA_VehLocSearchRS: { VehMatchedLocs: vehMatchedLocs }, gloria: { VehMatchedLocs: vehMatchedLocs } };
-        const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-        branches = extractBranchesFromGloria(gloriaResponse);
-        for (const loc of vehMatchedLocs) {
-          const locationDetail = loc.VehMatchedLoc?.LocationDetail;
-          if (!locationDetail) continue;
-          extractFromLocationDetail(locationDetail);
-        }
-      } catch (parseErr: any) {
-        console.error("[import-location-list] PHP parse error:", parseErr);
-        return res.status(400).json({
-          error: "INVALID_RESPONSE_FORMAT",
-          message: `Failed to parse PHP var_dump response: ${parseErr.message || String(parseErr)}`,
-        });
-      }
-    }
-    // ──── Strategy 3: JSON response ────
-    else {
-      try {
-        const data = JSON.parse(responseText);
-        const root = data[responseRoot] || data.GLORIA_locationlistrs;
-        const locs = root?.Locs || root?.CountryList || [];
-        if (Array.isArray(locs) && locs.length > 0) {
-          const { extractBranchesFromGloria } = await import("../../services/xmlParser.js");
-          const vehMatchedLocs = locs.map((item: any) => ({
-            VehMatchedLoc: {
-              LocationDetail: item.location?.LocationDetail || item.LocationDetail || item,
-            },
-          }));
-          branches = extractBranchesFromGloria({ OTA_VehLocSearchRS: { VehMatchedLocs: vehMatchedLocs }, gloria: { VehMatchedLocs: vehMatchedLocs } });
-          for (const item of locs) {
-            const locationDetail = item.location?.LocationDetail || item.LocationDetail || item;
-            extractFromLocationDetail(locationDetail);
-          }
-        }
-      } catch (jsonErr: any) {
-        const preview = (responseText || "").substring(0, 600);
-        const detected = preview.startsWith("<") ? "XML-like" : preview.startsWith("{") || preview.startsWith("[") ? "JSON-like" : preview.includes("array(") ? "PHP var_dump" : "unknown";
-        return res.status(400).json({
-          error: "INVALID_RESPONSE_FORMAT",
-          message: `Could not parse supplier response as JSON. Expected XML with <${responseRoot}>, PHP var_dump, or JSON.`,
-          detected,
-          parseError: jsonErr?.message || String(jsonErr),
-          responseLength: (responseText || "").length,
-          responseExcerpt: preview || "(empty response)",
-        });
-      }
-    }
-    }
+			const sub = await prisma.sourceSubscription.findUnique({
+				where: { sourceId },
+				include: { plan: true },
+			});
+			if (sub?.plan) {
+				const limitCheck = await checkBranchQuota(
+					sourceId,
+					sub.subscribedBranchCount,
+					0,
+					locations.length + branches.length,
+				);
+				if (limitCheck)
+					return res.status(limitCheck.status).json(limitCheck.body);
+			}
 
-    const sub = await prisma.sourceSubscription.findUnique({ where: { sourceId }, include: { plan: true } });
-    if (sub?.plan) {
-      const limitCheck = await checkBranchQuota(sourceId, sub.subscribedBranchCount, 0, locations.length + branches.length);
-      if (limitCheck) return res.status(limitCheck.status).json(limitCheck.body);
-    }
+			let imported = 0;
+			let updated = 0;
+			let skipped = 0;
+			const errors: any[] = [];
+			let branchesImported = 0;
+			let branchesUpdated = 0;
 
-    let imported = 0;
-    let updated = 0;
-    let skipped = 0;
-    const errors: any[] = [];
-    let branchesImported = 0;
-    let branchesUpdated = 0;
+			for (let i = 0; i < locations.length; i++) {
+				const loc = locations[i];
+				try {
+					const unlocode = (loc.unlocode || "").toString().toUpperCase().trim();
+					if (!unlocode || unlocode.length < 4 || unlocode.length > 5) {
+						errors.push({
+							index: i,
+							unlocode: loc.unlocode,
+							error: "Invalid unlocode (4-5 chars)",
+						});
+						skipped++;
+						continue;
+					}
+					const country = loc.country || unlocode.substring(0, 2);
+					const place = loc.place || unlocode;
+					await prisma.uNLocode.upsert({
+						where: { unlocode },
+						update: {
+							country,
+							place,
+							iataCode: loc.iataCode || null,
+							latitude: loc.latitude ?? null,
+							longitude: loc.longitude ?? null,
+						},
+						create: {
+							unlocode,
+							country,
+							place,
+							iataCode: loc.iataCode || null,
+							latitude: loc.latitude ?? null,
+							longitude: loc.longitude ?? null,
+						},
+					});
+					const existing = await prisma.sourceLocation.findUnique({
+						where: { sourceId_unlocode: { sourceId, unlocode } },
+					});
+					if (existing) updated++;
+					else {
+						await prisma.sourceLocation.create({
+							data: { sourceId, unlocode, isMock: false },
+						});
+						imported++;
+					}
+				} catch (locErr: any) {
+					errors.push({
+						index: i,
+						unlocode: loc.unlocode,
+						error: locErr.message || String(locErr),
+					});
+					skipped++;
+				}
+			}
 
-    for (let i = 0; i < locations.length; i++) {
-      const loc = locations[i];
-      try {
-        const unlocode = (loc.unlocode || "").toString().toUpperCase().trim();
-        if (!unlocode || unlocode.length < 4 || unlocode.length > 5) {
-          errors.push({ index: i, unlocode: loc.unlocode, error: "Invalid unlocode (4-5 chars)" });
-          skipped++;
-          continue;
-        }
-        const country = loc.country || unlocode.substring(0, 2);
-        const place = loc.place || unlocode;
-        await prisma.uNLocode.upsert({
-          where: { unlocode },
-          update: { country, place, iataCode: loc.iataCode || null, latitude: loc.latitude ?? null, longitude: loc.longitude ?? null },
-          create: { unlocode, country, place, iataCode: loc.iataCode || null, latitude: loc.latitude ?? null, longitude: loc.longitude ?? null },
-        });
-        const existing = await prisma.sourceLocation.findUnique({
-          where: { sourceId_unlocode: { sourceId, unlocode } },
-        });
-        if (existing) updated++;
-        else {
-          await prisma.sourceLocation.create({ data: { sourceId, unlocode, isMock: false } });
-          imported++;
-        }
-      } catch (locErr: any) {
-        errors.push({ index: i, unlocode: loc.unlocode, error: locErr.message || String(locErr) });
-        skipped++;
-      }
-    }
+			for (const branch of branches) {
+				try {
+					let branchCode =
+						branch.Branchcode ||
+						branch.Code ||
+						branch.attr?.Code ||
+						branch.attr?.BranchType ||
+						(branch as any).LocationDetail?.attr?.Code ||
+						(branch as any).LocationDetail?.attr?.BranchType ||
+						"";
+					if (!branchCode && branch.rawJson) {
+						branchCode =
+							branch.rawJson.Code ||
+							branch.rawJson.attr?.Code ||
+							branch.rawJson.attr?.BranchType ||
+							"";
+					}
+					if (!branchCode) {
+						skipped++;
+						continue;
+					}
+					branchCode = String(branchCode).trim();
+					const name =
+						branch.Name ||
+						branch.attr?.Name ||
+						(branch as any).LocationDetail?.attr?.Name ||
+						null;
+					const rawAddressLine = branch.Address?.AddressLine ?? null;
+					const rawCity = branch.Address?.CityName ?? null;
+					const rawPostalCode = branch.Address?.PostalCode ?? null;
+					const rawCountry = branch.Address?.CountryName ?? null;
+					const addressLine =
+						typeof rawAddressLine === "string"
+							? rawAddressLine
+							: rawAddressLine && "value" in rawAddressLine
+								? (rawAddressLine as any).value
+								: null;
+					const city =
+						typeof rawCity === "string"
+							? rawCity
+							: rawCity && "value" in rawCity
+								? (rawCity as any).value
+								: null;
+					const postalCode =
+						typeof rawPostalCode === "string"
+							? rawPostalCode
+							: rawPostalCode && "value" in rawPostalCode
+								? (rawPostalCode as any).value
+								: null;
+					const country =
+						typeof rawCountry === "string"
+							? rawCountry
+							: rawCountry && "value" in rawCountry
+								? (rawCountry as any).value
+								: null;
+					const countryCode =
+						branch.Address?.CountryName?.attr?.Code ||
+						branch.Address?.CountryName?.Code ||
+						defaultCountryCode;
+					const phone =
+						branch.Telephone?.attr?.PhoneNumber ||
+						branch.Telephone?.PhoneNumber ||
+						null;
+					const latVal =
+						branch.Latitude ??
+						branch.attr?.Latitude ??
+						(branch as any).LocationDetail?.attr?.Latitude;
+					const lonVal =
+						branch.Longitude ??
+						branch.attr?.Longitude ??
+						(branch as any).LocationDetail?.attr?.Longitude;
+					const latitude =
+						latVal != null
+							? typeof latVal === "number"
+								? latVal
+								: parseFloat(String(latVal))
+							: null;
+					const longitude =
+						lonVal != null
+							? typeof lonVal === "number"
+								? lonVal
+								: parseFloat(String(lonVal))
+							: null;
 
-    for (const branch of branches) {
-      try {
-        let branchCode =
-          branch.Branchcode ||
-          branch.Code ||
-          branch.attr?.Code ||
-          branch.attr?.BranchType ||
-          (branch as any).LocationDetail?.attr?.Code ||
-          (branch as any).LocationDetail?.attr?.BranchType ||
-          "";
-        if (!branchCode && branch.rawJson) {
-          branchCode = branch.rawJson.Code || branch.rawJson.attr?.Code || branch.rawJson.attr?.BranchType || "";
-        }
-        if (!branchCode) {
-          skipped++;
-          continue;
-        }
-        branchCode = String(branchCode).trim();
-        const name = branch.Name || branch.attr?.Name || (branch as any).LocationDetail?.attr?.Name || null;
-        const rawAddressLine = branch.Address?.AddressLine ?? null;
-        const rawCity = branch.Address?.CityName ?? null;
-        const rawPostalCode = branch.Address?.PostalCode ?? null;
-        const rawCountry = branch.Address?.CountryName ?? null;
-        const addressLine = typeof rawAddressLine === "string" ? rawAddressLine : (rawAddressLine && "value" in rawAddressLine ? (rawAddressLine as any).value : null);
-        const city = typeof rawCity === "string" ? rawCity : (rawCity && "value" in rawCity ? (rawCity as any).value : null);
-        const postalCode = typeof rawPostalCode === "string" ? rawPostalCode : (rawPostalCode && "value" in rawPostalCode ? (rawPostalCode as any).value : null);
-        const country = typeof rawCountry === "string" ? rawCountry : (rawCountry && "value" in rawCountry ? (rawCountry as any).value : null);
-        let countryCode = branch.Address?.CountryName?.attr?.Code || branch.Address?.CountryName?.Code || defaultCountryCode;
-        const phone = branch.Telephone?.attr?.PhoneNumber || branch.Telephone?.PhoneNumber || null;
-        const latVal = branch.Latitude ?? branch.attr?.Latitude ?? (branch as any).LocationDetail?.attr?.Latitude;
-        const lonVal = branch.Longitude ?? branch.attr?.Longitude ?? (branch as any).LocationDetail?.attr?.Longitude;
-        const latitude = latVal != null ? (typeof latVal === "number" ? latVal : parseFloat(String(latVal))) : null;
-        const longitude = lonVal != null ? (typeof lonVal === "number" ? lonVal : parseFloat(String(lonVal))) : null;
+					const existingBranch = await prisma.branch.findUnique({
+						where: { sourceId_branchCode: { sourceId: source.id, branchCode } },
+					});
 
-        const existingBranch = await prisma.branch.findUnique({
-          where: { sourceId_branchCode: { sourceId: source.id, branchCode } },
-        });
+					let natoLocode = explicitNatoFromBranch(
+						branch as Record<string, unknown>,
+					);
+					if (!natoLocode && countryCode && city) {
+						natoLocode = await autoAssignLocode(countryCode, city);
+					}
+					if (!natoLocode && existingBranch?.natoLocode) {
+						natoLocode = existingBranch.natoLocode;
+					}
 
-        let natoLocode = explicitNatoFromBranch(branch as Record<string, unknown>);
-        if (!natoLocode && countryCode && city) {
-          natoLocode = await autoAssignLocode(countryCode, city);
-        }
-        if (!natoLocode && existingBranch?.natoLocode) {
-          natoLocode = existingBranch.natoLocode;
-        }
+					const branchData = {
+						sourceId: source.id,
+						branchCode,
+						name: name || null,
+						status: (branch as any).Status || "ACTIVE",
+						locationType:
+							branch.LocationType || branch.attr?.LocationType || null,
+						collectionType:
+							branch.CollectionType || branch.attr?.CollectionType || null,
+						email: branch.EmailAddress || branch.email || null,
+						phone: phone || null,
+						latitude: latitude ?? null,
+						longitude: longitude ?? null,
+						addressLine: addressLine || null,
+						city: city || null,
+						postalCode: postalCode || null,
+						country: country || null,
+						countryCode: countryCode || null,
+						natoLocode,
+						rawJson: branch,
+					};
+					if (existingBranch) {
+						await prisma.branch.update({
+							where: { id: existingBranch.id },
+							data: branchData,
+						});
+						branchesUpdated++;
+					} else {
+						await prisma.branch.create({ data: branchData });
+						branchesImported++;
+					}
+				} catch (branchErr: any) {
+					console.error(
+						"[import-location-list] Branch upsert error:",
+						branchErr,
+					);
+				}
+			}
 
-        const branchData = {
-          sourceId: source.id,
-          branchCode,
-          name: name || null,
-          status: (branch as any).Status || "ACTIVE",
-          locationType: branch.LocationType || branch.attr?.LocationType || null,
-          collectionType: branch.CollectionType || branch.attr?.CollectionType || null,
-          email: branch.EmailAddress || branch.email || null,
-          phone: phone || null,
-          latitude: latitude ?? null,
-          longitude: longitude ?? null,
-          addressLine: addressLine || null,
-          city: city || null,
-          postalCode: postalCode || null,
-          country: country || null,
-          countryCode: countryCode || null,
-          natoLocode,
-          rawJson: branch,
-        };
-        if (existingBranch) {
-          await prisma.branch.update({ where: { id: existingBranch.id }, data: branchData });
-          branchesUpdated++;
-        } else {
-          await prisma.branch.create({ data: branchData });
-          branchesImported++;
-        }
-      } catch (branchErr: any) {
-        console.error("[import-location-list] Branch upsert error:", branchErr);
-      }
-    }
+			await prisma.company.update({
+				where: { id: sourceId },
+				data: { lastLocationSyncAt: new Date() },
+			});
 
-    await prisma.company.update({
-      where: { id: sourceId },
-      data: { lastLocationSyncAt: new Date() },
-    });
-
-    const result: any = {
-      message: "Location list imported successfully",
-      imported,
-      updated,
-      skipped,
-      total: locations.length,
-      errors: errors.length > 0 ? errors : undefined,
-      branchesImported,
-      branchesUpdated,
-    };
-    if (locations.length === 0 && branches.length === 0) {
-      result.debug = {
-        responseLength: responseText.length,
-        responseExcerpt: responseText.substring(0, 300),
-        strategy:
-          transport === "grpc"
-            ? "grpc"
-            : isXmlResponse
-              ? "xml"
-              : responseText.includes("array(")
-                ? "php"
-                : "json",
-      };
-    }
-    res.json(result);
-  } catch (error: any) {
-    console.error("[import-location-list] Error:", error);
-    next(error);
-  }
-});
+			const result: any = {
+				message: "Location list imported successfully",
+				imported,
+				updated,
+				skipped,
+				total: locations.length,
+				errors: errors.length > 0 ? errors : undefined,
+				branchesImported,
+				branchesUpdated,
+			};
+			if (locations.length === 0 && branches.length === 0) {
+				result.debug = {
+					responseLength: responseText.length,
+					responseExcerpt: responseText.substring(0, 300),
+					strategy:
+						transport === "grpc"
+							? "grpc"
+							: isXmlResponse
+								? "xml"
+								: responseText.includes("array(")
+									? "php"
+									: "json",
+				};
+			}
+			res.json(result);
+		} catch (error: any) {
+			console.error("[import-location-list] Error:", error);
+			next(error);
+		}
+	},
+);
 
 const getDailyPricingQuerySchema = z.object({
-  startDate: z.string(),
-  endDate: z.string(),
-  pickupLoc: z.string().trim().min(1),
-  returnLoc: z.string().trim().min(1),
-  acrissCode: z.string().trim().min(1),
-  maxDays: z.coerce.number().int().min(1).max(31).default(17),
+	startDate: z.string(),
+	endDate: z.string(),
+	pickupLoc: z.string().trim().min(1),
+	returnLoc: z.string().trim().min(1),
+	acrissCode: z.string().trim().min(1),
+	maxDays: z.coerce.number().int().min(1).max(31).default(17),
 });
 
 const setDailyPricingDefaultSchema = z.object({
-  startDate: z.string(),
-  endDate: z.string(),
-  pickupLoc: z.string().trim().min(1),
-  returnLoc: z.string().trim().min(1),
-  acrissCode: z.string().trim().min(1),
-  currency: z.string().trim().min(3).max(3).default("EUR"),
-  defaultPrice: z.coerce.number().positive(),
-  dayStart: z.coerce.number().int().min(1).default(1),
-  dayEnd: z.coerce.number().int().min(1).max(31),
+	startDate: z.string(),
+	endDate: z.string(),
+	pickupLoc: z.string().trim().min(1),
+	returnLoc: z.string().trim().min(1),
+	acrissCode: z.string().trim().min(1),
+	currency: z.string().trim().min(3).max(3).default("EUR"),
+	defaultPrice: z.coerce.number().positive(),
+	dayStart: z.coerce.number().int().min(1).default(1),
+	dayEnd: z.coerce.number().int().min(1).max(31),
 });
 
 const patchDailyPricingCellSchema = z.object({
-  pickupDate: z.string(),
-  pickupLoc: z.string().trim().min(1),
-  returnLoc: z.string().trim().min(1),
-  acrissCode: z.string().trim().min(1),
-  dayOffset: z.coerce.number().int().min(1).max(31),
-  price: z.coerce.number().positive(),
-  currency: z.string().trim().min(3).max(3).default("EUR"),
+	pickupDate: z.string(),
+	pickupLoc: z.string().trim().min(1),
+	returnLoc: z.string().trim().min(1),
+	acrissCode: z.string().trim().min(1),
+	dayOffset: z.coerce.number().int().min(1).max(31),
+	price: z.coerce.number().positive(),
+	currency: z.string().trim().min(3).max(3).default("EUR"),
 });
 
 const bulkDailyPricingSchema = z.object({
-  cells: z.array(patchDailyPricingCellSchema).min(1),
+	cells: z.array(patchDailyPricingCellSchema).min(1),
 });
 
 /** Deduplicate manual/imported terms by Code (same rule as GLORIA parser). */
 function uniqueTermsByCode<T extends { code?: string }>(rows: T[]): T[] {
-  const out: T[] = [];
-  const seen = new Set<string>();
-  for (const row of rows) {
-    const code = (row.code || "").trim().toUpperCase();
-    if (!code) {
-      out.push(row);
-      continue;
-    }
-    if (seen.has(code)) continue;
-    seen.add(code);
-    out.push(row);
-  }
-  return out;
+	const out: T[] = [];
+	const seen = new Set<string>();
+	for (const row of rows) {
+		const code = (row.code || "").trim().toUpperCase();
+		if (!code) {
+			out.push(row);
+			continue;
+		}
+		if (seen.has(code)) continue;
+		seen.add(code);
+		out.push(row);
+	}
+	return out;
 }
 
 /** GLORIA Item @attributes-style row (included / not-included). */
 const manualGloriaLineItemSchema = z.object({
-  code: z.string().optional(),
-  description: z.string().max(4000).optional(),
-  excess: z.string().optional(),
-  deposit: z.string().optional(),
-  price: z.string().optional(),
-  currency: z.string().max(8).optional(),
-  cover_amount: z.string().optional(),
+	code: z.string().optional(),
+	description: z.string().max(4000).optional(),
+	excess: z.string().optional(),
+	deposit: z.string().optional(),
+	price: z.string().optional(),
+	currency: z.string().max(8).optional(),
+	cover_amount: z.string().optional(),
 });
 
 const manualGloriaExtraItemSchema = z.object({
-  code: z.string().optional(),
-  /** ItemDescription */
-  description: z.string().max(500).optional(),
-  /** Legacy alias for description */
-  name: z.string().max(500).optional(),
-  price: z.coerce.number().nonnegative(),
-  currency: z.string().max(8).optional(),
-  /** OptionalExtras Item Description (long) */
-  long_description: z.string().max(4000).optional(),
+	code: z.string().optional(),
+	/** ItemDescription */
+	description: z.string().max(500).optional(),
+	/** Legacy alias for description */
+	name: z.string().max(500).optional(),
+	price: z.coerce.number().nonnegative(),
+	currency: z.string().max(8).optional(),
+	/** OptionalExtras Item Description (long) */
+	long_description: z.string().max(4000).optional(),
 });
 
 const manualGloriaPricingSchema = z.object({
-  car_order_id: z.string().max(120).optional(),
-  currency: z.string().max(8).optional(),
-  duration: z.union([z.string(), z.number()]).optional(),
-  daily_net: z.union([z.string(), z.number()]).optional(),
-  daily_tax: z.union([z.string(), z.number()]).optional(),
-  daily_gross: z.union([z.string(), z.number()]).optional(),
-  total_net: z.union([z.string(), z.number()]).optional(),
-  total_tax: z.union([z.string(), z.number()]).optional(),
-  total_gross: z.union([z.string(), z.number()]).optional(),
-  tax_rate: z.union([z.string(), z.number()]).optional(),
+	car_order_id: z.string().max(120).optional(),
+	currency: z.string().max(8).optional(),
+	duration: z.union([z.string(), z.number()]).optional(),
+	daily_net: z.union([z.string(), z.number()]).optional(),
+	daily_tax: z.union([z.string(), z.number()]).optional(),
+	daily_gross: z.union([z.string(), z.number()]).optional(),
+	total_net: z.union([z.string(), z.number()]).optional(),
+	total_tax: z.union([z.string(), z.number()]).optional(),
+	total_gross: z.union([z.string(), z.number()]).optional(),
+	tax_rate: z.union([z.string(), z.number()]).optional(),
 });
 
 const manualGloriaResponseMetaSchema = z.object({
-  timestamp: z.string().max(40).optional(),
-  target: z.string().max(40).optional(),
-  version: z.string().max(20).optional(),
+	timestamp: z.string().max(40).optional(),
+	target: z.string().max(40).optional(),
+	version: z.string().max(20).optional(),
 });
 
 const manualAvailabilityVehicleSchema = z.object({
-  acriss: z.string().trim().min(1).max(16),
-  make: z.string().trim().min(1).max(80),
-  model: z.string().trim().min(1).max(80),
-  currency: z.string().trim().min(1).max(8).default("EUR"),
-  /** Total gross; optional if pricing.total_gross is set */
-  total_price: z.coerce.number().nonnegative().optional(),
-  daily_gross: z.coerce.number().nonnegative().optional(),
-  transmission: z.string().max(80).optional(),
-  doors: z.union([z.string(), z.number()]).optional(),
-  seats: z.union([z.string(), z.number()]).optional(),
-  bags_small: z.union([z.string(), z.number()]).optional(),
-  bags_medium: z.union([z.string(), z.number()]).optional(),
-  image_url: z.string().max(4000).optional(),
-  car_order_id: z.string().max(120).optional(),
-  min_lead_hours: z.coerce.number().int().min(0).optional(),
-  max_lead_days: z.coerce.number().int().min(0).optional(),
-  mileage: z.coerce.number().nonnegative().optional(),
+	acriss: z.string().trim().min(1).max(16),
+	make: z.string().trim().min(1).max(80),
+	model: z.string().trim().min(1).max(80),
+	currency: z.string().trim().min(1).max(8).default("EUR"),
+	/** Total gross; optional if pricing.total_gross is set */
+	total_price: z.coerce.number().nonnegative().optional(),
+	daily_gross: z.coerce.number().nonnegative().optional(),
+	transmission: z.string().max(80).optional(),
+	doors: z.union([z.string(), z.number()]).optional(),
+	seats: z.union([z.string(), z.number()]).optional(),
+	bags_small: z.union([z.string(), z.number()]).optional(),
+	bags_medium: z.union([z.string(), z.number()]).optional(),
+	image_url: z.string().max(4000).optional(),
+	car_order_id: z.string().max(120).optional(),
+	min_lead_hours: z.coerce.number().int().min(0).optional(),
+	max_lead_days: z.coerce.number().int().min(0).optional(),
+	mileage: z.coerce.number().nonnegative().optional(),
 });
 
 const manualAvailabilityBodySchema = z
-  .object({
-    pickupLoc: z.string().trim().min(1),
-    returnLoc: z.string().trim().min(1),
-    pickupIso: z.string().trim().min(1),
-    returnIso: z.string().trim().min(1),
-    /** vehavailmaindet @attributes.Duration (rental days) */
-    rental_duration: z.coerce.number().int().min(0).max(3660).optional(),
-    requestorId: z.string().optional(),
-    driverAge: z.coerce.number().int().min(18).max(99).optional(),
-    citizenCountry: z.string().max(3).optional(),
-    vehicle: manualAvailabilityVehicleSchema,
-    pricing: manualGloriaPricingSchema.optional(),
-    /** Root GLORIA response @attributes (optional) */
-    response_meta: manualGloriaResponseMetaSchema.optional(),
-    included: z.array(manualGloriaLineItemSchema).max(200).optional(),
-    not_included: z.array(manualGloriaLineItemSchema).max(200).optional(),
-    extras: z.array(manualGloriaExtraItemSchema).max(100).optional(),
-    /** Terms.Item[] — stored as JSON (nested structures preserved) */
-    terms: z.array(z.any()).max(200).optional(),
-    force: z.boolean().optional(),
-  })
-  .superRefine((data, ctx) => {
-    const pg = data.pricing;
-    const gross = pg?.total_gross;
-    const nGross = typeof gross === "string" || typeof gross === "number" ? Number(String(gross).replace(/,/g, ".")) : NaN;
-    const tp = data.vehicle.total_price;
-    const ok =
-      (typeof tp === "number" && Number.isFinite(tp)) ||
-      (Number.isFinite(nGross) && nGross >= 0);
-    if (!ok) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Provide vehicle.total_price or pricing.total_gross",
-        path: ["vehicle", "total_price"],
-      });
-    }
-  });
+	.object({
+		pickupLoc: z.string().trim().min(1),
+		returnLoc: z.string().trim().min(1),
+		pickupIso: z.string().trim().min(1),
+		returnIso: z.string().trim().min(1),
+		/** vehavailmaindet @attributes.Duration (rental days) */
+		rental_duration: z.coerce.number().int().min(0).max(3660).optional(),
+		requestorId: z.string().optional(),
+		driverAge: z.coerce.number().int().min(18).max(99).optional(),
+		citizenCountry: z.string().max(3).optional(),
+		vehicle: manualAvailabilityVehicleSchema,
+		pricing: manualGloriaPricingSchema.optional(),
+		/** Root GLORIA response @attributes (optional) */
+		response_meta: manualGloriaResponseMetaSchema.optional(),
+		included: z.array(manualGloriaLineItemSchema).max(200).optional(),
+		not_included: z.array(manualGloriaLineItemSchema).max(200).optional(),
+		extras: z.array(manualGloriaExtraItemSchema).max(100).optional(),
+		/** Terms.Item[] — stored as JSON (nested structures preserved) */
+		terms: z.array(z.any()).max(200).optional(),
+		force: z.boolean().optional(),
+	})
+	.superRefine((data, ctx) => {
+		const pg = data.pricing;
+		const gross = pg?.total_gross;
+		const nGross =
+			typeof gross === "string" || typeof gross === "number"
+				? Number(String(gross).replace(/,/g, "."))
+				: NaN;
+		const tp = data.vehicle.total_price;
+		const ok =
+			(typeof tp === "number" && Number.isFinite(tp)) ||
+			(Number.isFinite(nGross) && nGross >= 0);
+		if (!ok) {
+			ctx.addIssue({
+				code: "custom",
+				message: "Provide vehicle.total_price or pricing.total_gross",
+				path: ["vehicle", "total_price"],
+			});
+		}
+	});
 
 function enumerateDatesInclusive(start: Date, end: Date): Date[] {
-  const out: Date[] = [];
-  const cur = new Date(start);
-  while (cur <= end) {
-    out.push(new Date(cur));
-    cur.setDate(cur.getDate() + 1);
-  }
-  return out;
+	const out: Date[] = [];
+	const cur = new Date(start);
+	while (cur <= end) {
+		out.push(new Date(cur));
+		cur.setDate(cur.getDate() + 1);
+	}
+	return out;
 }
 
 /**
  * GET /sources/daily-pricing
  * Return matrix rows by pickup date with day columns Day1..DayN
  */
-sourcesRouter.get("/sources/daily-pricing", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const q = getDailyPricingQuerySchema.parse(req.query);
-    const startDate = new Date(q.startDate);
-    const endDate = new Date(q.endDate);
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate < startDate) {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "Invalid startDate/endDate range" });
-    }
-    const records = await prisma.sourceDailyRate.findMany({
-      where: {
-        sourceId,
-        pickupDate: { gte: startDate, lte: endDate },
-        pickupLoc: q.pickupLoc,
-        returnLoc: q.returnLoc,
-        acrissCode: q.acrissCode,
-        dayOffset: { lte: q.maxDays },
-      },
-      orderBy: [{ pickupDate: "asc" }, { dayOffset: "asc" }],
-    });
-    const days = enumerateDatesInclusive(startDate, endDate);
-    const byDate = new Map<string, any>();
-    for (const d of days) {
-      const key = d.toISOString().slice(0, 10);
-      const row: any = { pickupDate: key, acrissCode: q.acrissCode };
-      for (let i = 1; i <= q.maxDays; i++) row[`day${i}`] = null;
-      byDate.set(key, row);
-    }
-    for (const r of records) {
-      const key = r.pickupDate.toISOString().slice(0, 10);
-      const row = byDate.get(key);
-      if (row) row[`day${r.dayOffset}`] = Number(r.price);
-    }
-    return res.json({
-      items: Array.from(byDate.values()),
-      meta: {
-        startDate: q.startDate,
-        endDate: q.endDate,
-        pickupLoc: q.pickupLoc,
-        returnLoc: q.returnLoc,
-        acrissCode: q.acrissCode,
-        maxDays: q.maxDays,
-      },
-    });
-  } catch (e) {
-    next(e);
-  }
-});
+sourcesRouter.get(
+	"/sources/daily-pricing",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const q = getDailyPricingQuerySchema.parse(req.query);
+			const startDate = new Date(q.startDate);
+			const endDate = new Date(q.endDate);
+			if (
+				Number.isNaN(startDate.getTime()) ||
+				Number.isNaN(endDate.getTime()) ||
+				endDate < startDate
+			) {
+				return res
+					.status(400)
+					.json({
+						error: "BAD_REQUEST",
+						message: "Invalid startDate/endDate range",
+					});
+			}
+			const records = await prisma.sourceDailyRate.findMany({
+				where: {
+					sourceId,
+					pickupDate: { gte: startDate, lte: endDate },
+					pickupLoc: q.pickupLoc,
+					returnLoc: q.returnLoc,
+					acrissCode: q.acrissCode,
+					dayOffset: { lte: q.maxDays },
+				},
+				orderBy: [{ pickupDate: "asc" }, { dayOffset: "asc" }],
+			});
+			const days = enumerateDatesInclusive(startDate, endDate);
+			const byDate = new Map<string, any>();
+			for (const d of days) {
+				const key = d.toISOString().slice(0, 10);
+				const row: any = { pickupDate: key, acrissCode: q.acrissCode };
+				for (let i = 1; i <= q.maxDays; i++) row[`day${i}`] = null;
+				byDate.set(key, row);
+			}
+			for (const r of records) {
+				const key = r.pickupDate.toISOString().slice(0, 10);
+				const row = byDate.get(key);
+				if (row) row[`day${r.dayOffset}`] = Number(r.price);
+			}
+			return res.json({
+				items: Array.from(byDate.values()),
+				meta: {
+					startDate: q.startDate,
+					endDate: q.endDate,
+					pickupLoc: q.pickupLoc,
+					returnLoc: q.returnLoc,
+					acrissCode: q.acrissCode,
+					maxDays: q.maxDays,
+				},
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * PUT /sources/daily-pricing/default
  * Bulk apply default price to date/day range
  */
-sourcesRouter.put("/sources/daily-pricing/default", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const body = setDailyPricingDefaultSchema.parse(req.body);
-    if (body.dayEnd < body.dayStart) {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "dayEnd must be >= dayStart" });
-    }
-    const startDate = new Date(body.startDate);
-    const endDate = new Date(body.endDate);
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate < startDate) {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "Invalid startDate/endDate range" });
-    }
-    const dates = enumerateDatesInclusive(startDate, endDate);
-    const data = dates.flatMap((d) =>
-      Array.from({ length: body.dayEnd - body.dayStart + 1 }, (_, idx) => ({
-        sourceId,
-        pickupDate: d,
-        acrissCode: body.acrissCode,
-        pickupLoc: body.pickupLoc,
-        returnLoc: body.returnLoc,
-        dayOffset: body.dayStart + idx,
-        price: body.defaultPrice,
-        currency: body.currency.toUpperCase(),
-      }))
-    );
-    let upserted = 0;
-    for (const row of data) {
-      await prisma.sourceDailyRate.upsert({
-        where: {
-          sourceId_pickupDate_acrissCode_pickupLoc_returnLoc_dayOffset: {
-            sourceId: row.sourceId,
-            pickupDate: row.pickupDate,
-            acrissCode: row.acrissCode,
-            pickupLoc: row.pickupLoc,
-            returnLoc: row.returnLoc,
-            dayOffset: row.dayOffset,
-          },
-        },
-        create: row,
-        update: { price: row.price, currency: row.currency },
-      });
-      upserted++;
-    }
-    return res.json({ message: "Default prices applied", upserted });
-  } catch (e) {
-    next(e);
-  }
-});
+sourcesRouter.put(
+	"/sources/daily-pricing/default",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const body = setDailyPricingDefaultSchema.parse(req.body);
+			if (body.dayEnd < body.dayStart) {
+				return res
+					.status(400)
+					.json({
+						error: "BAD_REQUEST",
+						message: "dayEnd must be >= dayStart",
+					});
+			}
+			const startDate = new Date(body.startDate);
+			const endDate = new Date(body.endDate);
+			if (
+				Number.isNaN(startDate.getTime()) ||
+				Number.isNaN(endDate.getTime()) ||
+				endDate < startDate
+			) {
+				return res
+					.status(400)
+					.json({
+						error: "BAD_REQUEST",
+						message: "Invalid startDate/endDate range",
+					});
+			}
+			const dates = enumerateDatesInclusive(startDate, endDate);
+			const data = dates.flatMap((d) =>
+				Array.from({ length: body.dayEnd - body.dayStart + 1 }, (_, idx) => ({
+					sourceId,
+					pickupDate: d,
+					acrissCode: body.acrissCode,
+					pickupLoc: body.pickupLoc,
+					returnLoc: body.returnLoc,
+					dayOffset: body.dayStart + idx,
+					price: body.defaultPrice,
+					currency: body.currency.toUpperCase(),
+				})),
+			);
+			let upserted = 0;
+			for (const row of data) {
+				await prisma.sourceDailyRate.upsert({
+					where: {
+						sourceId_pickupDate_acrissCode_pickupLoc_returnLoc_dayOffset: {
+							sourceId: row.sourceId,
+							pickupDate: row.pickupDate,
+							acrissCode: row.acrissCode,
+							pickupLoc: row.pickupLoc,
+							returnLoc: row.returnLoc,
+							dayOffset: row.dayOffset,
+						},
+					},
+					create: row,
+					update: { price: row.price, currency: row.currency },
+				});
+				upserted++;
+			}
+			return res.json({ message: "Default prices applied", upserted });
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * PATCH /sources/daily-pricing/cell
  * Update one matrix cell
  */
-sourcesRouter.patch("/sources/daily-pricing/cell", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const body = patchDailyPricingCellSchema.parse(req.body);
-    const pickupDate = new Date(body.pickupDate);
-    if (Number.isNaN(pickupDate.getTime())) {
-      return res.status(400).json({ error: "BAD_REQUEST", message: "Invalid pickupDate" });
-    }
-    const row = await prisma.sourceDailyRate.upsert({
-      where: {
-        sourceId_pickupDate_acrissCode_pickupLoc_returnLoc_dayOffset: {
-          sourceId,
-          pickupDate,
-          acrissCode: body.acrissCode,
-          pickupLoc: body.pickupLoc,
-          returnLoc: body.returnLoc,
-          dayOffset: body.dayOffset,
-        },
-      },
-      create: {
-        sourceId,
-        pickupDate,
-        acrissCode: body.acrissCode,
-        pickupLoc: body.pickupLoc,
-        returnLoc: body.returnLoc,
-        dayOffset: body.dayOffset,
-        price: body.price,
-        currency: body.currency.toUpperCase(),
-      },
-      update: { price: body.price, currency: body.currency.toUpperCase() },
-    });
-    return res.json({ message: "Cell updated", item: row });
-  } catch (e) {
-    next(e);
-  }
-});
+sourcesRouter.patch(
+	"/sources/daily-pricing/cell",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const body = patchDailyPricingCellSchema.parse(req.body);
+			const pickupDate = new Date(body.pickupDate);
+			if (Number.isNaN(pickupDate.getTime())) {
+				return res
+					.status(400)
+					.json({ error: "BAD_REQUEST", message: "Invalid pickupDate" });
+			}
+			const row = await prisma.sourceDailyRate.upsert({
+				where: {
+					sourceId_pickupDate_acrissCode_pickupLoc_returnLoc_dayOffset: {
+						sourceId,
+						pickupDate,
+						acrissCode: body.acrissCode,
+						pickupLoc: body.pickupLoc,
+						returnLoc: body.returnLoc,
+						dayOffset: body.dayOffset,
+					},
+				},
+				create: {
+					sourceId,
+					pickupDate,
+					acrissCode: body.acrissCode,
+					pickupLoc: body.pickupLoc,
+					returnLoc: body.returnLoc,
+					dayOffset: body.dayOffset,
+					price: body.price,
+					currency: body.currency.toUpperCase(),
+				},
+				update: { price: body.price, currency: body.currency.toUpperCase() },
+			});
+			return res.json({ message: "Cell updated", item: row });
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * PUT /sources/daily-pricing/bulk
  * Bulk update many cells
  */
-sourcesRouter.put("/sources/daily-pricing/bulk", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const body = bulkDailyPricingSchema.parse(req.body);
-    let upserted = 0;
-    for (const c of body.cells) {
-      const pickupDate = new Date(c.pickupDate);
-      if (Number.isNaN(pickupDate.getTime())) continue;
-      await prisma.sourceDailyRate.upsert({
-        where: {
-          sourceId_pickupDate_acrissCode_pickupLoc_returnLoc_dayOffset: {
-            sourceId,
-            pickupDate,
-            acrissCode: c.acrissCode,
-            pickupLoc: c.pickupLoc,
-            returnLoc: c.returnLoc,
-            dayOffset: c.dayOffset,
-          },
-        },
-        create: {
-          sourceId,
-          pickupDate,
-          acrissCode: c.acrissCode,
-          pickupLoc: c.pickupLoc,
-          returnLoc: c.returnLoc,
-          dayOffset: c.dayOffset,
-          price: c.price,
-          currency: c.currency.toUpperCase(),
-        },
-        update: { price: c.price, currency: c.currency.toUpperCase() },
-      });
-      upserted++;
-    }
-    return res.json({ message: "Bulk pricing updated", upserted });
-  } catch (e) {
-    next(e);
-  }
-});
+sourcesRouter.put(
+	"/sources/daily-pricing/bulk",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const body = bulkDailyPricingSchema.parse(req.body);
+			let upserted = 0;
+			for (const c of body.cells) {
+				const pickupDate = new Date(c.pickupDate);
+				if (Number.isNaN(pickupDate.getTime())) continue;
+				await prisma.sourceDailyRate.upsert({
+					where: {
+						sourceId_pickupDate_acrissCode_pickupLoc_returnLoc_dayOffset: {
+							sourceId,
+							pickupDate,
+							acrissCode: c.acrissCode,
+							pickupLoc: c.pickupLoc,
+							returnLoc: c.returnLoc,
+							dayOffset: c.dayOffset,
+						},
+					},
+					create: {
+						sourceId,
+						pickupDate,
+						acrissCode: c.acrissCode,
+						pickupLoc: c.pickupLoc,
+						returnLoc: c.returnLoc,
+						dayOffset: c.dayOffset,
+						price: c.price,
+						currency: c.currency.toUpperCase(),
+					},
+					update: { price: c.price, currency: c.currency.toUpperCase() },
+				});
+				upserted++;
+			}
+			return res.json({ message: "Bulk pricing updated", upserted });
+		} catch (e) {
+			next(e);
+		}
+	},
+);
 
 /**
  * POST /sources/manual-availability-image
  * Multipart form field name: "image". Returns { url: "/uploads/source-availability/..." } for vehicle.image_url.
  */
 sourcesRouter.post(
-  "/sources/manual-availability-image",
-  requireAuth(),
-  requireCompanyType("SOURCE"),
-  (req: any, res: any, next: any) => {
-    manualAvailabilityImageUpload.single("image")(req, res, (err: unknown) => {
-      if (err) {
-        const msg = err instanceof Error ? err.message : "Upload failed";
-        return res.status(400).json({ error: "UPLOAD_FAILED", message: msg });
-      }
-      next();
-    });
-  },
-  async (req: any, res: any) => {
-    try {
-      const f = req.file as { filename?: string } | undefined;
-      if (!f?.filename) {
-        return res.status(400).json({ error: "NO_FILE", message: 'Send multipart field "image" (JPEG, PNG, GIF, or WEBP, max ~3 MB).' });
-      }
-      const sourceId = req.user.companyId as string;
-      const relUrl = `/uploads/source-availability/${sourceId}/${f.filename}`;
-      return res.status(200).json({ url: relUrl });
-    } catch (e: any) {
-      return res.status(500).json({ error: "SERVER", message: e?.message ?? "Upload error" });
-    }
-  }
+	"/sources/manual-availability-image",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	(req: any, res: any, next: any) => {
+		manualAvailabilityImageUpload.single("image")(req, res, (err: unknown) => {
+			if (err) {
+				const msg = err instanceof Error ? err.message : "Upload failed";
+				return res.status(400).json({ error: "UPLOAD_FAILED", message: msg });
+			}
+			next();
+		});
+	},
+	async (req: any, res: any) => {
+		try {
+			const f = req.file as { filename?: string } | undefined;
+			if (!f?.filename) {
+				return res
+					.status(400)
+					.json({
+						error: "NO_FILE",
+						message:
+							'Send multipart field "image" (JPEG, PNG, GIF, or WEBP, max ~3 MB).',
+					});
+			}
+			const sourceId = req.user.companyId as string;
+			const relUrl = `/uploads/source-availability/${sourceId}/${f.filename}`;
+			return res.status(200).json({ url: relUrl });
+		} catch (e: any) {
+			return res
+				.status(500)
+				.json({ error: "SERVER", message: e?.message ?? "Upload error" });
+		}
+	},
 );
 
 /**
  * POST /sources/manual-availability-sample
  * Stores a single-vehicle availability sample without calling a supplier endpoint (brokers/suppliers with no HTTP/gRPC pricing API).
  */
-sourcesRouter.post("/sources/manual-availability-sample", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const parsed = manualAvailabilityBodySchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      return res.status(400).json({
-        error: "VALIDATION_ERROR",
-        message: "Invalid manual availability payload",
-        details: parsed.error.flatten(),
-      });
-    }
-    const body = parsed.data;
-    const sourceId = req.user.companyId;
+sourcesRouter.post(
+	"/sources/manual-availability-sample",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const parsed = manualAvailabilityBodySchema.safeParse(req.body ?? {});
+			if (!parsed.success) {
+				return res.status(400).json({
+					error: "VALIDATION_ERROR",
+					message: "Invalid manual availability payload",
+					details: parsed.error.flatten(),
+				});
+			}
+			const body = parsed.data;
+			const sourceId = req.user.companyId;
 
-    const source = await prisma.company.findUnique({
-      where: { id: sourceId },
-      select: { id: true, locationListAccountId: true },
-    });
-    if (!source) {
-      return res.status(404).json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
-    }
+			const source = await prisma.company.findUnique({
+				where: { id: sourceId },
+				select: { id: true, locationListAccountId: true },
+			});
+			if (!source) {
+				return res
+					.status(404)
+					.json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
+			}
 
-    const pickupLoc = body.pickupLoc.trim().toUpperCase();
-    const returnLoc = body.returnLoc.trim().toUpperCase();
-    const pickupIso = body.pickupIso.trim();
-    const returnIso = body.returnIso.trim();
-    const requestorId = (body.requestorId || source.locationListAccountId || "1000097").trim();
-    const driverAge = body.driverAge ?? 30;
-    const citizenCountry = (body.citizenCountry || "US").trim().toUpperCase().slice(0, 2);
+			const pickupLoc = body.pickupLoc.trim().toUpperCase();
+			const returnLoc = body.returnLoc.trim().toUpperCase();
+			const pickupIso = body.pickupIso.trim();
+			const returnIso = body.returnIso.trim();
+			const requestorId = (
+				body.requestorId ||
+				source.locationListAccountId ||
+				"1000097"
+			).trim();
+			const driverAge = body.driverAge ?? 30;
+			const citizenCountry = (body.citizenCountry || "US")
+				.trim()
+				.toUpperCase()
+				.slice(0, 2);
 
-    const endpointUrl = "manual-entry";
-    const adapterType = "manual" as const;
+			const endpointUrl = "manual-entry";
+			const adapterType = "manual" as const;
 
-    const criteriaHash = crypto
-      .createHash("sha256")
-      .update(`${sourceId}|${pickupIso}|${returnIso}|${pickupLoc}|${returnLoc}|${endpointUrl}|${adapterType}`)
-      .digest("hex")
-      .slice(0, 32);
+			const criteriaHash = crypto
+				.createHash("sha256")
+				.update(
+					`${sourceId}|${pickupIso}|${returnIso}|${pickupLoc}|${returnLoc}|${endpointUrl}|${adapterType}`,
+				)
+				.digest("hex")
+				.slice(0, 32);
 
-    const v = body.vehicle;
-    const acriss = v.acriss.trim().toUpperCase();
-    const make = v.make.trim();
-    const model = v.model.trim();
-    const name = `${make} ${model}`.trim();
+			const v = body.vehicle;
+			const acriss = v.acriss.trim().toUpperCase();
+			const make = v.make.trim();
+			const model = v.model.trim();
+			const name = `${make} ${model}`.trim();
 
-    const strOpt = (x: unknown): string | undefined => {
-      if (x === undefined || x === null) return undefined;
-      const s = String(x).trim();
-      return s.length ? s : undefined;
-    };
-    const bagsS = strOpt(v.bags_small);
-    const bagsM = strOpt(v.bags_medium);
-    const baggage = [bagsS, bagsM].filter(Boolean).join("/") || undefined;
-    const img = v.image_url?.trim();
+			const strOpt = (x: unknown): string | undefined => {
+				if (x === undefined || x === null) return undefined;
+				const s = String(x).trim();
+				return s.length ? s : undefined;
+			};
+			const bagsS = strOpt(v.bags_small);
+			const bagsM = strOpt(v.bags_medium);
+			const baggage = [bagsS, bagsM].filter(Boolean).join("/") || undefined;
+			const img = v.image_url?.trim();
 
-    const toNumManual = (x: unknown): number => {
-      if (typeof x === "number") return Number.isFinite(x) ? x : 0;
-      if (typeof x !== "string") return 0;
-      const n = Number(x.replace(/,/g, "."));
-      return Number.isFinite(n) ? n : 0;
-    };
+			const toNumManual = (x: unknown): number => {
+				if (typeof x === "number") return Number.isFinite(x) ? x : 0;
+				if (typeof x !== "string") return 0;
+				const n = Number(x.replace(/,/g, "."));
+				return Number.isFinite(n) ? n : 0;
+			};
 
-    const pg = body.pricing;
-    const totalFromPricing = pg != null ? toNumManual(pg.total_gross) : NaN;
-    const total_price =
-      Number.isFinite(totalFromPricing) && totalFromPricing >= 0
-        ? totalFromPricing
-        : toNumManual(v.total_price ?? 0);
+			const pg = body.pricing;
+			const totalFromPricing = pg != null ? toNumManual(pg.total_gross) : NaN;
+			const total_price =
+				Number.isFinite(totalFromPricing) && totalFromPricing >= 0
+					? totalFromPricing
+					: toNumManual(v.total_price ?? 0);
 
-    const currency = (strOpt(pg?.currency) || v.currency).trim().toUpperCase();
+			const currency = (strOpt(pg?.currency) || v.currency)
+				.trim()
+				.toUpperCase();
 
-    const supplier_offer_ref =
-      strOpt(pg?.car_order_id) ||
-      v.car_order_id?.trim() ||
-      `${acriss}-${Date.now().toString(36).toUpperCase()}`;
+			const supplier_offer_ref =
+				strOpt(pg?.car_order_id) ||
+				v.car_order_id?.trim() ||
+				`${acriss}-${Date.now().toString(36).toUpperCase()}`;
 
-    const incFiltered = (body.included || []).filter((t) => (t.description || "").trim() || (t.code || "").trim());
-    const includedRaw = incFiltered.map((t) => {
-      const desc = (t.description || "").trim();
-      const code = (t.code || "").trim();
-      const header = desc || code || "Item";
-      return {
-        code,
-        header,
-        details: desc || header,
-        price: t.price || "0.00",
-        excess: t.excess,
-        deposit: t.deposit,
-        currency: strOpt(t.currency),
-        mandatory: "Yes" as const,
-      };
-    });
+			const incFiltered = (body.included || []).filter(
+				(t) => (t.description || "").trim() || (t.code || "").trim(),
+			);
+			const includedRaw = incFiltered.map((t) => {
+				const desc = (t.description || "").trim();
+				const code = (t.code || "").trim();
+				const header = desc || code || "Item";
+				return {
+					code,
+					header,
+					details: desc || header,
+					price: t.price || "0.00",
+					excess: t.excess,
+					deposit: t.deposit,
+					currency: strOpt(t.currency),
+					mandatory: "Yes" as const,
+				};
+			});
 
-    const notFiltered = (body.not_included || []).filter((t) => (t.description || "").trim() || (t.code || "").trim());
-    const notIncludedRaw = notFiltered.map((t) => {
-      const desc = (t.description || "").trim();
-      const code = (t.code || "").trim();
-      const header = desc || code || "Item";
-      return {
-        code,
-        header,
-        details: desc || header,
-        price: t.price,
-        excess: t.excess,
-        deposit: t.deposit,
-        cover_amount: strOpt(t.cover_amount),
-        currency: strOpt(t.currency),
-        mandatory: "No" as const,
-      };
-    });
+			const notFiltered = (body.not_included || []).filter(
+				(t) => (t.description || "").trim() || (t.code || "").trim(),
+			);
+			const notIncludedRaw = notFiltered.map((t) => {
+				const desc = (t.description || "").trim();
+				const code = (t.code || "").trim();
+				const header = desc || code || "Item";
+				return {
+					code,
+					header,
+					details: desc || header,
+					price: t.price,
+					excess: t.excess,
+					deposit: t.deposit,
+					cover_amount: strOpt(t.cover_amount),
+					currency: strOpt(t.currency),
+					mandatory: "No" as const,
+				};
+			});
 
-    const priced_equips =
-      body.extras
-        ?.map((e) => {
-          const desc = strOpt(e.description) || strOpt(e.name) || "";
-          if (!desc) return null;
-          return {
-            description: desc,
-            equip_type: strOpt(e.code),
-            vendor_equip_id: strOpt(e.code),
-            charge: { Amount: String(e.price) },
-            currency: strOpt(e.currency),
-            long_description: strOpt(e.long_description),
-          };
-        })
-        .filter(Boolean) ?? [];
+			const priced_equips =
+				body.extras
+					?.map((e) => {
+						const desc = strOpt(e.description) || strOpt(e.name) || "";
+						if (!desc) return null;
+						return {
+							description: desc,
+							equip_type: strOpt(e.code),
+							vendor_equip_id: strOpt(e.code),
+							charge: { Amount: String(e.price) },
+							currency: strOpt(e.currency),
+							long_description: strOpt(e.long_description),
+						};
+					})
+					.filter(Boolean) ?? [];
 
-    const gloria_pricing_attributes: Record<string, string> = {};
-    if (pg) {
-      const mapAttr: [string, unknown][] = [
-        ["CarOrderID", pg.car_order_id],
-        ["Currency", pg.currency],
-        ["Duration", pg.duration],
-        ["DailyNet", pg.daily_net],
-        ["DailyTax", pg.daily_tax],
-        ["DailyGross", pg.daily_gross],
-        ["TotalNet", pg.total_net],
-        ["TotalTax", pg.total_tax],
-        ["TotalGross", pg.total_gross],
-        ["TaxRate", pg.tax_rate],
-      ];
-      for (const [k, val] of mapAttr) {
-        if (val === undefined || val === null || val === "") continue;
-        gloria_pricing_attributes[k] = String(val);
-      }
-    }
+			const gloria_pricing_attributes: Record<string, string> = {};
+			if (pg) {
+				const mapAttr: [string, unknown][] = [
+					["CarOrderID", pg.car_order_id],
+					["Currency", pg.currency],
+					["Duration", pg.duration],
+					["DailyNet", pg.daily_net],
+					["DailyTax", pg.daily_tax],
+					["DailyGross", pg.daily_gross],
+					["TotalNet", pg.total_net],
+					["TotalTax", pg.total_tax],
+					["TotalGross", pg.total_gross],
+					["TaxRate", pg.tax_rate],
+				];
+				for (const [k, val] of mapAttr) {
+					if (val === undefined || val === null || val === "") continue;
+					gloria_pricing_attributes[k] = String(val);
+				}
+			}
 
-    const calculation =
-      pg && (pg.daily_gross !== undefined && pg.daily_gross !== null && String(pg.daily_gross).trim() !== "" || body.rental_duration != null)
-        ? {
-            UnitCharge: String(pg.daily_gross ?? ""),
-            UnitName: "Day",
-            Quantity: body.rental_duration != null ? String(body.rental_duration) : "",
-          }
-        : undefined;
+			const calculation =
+				pg &&
+				((pg.daily_gross !== undefined &&
+					pg.daily_gross !== null &&
+					String(pg.daily_gross).trim() !== "") ||
+					body.rental_duration != null)
+					? {
+							UnitCharge: String(pg.daily_gross ?? ""),
+							UnitName: "Day",
+							Quantity:
+								body.rental_duration != null
+									? String(body.rental_duration)
+									: "",
+						}
+					: undefined;
 
-    const manual_business_rules: Record<string, string | number | undefined> = {};
-    if (v.min_lead_hours != null) manual_business_rules.min_lead_hours = v.min_lead_hours;
-    if (v.max_lead_days != null) manual_business_rules.max_lead_days = v.max_lead_days;
-    if (v.mileage != null) manual_business_rules.mileage = v.mileage;
-    const seatsStr = strOpt(v.seats);
-    if (seatsStr) manual_business_rules.seats = seatsStr;
+			const manual_business_rules: Record<string, string | number | undefined> =
+				{};
+			if (v.min_lead_hours != null)
+				manual_business_rules.min_lead_hours = v.min_lead_hours;
+			if (v.max_lead_days != null)
+				manual_business_rules.max_lead_days = v.max_lead_days;
+			if (v.mileage != null) manual_business_rules.mileage = v.mileage;
+			const seatsStr = strOpt(v.seats);
+			if (seatsStr) manual_business_rules.seats = seatsStr;
 
-    const gloria_vehdetails_attributes: Record<string, string> = {
-      ...(acriss ? { ACRISS: acriss } : {}),
-      Make: make,
-      Model: model,
-      ...(v.transmission?.trim() ? { Transmission: v.transmission.trim() } : {}),
-      ...(strOpt(v.doors) ? { Doors: strOpt(v.doors)! } : {}),
-      ...(seatsStr ? { Seats: seatsStr } : {}),
-      ...(bagsS ? { BagsSmall: bagsS } : {}),
-      ...(bagsM ? { BagsMedium: bagsM } : {}),
-      ...(img ? { ImageURL: img } : {}),
-    };
+			const gloria_vehdetails_attributes: Record<string, string> = {
+				...(acriss ? { ACRISS: acriss } : {}),
+				Make: make,
+				Model: model,
+				...(v.transmission?.trim()
+					? { Transmission: v.transmission.trim() }
+					: {}),
+				...(strOpt(v.doors) ? { Doors: strOpt(v.doors)! } : {}),
+				...(seatsStr ? { Seats: seatsStr } : {}),
+				...(bagsS ? { BagsSmall: bagsS } : {}),
+				...(bagsM ? { BagsMedium: bagsM } : {}),
+				...(img ? { ImageURL: img } : {}),
+			};
 
-    const offer = {
-      source_id: sourceId,
-      agreement_ref: requestorId,
-      vehicle_class: acriss,
-      vehicle_make_model: name,
-      rate_plan_code: "",
-      currency,
-      total_price,
-      supplier_offer_ref,
-      availability_status: "AVAILABLE",
-      veh_id: supplier_offer_ref,
-      picture_url: img || undefined,
-      door_count: strOpt(v.doors),
-      baggage,
-      vehicle_category: acriss,
-      transmission_type: v.transmission?.trim() || undefined,
-      veh_terms_included: includedRaw.length ? uniqueTermsByCode(includedRaw.filter((x) => x.header || x.code)) : undefined,
-      veh_terms_not_included: notIncludedRaw.length
-        ? uniqueTermsByCode(notIncludedRaw.filter((x) => x.header || x.code))
-        : undefined,
-      priced_equips: priced_equips.length ? priced_equips : undefined,
-      calculation: calculation && (calculation.UnitCharge || calculation.Quantity) ? calculation : undefined,
-      total_charge: {
-        rate_total_amount: String(total_price),
-        currency_code: currency,
-        tax_inclusive: "true",
-      },
-      gloria_vehdetails_attributes,
-    };
+			const offer = {
+				source_id: sourceId,
+				agreement_ref: requestorId,
+				vehicle_class: acriss,
+				vehicle_make_model: name,
+				rate_plan_code: "",
+				currency,
+				total_price,
+				supplier_offer_ref,
+				availability_status: "AVAILABLE",
+				veh_id: supplier_offer_ref,
+				picture_url: img || undefined,
+				door_count: strOpt(v.doors),
+				baggage,
+				vehicle_category: acriss,
+				transmission_type: v.transmission?.trim() || undefined,
+				veh_terms_included: includedRaw.length
+					? uniqueTermsByCode(includedRaw.filter((x) => x.header || x.code))
+					: undefined,
+				veh_terms_not_included: notIncludedRaw.length
+					? uniqueTermsByCode(notIncludedRaw.filter((x) => x.header || x.code))
+					: undefined,
+				priced_equips: priced_equips.length ? priced_equips : undefined,
+				calculation:
+					calculation && (calculation.UnitCharge || calculation.Quantity)
+						? calculation
+						: undefined,
+				total_charge: {
+					rate_total_amount: String(total_price),
+					currency_code: currency,
+					tax_inclusive: "true",
+				},
+				gloria_vehdetails_attributes,
+			};
 
-    const offers = [offer];
+			const offers = [offer];
 
-    const gloria_terms = body.terms?.length ? body.terms : undefined;
-    const gloria_response_meta = body.response_meta
-      ? {
-          TimeStamp: body.response_meta.timestamp,
-          Target: body.response_meta.target,
-          Version: body.response_meta.version,
-        }
-      : undefined;
+			const gloria_terms = body.terms?.length ? body.terms : undefined;
+			const gloria_response_meta = body.response_meta
+				? {
+						TimeStamp: body.response_meta.timestamp,
+						Target: body.response_meta.target,
+						Version: body.response_meta.version,
+					}
+				: undefined;
 
-    const offersSummary = offers.map((o: any) => ({
-      vehicle_class: o.vehicle_class ?? "",
-      vehicle_make_model: o.vehicle_make_model ?? "",
-      total_price: o.total_price,
-      currency: o.currency ?? "",
-      availability_status: o.availability_status ?? "",
-      picture_url: o.picture_url ?? undefined,
-      transmission_type: o.transmission_type ?? undefined,
-      vehicle_category: o.vehicle_category ?? undefined,
-      air_condition_ind: o.air_condition_ind ?? undefined,
-      veh_id: o.veh_id ?? undefined,
-      door_count: o.door_count ?? undefined,
-      baggage: o.baggage ?? undefined,
-      included: o.veh_terms_included ?? undefined,
-      not_included: o.veh_terms_not_included ?? undefined,
-      priced_equips: o.priced_equips ?? undefined,
-      manual_business_rules: Object.keys(manual_business_rules).length ? manual_business_rules : undefined,
-      gloria_pricing_attributes: Object.keys(gloria_pricing_attributes).length ? gloria_pricing_attributes : undefined,
-      gloria_vehdetails_attributes: o.gloria_vehdetails_attributes ?? undefined,
-      gloria_terms: gloria_terms ?? undefined,
-      gloria_response_meta: gloria_response_meta ?? undefined,
-    }));
+			const offersSummary = offers.map((o: any) => ({
+				vehicle_class: o.vehicle_class ?? "",
+				vehicle_make_model: o.vehicle_make_model ?? "",
+				total_price: o.total_price,
+				currency: o.currency ?? "",
+				availability_status: o.availability_status ?? "",
+				picture_url: o.picture_url ?? undefined,
+				transmission_type: o.transmission_type ?? undefined,
+				vehicle_category: o.vehicle_category ?? undefined,
+				air_condition_ind: o.air_condition_ind ?? undefined,
+				veh_id: o.veh_id ?? undefined,
+				door_count: o.door_count ?? undefined,
+				baggage: o.baggage ?? undefined,
+				included: o.veh_terms_included ?? undefined,
+				not_included: o.veh_terms_not_included ?? undefined,
+				priced_equips: o.priced_equips ?? undefined,
+				manual_business_rules: Object.keys(manual_business_rules).length
+					? manual_business_rules
+					: undefined,
+				gloria_pricing_attributes: Object.keys(gloria_pricing_attributes).length
+					? gloria_pricing_attributes
+					: undefined,
+				gloria_vehdetails_attributes:
+					o.gloria_vehdetails_attributes ?? undefined,
+				gloria_terms: gloria_terms ?? undefined,
+				gloria_response_meta: gloria_response_meta ?? undefined,
+			}));
 
-    const offersCount = offers.length;
-    const criteriaDisplay = { pickupLoc, returnLoc, pickupIso, returnIso, requestorId, driverAge, citizenCountry, adapterType };
+			const offersCount = offers.length;
+			const criteriaDisplay = {
+				pickupLoc,
+				returnLoc,
+				pickupIso,
+				returnIso,
+				requestorId,
+				driverAge,
+				citizenCountry,
+				adapterType,
+			};
 
-    const manualPayloadSnapshot = {
-      pickupIso,
-      returnIso,
-      pickupLoc,
-      returnLoc,
-      vehicle: v,
-      pricing: pg ?? null,
-      rental_duration: body.rental_duration ?? null,
-      included: incFiltered,
-      not_included: notFiltered,
-      extras: body.extras ?? null,
-      terms: body.terms ?? null,
-      response_meta: body.response_meta ?? null,
-    };
-    const manualDataFingerprint = crypto.createHash("sha256").update(JSON.stringify(manualPayloadSnapshot)).digest("hex").slice(0, 48);
+			const manualPayloadSnapshot = {
+				pickupIso,
+				returnIso,
+				pickupLoc,
+				returnLoc,
+				vehicle: v,
+				pricing: pg ?? null,
+				rental_duration: body.rental_duration ?? null,
+				included: incFiltered,
+				not_included: notFiltered,
+				extras: body.extras ?? null,
+				terms: body.terms ?? null,
+				response_meta: body.response_meta ?? null,
+			};
+			const manualDataFingerprint = crypto
+				.createHash("sha256")
+				.update(JSON.stringify(manualPayloadSnapshot))
+				.digest("hex")
+				.slice(0, 48);
 
-    const sampleJson = {
-      count: offersCount,
-      adapterType,
-      firstOffer: {
-        vehicle_class: offers[0].vehicle_class,
-        vehicle_make_model: offers[0].vehicle_make_model,
-        total_price: offers[0].total_price,
-      },
-      offersSummary,
-      criteria: criteriaDisplay,
-      fetchedAt: new Date().toISOString(),
-      manualEntry: true,
-      manualDataFingerprint,
-      rental_duration: body.rental_duration ?? undefined,
-      response_meta: body.response_meta ?? undefined,
-      gloria_terms: gloria_terms ?? undefined,
-    };
+			const sampleJson = {
+				count: offersCount,
+				adapterType,
+				firstOffer: {
+					vehicle_class: offers[0].vehicle_class,
+					vehicle_make_model: offers[0].vehicle_make_model,
+					total_price: offers[0].total_price,
+				},
+				offersSummary,
+				criteria: criteriaDisplay,
+				fetchedAt: new Date().toISOString(),
+				manualEntry: true,
+				manualDataFingerprint,
+				rental_duration: body.rental_duration ?? undefined,
+				response_meta: body.response_meta ?? undefined,
+				gloria_terms: gloria_terms ?? undefined,
+			};
 
-    const existing = await prisma.sourceAvailabilitySample.findUnique({
-      where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
-    });
+			const existing = await prisma.sourceAvailabilitySample.findUnique({
+				where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
+			});
 
-    const existingJson = existing?.sampleJson as any ?? {};
-    const isSameContent =
-      !body.force &&
-      existing &&
-      typeof existingJson.manualDataFingerprint === "string" &&
-      existingJson.manualDataFingerprint === manualDataFingerprint;
+			const existingJson = (existing?.sampleJson as any) ?? {};
+			const isSameContent =
+				!body.force &&
+				existing &&
+				typeof existingJson.manualDataFingerprint === "string" &&
+				existingJson.manualDataFingerprint === manualDataFingerprint;
 
-    if (isSameContent) {
-      return res.json({
-        message: "Data unchanged (same as existing); not stored.",
-        offersCount,
-        stored: false,
-        duplicate: true,
-        isNew: false,
-        adapterType,
-        offersSummary,
-        criteria: criteriaDisplay,
-      });
-    }
+			if (isSameContent) {
+				return res.json({
+					message: "Data unchanged (same as existing); not stored.",
+					offersCount,
+					stored: false,
+					duplicate: true,
+					isNew: false,
+					adapterType,
+					offersSummary,
+					criteria: criteriaDisplay,
+				});
+			}
 
-    await prisma.sourceAvailabilitySample.upsert({
-      where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
-      update: { pickupIso, returnIso, pickupLoc, returnLoc, offersCount, sampleJson: sampleJson as any, updatedAt: new Date() },
-      create: { sourceId, criteriaHash, pickupIso, returnIso, pickupLoc, returnLoc, offersCount, sampleJson: sampleJson as any },
-    });
+			await prisma.sourceAvailabilitySample.upsert({
+				where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
+				update: {
+					pickupIso,
+					returnIso,
+					pickupLoc,
+					returnLoc,
+					offersCount,
+					sampleJson: sampleJson as any,
+					updatedAt: new Date(),
+				},
+				create: {
+					sourceId,
+					criteriaHash,
+					pickupIso,
+					returnIso,
+					pickupLoc,
+					returnLoc,
+					offersCount,
+					sampleJson: sampleJson as any,
+				},
+			});
 
-    return res.json({
-      message: existing ? "Manual availability sample updated" : "Manual availability sample stored",
-      offersCount,
-      stored: true,
-      isNew: !existing,
-      duplicate: false,
-      adapterType,
-      offersSummary,
-      criteria: criteriaDisplay,
-    });
-  } catch (e: any) {
-    next(e);
-  }
-});
+			return res.json({
+				message: existing
+					? "Manual availability sample updated"
+					: "Manual availability sample stored",
+				offersCount,
+				stored: true,
+				isNew: !existing,
+				duplicate: false,
+				adapterType,
+				offersSummary,
+				criteria: criteriaDisplay,
+			});
+		} catch (e: any) {
+			next(e);
+		}
+	},
+);
 
 /**
  * GET /sources/availability-samples
  * Returns all stored availability samples for the authenticated source (most-recent first).
  */
-sourcesRouter.get("/sources/availability-samples", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const samples = await prisma.sourceAvailabilitySample.findMany({
-      where: { sourceId },
-      orderBy: { updatedAt: "desc" },
-    });
+sourcesRouter.get(
+	"/sources/availability-samples",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const samples = await prisma.sourceAvailabilitySample.findMany({
+				where: { sourceId },
+				orderBy: { updatedAt: "desc" },
+			});
 
-    // Each sample's sampleJson may have the full offersSummary (new format)
-    // or just the legacy { count, firstOffer } format.
-    const result = samples.map((s) => {
-      const json = s.sampleJson as any ?? {};
-      return {
-        id: s.id,
-        criteriaHash: s.criteriaHash,
-        pickupLoc: s.pickupLoc ?? json.criteria?.pickupLoc ?? "",
-        returnLoc: s.returnLoc ?? json.criteria?.returnLoc ?? "",
-        pickupIso: s.pickupIso ?? json.criteria?.pickupIso ?? "",
-        returnIso: s.returnIso ?? json.criteria?.returnIso ?? "",
-        offersCount: s.offersCount,
-        offersSummary: json.offersSummary ?? null,
-        criteria: json.criteria ?? null,
-        fetchedAt: json.fetchedAt ?? s.updatedAt,
-        updatedAt: s.updatedAt,
-      };
-    });
+			// Each sample's sampleJson may have the full offersSummary (new format)
+			// or just the legacy { count, firstOffer } format.
+			const result = samples.map((s) => {
+				const json = (s.sampleJson as any) ?? {};
+				return {
+					id: s.id,
+					criteriaHash: s.criteriaHash,
+					pickupLoc: s.pickupLoc ?? json.criteria?.pickupLoc ?? "",
+					returnLoc: s.returnLoc ?? json.criteria?.returnLoc ?? "",
+					pickupIso: s.pickupIso ?? json.criteria?.pickupIso ?? "",
+					returnIso: s.returnIso ?? json.criteria?.returnIso ?? "",
+					offersCount: s.offersCount,
+					offersSummary: json.offersSummary ?? null,
+					criteria: json.criteria ?? null,
+					fetchedAt: json.fetchedAt ?? s.updatedAt,
+					updatedAt: s.updatedAt,
+				};
+			});
 
-    return res.json({ samples: result });
-  } catch (e: any) {
-    next(e);
-  }
-});
+			return res.json({ samples: result });
+		} catch (e: any) {
+			next(e);
+		}
+	},
+);
 
 /**
  * POST /sources/fetch-availability
  * Fetches availability from source's availability endpoint, parses OTA VehAvailRS, and stores with dedupe (no duplicate for same criteria).
  */
-sourcesRouter.post("/sources/fetch-availability", requireAuth(), requireCompanyType("SOURCE"), async (req: any, res, next) => {
-  try {
-    const sourceId = req.user.companyId;
-    const body = (req.body || {}) as {
-      url?: string;
-      adapterType?: "xml" | "json" | "grpc"; // xml=OTA XML, json=Gloria JSON, grpc=Gloria gRPC
-      pickupDateTime?: string;
-      returnDateTime?: string;
-      pickupLoc?: string;
-      returnLoc?: string;
-      requestorId?: string;
-      driverAge?: number | string;
-      citizenCountry?: string;
-      force?: boolean;
-      debug?: boolean;
-    };
+sourcesRouter.post(
+	"/sources/fetch-availability",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const body = (req.body || {}) as {
+				url?: string;
+				adapterType?: "xml" | "json" | "grpc"; // xml=OTA XML, json=Gloria JSON, grpc=Gloria gRPC
+				pickupDateTime?: string;
+				returnDateTime?: string;
+				pickupLoc?: string;
+				returnLoc?: string;
+				requestorId?: string;
+				driverAge?: number | string;
+				citizenCountry?: string;
+				force?: boolean;
+				debug?: boolean;
+			};
 
-    const adapterType: "xml" | "json" | "grpc" = body.adapterType ?? "xml";
+			const adapterType: "xml" | "json" | "grpc" = body.adapterType ?? "xml";
 
-    const source = await prisma.company.findUnique({
-      where: { id: sourceId },
-      select: {
-        id: true,
-        httpEndpoint: true,
-        grpcEndpoint: true,
-        availabilityEndpointUrl: true,
-        locationListAccountId: true,
-      },
-    });
+			const source = await prisma.company.findUnique({
+				where: { id: sourceId },
+				select: {
+					id: true,
+					httpEndpoint: true,
+					grpcEndpoint: true,
+					availabilityEndpointUrl: true,
+					locationListAccountId: true,
+				},
+			});
 
-    if (!source) {
-      return res.status(404).json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
-    }
+			if (!source) {
+				return res
+					.status(404)
+					.json({ error: "SOURCE_NOT_FOUND", message: "Source not found" });
+			}
 
-    // Resolve endpoint based on adapter type
-    let endpointUrl = "";
-    if (adapterType === "grpc") {
-      // For gRPC, use the provided url or the source's grpcEndpoint
-      endpointUrl = (body.url || source.grpcEndpoint || "").trim();
-      if (!endpointUrl) {
-        return res.status(400).json({
-          error: "ENDPOINT_NOT_CONFIGURED",
-          message: "Configure a gRPC endpoint address for this source (e.g. host:port or grpc://host:port)",
-        });
-      }
-      // Normalise: strip grpc:// prefix if present — GrpcSourceAdapter handles host:port directly
-      endpointUrl = endpointUrl.replace(/^grpc:\/\//, "");
-    } else {
-      // XML or JSON — HTTP endpoint
-      endpointUrl = (body.url || source.availabilityEndpointUrl || "").trim();
-      if (!endpointUrl && source.httpEndpoint) {
-        endpointUrl = source.httpEndpoint.replace(/\/$/, "") + "/availability";
-      }
-      if (!endpointUrl) {
-        return res.status(400).json({
-          error: "ENDPOINT_NOT_CONFIGURED",
-          message: "Configure an availability endpoint URL (Pricing tab) or set availabilityEndpointUrl / httpEndpoint",
-        });
-      }
-      if (!endpointUrl.startsWith("http://") && !endpointUrl.startsWith("https://")) {
-        endpointUrl = `https://${endpointUrl}`;
-      }
-    }
+			// Resolve endpoint based on adapter type
+			let endpointUrl = "";
+			if (adapterType === "grpc") {
+				// For gRPC, use the provided url or the source's grpcEndpoint
+				endpointUrl = (body.url || source.grpcEndpoint || "").trim();
+				if (!endpointUrl) {
+					return res.status(400).json({
+						error: "ENDPOINT_NOT_CONFIGURED",
+						message:
+							"Configure a gRPC endpoint address for this source (e.g. host:port or grpc://host:port)",
+					});
+				}
+				// Normalise: strip grpc:// prefix if present — GrpcSourceAdapter handles host:port directly
+				endpointUrl = endpointUrl.replace(/^grpc:\/\//, "");
+			} else {
+				// XML or JSON — HTTP endpoint
+				endpointUrl = (body.url || source.availabilityEndpointUrl || "").trim();
+				if (!endpointUrl && source.httpEndpoint) {
+					endpointUrl =
+						source.httpEndpoint.replace(/\/$/, "") + "/availability";
+				}
+				if (!endpointUrl) {
+					return res.status(400).json({
+						error: "ENDPOINT_NOT_CONFIGURED",
+						message:
+							"Configure an availability endpoint URL (Pricing tab) or set availabilityEndpointUrl / httpEndpoint",
+					});
+				}
+				if (
+					!endpointUrl.startsWith("http://") &&
+					!endpointUrl.startsWith("https://")
+				) {
+					endpointUrl = `https://${endpointUrl}`;
+				}
+			}
 
-    // Common request parameters
-    const pickupIso = body.pickupDateTime || "2026-03-18T14:00:00";
-    const returnIso = body.returnDateTime || "2026-03-22T14:00:00";
-    const pickupLoc = body.pickupLoc || "TIAA01";
-    const returnLoc = body.returnLoc || "TIAA01";
-    const requestorId = (body.requestorId || source.locationListAccountId || "1000097").trim();
-    const driverAge = Number(body.driverAge) || 30;
-    const citizenCountry = (body.citizenCountry || "US").trim().toUpperCase();
+			// Common request parameters
+			const pickupIso = body.pickupDateTime || "2026-03-18T14:00:00";
+			const returnIso = body.returnDateTime || "2026-03-22T14:00:00";
+			const pickupLoc = body.pickupLoc || "TIAA01";
+			const returnLoc = body.returnLoc || "TIAA01";
+			const requestorId = (
+				body.requestorId ||
+				source.locationListAccountId ||
+				"1000097"
+			).trim();
+			const driverAge = Number(body.driverAge) || 30;
+			const citizenCountry = (body.citizenCountry || "US").trim().toUpperCase();
 
-    const criteria = {
-      pickup_unlocode: pickupLoc,
-      dropoff_unlocode: returnLoc,
-      pickup_iso: pickupIso,
-      dropoff_iso: returnIso,
-      driver_age: driverAge,
-      residency_country: citizenCountry,
-    };
+			const criteria = {
+				pickup_unlocode: pickupLoc,
+				dropoff_unlocode: returnLoc,
+				pickup_iso: pickupIso,
+				dropoff_iso: returnIso,
+				driver_age: driverAge,
+				residency_country: citizenCountry,
+			};
 
-    // Include endpoint + adapterType in hash so different endpoints/formats never overwrite each other
-    const criteriaHash = crypto
-      .createHash("sha256")
-      .update(`${sourceId}|${pickupIso}|${returnIso}|${pickupLoc}|${returnLoc}|${endpointUrl}|${adapterType}`)
-      .digest("hex")
-      .slice(0, 32);
+			// Include endpoint + adapterType in hash so different endpoints/formats never overwrite each other
+			const criteriaHash = crypto
+				.createHash("sha256")
+				.update(
+					`${sourceId}|${pickupIso}|${returnIso}|${pickupLoc}|${returnLoc}|${endpointUrl}|${adapterType}`,
+				)
+				.digest("hex")
+				.slice(0, 32);
 
-    // Supplier (e.g. TL Gloria av.php) can take 30–60s+ to stream a large PHP dump/XML body; short timeouts yield partial reads / poor parses.
-    const FETCH_AVAILABILITY_SUPPLIER_TIMEOUT_MS = 120_000;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_AVAILABILITY_SUPPLIER_TIMEOUT_MS);
+			// Supplier (e.g. TL Gloria av.php) can take 30–60s+ to stream a large PHP dump/XML body; short timeouts yield partial reads / poor parses.
+			const FETCH_AVAILABILITY_SUPPLIER_TIMEOUT_MS = 120_000;
+			const controller = new AbortController();
+			const timeoutId = setTimeout(
+				() => controller.abort(),
+				FETCH_AVAILABILITY_SUPPLIER_TIMEOUT_MS,
+			);
 
-    // Normalized offer array — all three adapters populate this
-    let offers: any[] = [];
-    let rawResponsePreview: string | undefined;
-    let parsedPreview: any;
+			// Normalized offer array — all three adapters populate this
+			let offers: any[] = [];
+			let rawResponsePreview: string | undefined;
+			let parsedPreview: any;
 
-    try {
-      // ══════════════════════════════════════════════════════════════════════
-      // GLORIA gRPC adapter
-      // ══════════════════════════════════════════════════════════════════════
-      if (adapterType === "grpc") {
-        clearTimeout(timeoutId); // gRPC manages its own channel timeout
-        try {
-          const adapter = makeGrpcSourceAdapter(endpointUrl);
-          const grpcResult = await adapter.availability({
-            agreement_ref: requestorId,
-            pickup_unlocode: pickupLoc,
-            dropoff_unlocode: returnLoc,
-            pickup_iso: pickupIso,
-            dropoff_iso: returnIso,
-            driver_age: driverAge,
-            residency_country: citizenCountry,
-            source_id: sourceId,
-          });
-          offers = Array.isArray(grpcResult) ? grpcResult : [];
-          parsedPreview = { type: "grpc", offersCount: offers.length, firstOffer: offers[0] ?? null };
-          console.log(`[fetch-availability] gRPC: ${offers.length} offers from ${endpointUrl}`);
-        } catch (grpcErr: any) {
-          return res.status(503).json({
-            error: "GRPC_ERROR",
-            message: `Gloria gRPC call failed: ${grpcErr.message || grpcErr.details || String(grpcErr)}`,
-            details: { code: grpcErr.code, details: grpcErr.details },
-          });
-        }
+			try {
+				// ══════════════════════════════════════════════════════════════════════
+				// GLORIA gRPC adapter
+				// ══════════════════════════════════════════════════════════════════════
+				if (adapterType === "grpc") {
+					clearTimeout(timeoutId); // gRPC manages its own channel timeout
+					try {
+						const adapter = makeGrpcSourceAdapter(endpointUrl);
+						const grpcResult = await adapter.availability({
+							agreement_ref: requestorId,
+							pickup_unlocode: pickupLoc,
+							dropoff_unlocode: returnLoc,
+							pickup_iso: pickupIso,
+							dropoff_iso: returnIso,
+							driver_age: driverAge,
+							residency_country: citizenCountry,
+							source_id: sourceId,
+						});
+						offers = Array.isArray(grpcResult) ? grpcResult : [];
+						parsedPreview = {
+							type: "grpc",
+							offersCount: offers.length,
+							firstOffer: offers[0] ?? null,
+						};
+						console.log(
+							`[fetch-availability] gRPC: ${offers.length} offers from ${endpointUrl}`,
+						);
+					} catch (grpcErr: any) {
+						return res.status(503).json({
+							error: "GRPC_ERROR",
+							message: `Gloria gRPC call failed: ${grpcErr.message || grpcErr.details || String(grpcErr)}`,
+							details: { code: grpcErr.code, details: grpcErr.details },
+						});
+					}
 
-      // ══════════════════════════════════════════════════════════════════════
-      // GLORIA JSON adapter
-      // ══════════════════════════════════════════════════════════════════════
-      } else if (adapterType === "json") {
-        const gloriaJsonBody = {
-          agreement_ref: requestorId,
-          pickup_unlocode: pickupLoc,
-          dropoff_unlocode: returnLoc,
-          pickup_iso: pickupIso,
-          dropoff_iso: returnIso,
-          driver_age: driverAge,
-          residency_country: citizenCountry,
-        };
+					// ══════════════════════════════════════════════════════════════════════
+					// GLORIA JSON adapter
+					// ══════════════════════════════════════════════════════════════════════
+				} else if (adapterType === "json") {
+					const gloriaJsonBody = {
+						agreement_ref: requestorId,
+						pickup_unlocode: pickupLoc,
+						dropoff_unlocode: returnLoc,
+						pickup_iso: pickupIso,
+						dropoff_iso: returnIso,
+						driver_age: driverAge,
+						residency_country: citizenCountry,
+					};
 
-        const fetchResponse = await fetch(endpointUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Accept": "application/json" },
-          body: JSON.stringify(gloriaJsonBody),
-          signal: controller.signal,
-        } as any);
+					const fetchResponse = await fetch(endpointUrl, {
+						method: "POST",
+						headers: {
+							"Content-Type": "application/json",
+							Accept: "application/json",
+						},
+						body: JSON.stringify(gloriaJsonBody),
+						signal: controller.signal,
+					} as any);
 
-        clearTimeout(timeoutId);
+					clearTimeout(timeoutId);
 
-        if (!fetchResponse.ok) {
-          return res.status(fetchResponse.status).json({
-            error: "SUPPLIER_ERROR",
-            message: `Gloria JSON endpoint returned HTTP ${fetchResponse.status}`,
-          });
-        }
+					if (!fetchResponse.ok) {
+						return res.status(fetchResponse.status).json({
+							error: "SUPPLIER_ERROR",
+							message: `Gloria JSON endpoint returned HTTP ${fetchResponse.status}`,
+						});
+					}
 
-        const responseText = await fetchResponse.text();
-        rawResponsePreview = responseText.slice(0, 3000);
-        console.log(`[fetch-availability] Gloria JSON response (first 500):`, responseText.slice(0, 500));
+					const responseText = await fetchResponse.text();
+					rawResponsePreview = responseText.slice(0, 3000);
+					console.log(
+						`[fetch-availability] Gloria JSON response (first 500):`,
+						responseText.slice(0, 500),
+					);
 
-        let parsed: any;
-        try {
-          parsed = JSON.parse(responseText);
-        } catch {
-          return res.status(400).json({
-            error: "INVALID_FORMAT",
-            message: "Gloria JSON endpoint did not return valid JSON",
-            rawResponsePreview,
-          });
-        }
+					let parsed: any;
+					try {
+						parsed = JSON.parse(responseText);
+					} catch {
+						return res.status(400).json({
+							error: "INVALID_FORMAT",
+							message: "Gloria JSON endpoint did not return valid JSON",
+							rawResponsePreview,
+						});
+					}
 
-        // Gloria JSON response: { vehicles: VehicleOffer[] }
-        // Field names match source_provider.proto VehicleOffer
-        const vehicles: any[] = parsed.vehicles || parsed.offers || [];
-        offers = vehicles.map((v: any) => ({
-          source_id: sourceId,
-          agreement_ref: requestorId,
-          vehicle_class: v.vehicle_class || v.vehicleClass || "",
-          vehicle_make_model: v.make_model || v.makeModel || v.vehicle_make_model || "",
-          total_price: v.total_price ?? v.totalPrice ?? 0,
-          currency: v.currency || "",
-          availability_status: v.availability_status || v.availabilityStatus || "AVAILABLE",
-          supplier_offer_ref: v.supplier_offer_ref || v.supplierOfferRef || "",
-          picture_url: v.picture_url || v.pictureUrl || undefined,
-          door_count: v.door_count || v.doorCount || undefined,
-          baggage: v.baggage || undefined,
-          vehicle_category: v.vehicle_category || v.vehicleCategory || undefined,
-          veh_id: v.veh_id || v.vehId || undefined,
-          veh_terms_included: v.veh_terms_included || v.vehTermsIncluded || undefined,
-          veh_terms_not_included: v.veh_terms_not_included || v.vehTermsNotIncluded || undefined,
-          priced_equips: v.priced_equips || v.pricedEquips || undefined,
-        }));
-        parsedPreview = { type: "json", offersCount: offers.length, firstVehicle: vehicles[0] ?? null };
-        console.log(`[fetch-availability] Gloria JSON: ${offers.length} offers from ${endpointUrl}`);
+					// Gloria JSON response: { vehicles: VehicleOffer[] }
+					// Field names match source_provider.proto VehicleOffer
+					const vehicles: any[] = parsed.vehicles || parsed.offers || [];
+					offers = vehicles.map((v: any) => ({
+						source_id: sourceId,
+						agreement_ref: requestorId,
+						vehicle_class: v.vehicle_class || v.vehicleClass || "",
+						vehicle_make_model:
+							v.make_model || v.makeModel || v.vehicle_make_model || "",
+						total_price: v.total_price ?? v.totalPrice ?? 0,
+						currency: v.currency || "",
+						availability_status:
+							v.availability_status || v.availabilityStatus || "AVAILABLE",
+						supplier_offer_ref:
+							v.supplier_offer_ref || v.supplierOfferRef || "",
+						picture_url: v.picture_url || v.pictureUrl || undefined,
+						door_count: v.door_count || v.doorCount || undefined,
+						baggage: v.baggage || undefined,
+						vehicle_category:
+							v.vehicle_category || v.vehicleCategory || undefined,
+						veh_id: v.veh_id || v.vehId || undefined,
+						veh_terms_included:
+							v.veh_terms_included || v.vehTermsIncluded || undefined,
+						veh_terms_not_included:
+							v.veh_terms_not_included || v.vehTermsNotIncluded || undefined,
+						priced_equips: v.priced_equips || v.pricedEquips || undefined,
+					}));
+					parsedPreview = {
+						type: "json",
+						offersCount: offers.length,
+						firstVehicle: vehicles[0] ?? null,
+					};
+					console.log(
+						`[fetch-availability] Gloria JSON: ${offers.length} offers from ${endpointUrl}`,
+					);
 
-      // ══════════════════════════════════════════════════════════════════════
-      // OTA XML adapter (default)
-      // ══════════════════════════════════════════════════════════════════════
-      } else {
-        const gloriaAccountId = (requestorId && String(requestorId).trim()) || "Gloria002";
-        const xmlBody = buildGloriaAvailabilityRq(criteria, gloriaAccountId);
+					// ══════════════════════════════════════════════════════════════════════
+					// OTA XML adapter (default)
+					// ══════════════════════════════════════════════════════════════════════
+				} else {
+					const gloriaAccountId =
+						(requestorId && String(requestorId).trim()) || "Gloria002";
+					const xmlBody = buildGloriaAvailabilityRq(criteria, gloriaAccountId);
 
-        const fetchResponse = await fetch(endpointUrl, {
-          method: "POST",
-          headers: { "Content-Type": "text/xml" },
-          body: xmlBody,
-          signal: controller.signal,
-        } as any);
+					const fetchResponse = await fetch(endpointUrl, {
+						method: "POST",
+						headers: { "Content-Type": "text/xml" },
+						body: xmlBody,
+						signal: controller.signal,
+					} as any);
 
-        clearTimeout(timeoutId);
+					clearTimeout(timeoutId);
 
-        if (!fetchResponse.ok) {
-          return res.status(fetchResponse.status).json({
-            error: "SUPPLIER_ERROR",
-            message: `Availability endpoint returned ${fetchResponse.status}`,
-          });
-        }
+					if (!fetchResponse.ok) {
+						return res.status(fetchResponse.status).json({
+							error: "SUPPLIER_ERROR",
+							message: `Availability endpoint returned ${fetchResponse.status}`,
+						});
+					}
 
-        const responseText = await fetchResponse.text();
-        const contentType = fetchResponse.headers.get("content-type") || "";
-        let raw: any = null;
+					const responseText = await fetchResponse.text();
+					const contentType = fetchResponse.headers.get("content-type") || "";
+					let raw: any = null;
 
-        console.log(`[fetch-availability] OTA XML contentType="${contentType}" length=${responseText.length}`);
-        console.log(`[fetch-availability] responseText (first 800):`, responseText.slice(0, 800));
-        rawResponsePreview = responseText.slice(0, 3000);
+					console.log(
+						`[fetch-availability] OTA XML contentType="${contentType}" length=${responseText.length}`,
+					);
+					console.log(
+						`[fetch-availability] responseText (first 800):`,
+						responseText.slice(0, 800),
+					);
+					rawResponsePreview = responseText.slice(0, 3000);
 
-        // ── Try OTA XML parsing (OTA_VehAvailRateRS) ──
-        const trimmed = responseText.trim();
-        // GLORIA_availabilityrs must use the Gloria parser only — OTA pre-parse can mis-detect
-        // (e.g. VehAvailRSCore mentioned in prose) or build a partial tree and skip Gloria extraction.
-        const skipOtaXmlPreparse =
-          trimmed.includes("GLORIA_availability") ||
-          trimmed.includes("VehAvairsdetails") ||
-          trimmed.includes("vehavailmaindet");
-        if (
-          !skipOtaXmlPreparse &&
-          (trimmed.startsWith("<?xml") ||
-            trimmed.startsWith("<OTA_VehAvailRateRS") ||
-            trimmed.startsWith("<OTA_") ||
-            (trimmed.startsWith("<") && trimmed.includes("VehAvailRSCore")))
-        ) {
-          try {
-            const { XMLParser } = await import("fast-xml-parser");
-            const xmlParser = new XMLParser({
-              ignoreAttributes: false,
-              attributesGroupName: "@attributes",
-              attributeNamePrefix: "",
-              parseAttributeValue: false,
-              trimValues: true,
-              isArray: (name: string) =>
-                ["Included", "NotIncluded", "PricedEquips", "PricedEquip", "VehVendorAvail", "VehAvail", "VehicleCharge"].includes(name),
-            });
-            const parsedXml = xmlParser.parse(responseText);
-            const rsKey = Object.keys(parsedXml).find((k) => k === "OTA_VehAvailRateRS" || k.endsWith(":OTA_VehAvailRateRS") || k.includes("VehAvailRateRS"));
-            const rs = rsKey ? parsedXml[rsKey] : parsedXml;
+					// ── Try OTA XML parsing (OTA_VehAvailRateRS) ──
+					const trimmed = responseText.trim();
+					// GLORIA_availabilityrs must use the Gloria parser only — OTA pre-parse can mis-detect
+					// (e.g. VehAvailRSCore mentioned in prose) or build a partial tree and skip Gloria extraction.
+					const skipOtaXmlPreparse =
+						trimmed.includes("GLORIA_availability") ||
+						trimmed.includes("VehAvairsdetails") ||
+						trimmed.includes("vehavailmaindet");
+					if (
+						!skipOtaXmlPreparse &&
+						(trimmed.startsWith("<?xml") ||
+							trimmed.startsWith("<OTA_VehAvailRateRS") ||
+							trimmed.startsWith("<OTA_") ||
+							(trimmed.startsWith("<") && trimmed.includes("VehAvailRSCore")))
+					) {
+						try {
+							const { XMLParser } = await import("fast-xml-parser");
+							const xmlParser = new XMLParser({
+								ignoreAttributes: false,
+								attributesGroupName: "@attributes",
+								attributeNamePrefix: "",
+								parseAttributeValue: false,
+								trimValues: true,
+								isArray: (name: string) =>
+									[
+										"Included",
+										"NotIncluded",
+										"PricedEquips",
+										"PricedEquip",
+										"VehVendorAvail",
+										"VehAvail",
+										"VehicleCharge",
+									].includes(name),
+							});
+							const parsedXml = xmlParser.parse(responseText);
+							const rsKey = Object.keys(parsedXml).find(
+								(k) =>
+									k === "OTA_VehAvailRateRS" ||
+									k.endsWith(":OTA_VehAvailRateRS") ||
+									k.includes("VehAvailRateRS"),
+							);
+							const rs = rsKey ? parsedXml[rsKey] : parsedXml;
 
-            if (rs && rs.VehAvailRSCore) {
-              raw = {
-                VehAvailRSCore: {
-                  ...rs.VehAvailRSCore,
-                  VehVendorAvails: rs.VehVendorAvails ?? rs.VehAvailRSCore.VehVendorAvails,
-                },
-              };
-              // Hoist VehTerms from Vehicle up to VehAvailCore level
-              const vhVendorAvails = raw.VehAvailRSCore.VehVendorAvails;
-              const vaList: any[] = Array.isArray(vhVendorAvails?.VehVendorAvail)
-                ? vhVendorAvails.VehVendorAvail
-                : vhVendorAvails?.VehVendorAvail
-                ? [vhVendorAvails.VehVendorAvail]
-                : [];
-              for (const vva of vaList) {
-                const vehAvailsNode = vva.VehAvails ?? vva;
-                const vehAvailList: any[] = Array.isArray(vehAvailsNode?.VehAvail)
-                  ? vehAvailsNode.VehAvail
-                  : vehAvailsNode?.VehAvail
-                  ? [vehAvailsNode.VehAvail]
-                  : [];
-                for (const item of vehAvailList) {
-                  const core = item.VehAvailCore ?? item;
-                  if (core && !core.VehTerms && core.Vehicle?.VehTerms) {
-                    core.VehTerms = core.Vehicle.VehTerms;
-                  }
-                }
-              }
-            }
-          } catch (xmlErr: any) {
-            console.warn("[fetch-availability] OTA XML parse failed:", xmlErr?.message);
-          }
-        }
+							if (rs && rs.VehAvailRSCore) {
+								raw = {
+									VehAvailRSCore: {
+										...rs.VehAvailRSCore,
+										VehVendorAvails:
+											rs.VehVendorAvails ?? rs.VehAvailRSCore.VehVendorAvails,
+									},
+								};
+								// Hoist VehTerms from Vehicle up to VehAvailCore level
+								const vhVendorAvails = raw.VehAvailRSCore.VehVendorAvails;
+								const vaList: any[] = Array.isArray(
+									vhVendorAvails?.VehVendorAvail,
+								)
+									? vhVendorAvails.VehVendorAvail
+									: vhVendorAvails?.VehVendorAvail
+										? [vhVendorAvails.VehVendorAvail]
+										: [];
+								for (const vva of vaList) {
+									const vehAvailsNode = vva.VehAvails ?? vva;
+									const vehAvailList: any[] = Array.isArray(
+										vehAvailsNode?.VehAvail,
+									)
+										? vehAvailsNode.VehAvail
+										: vehAvailsNode?.VehAvail
+											? [vehAvailsNode.VehAvail]
+											: [];
+									for (const item of vehAvailList) {
+										const core = item.VehAvailCore ?? item;
+										if (core && !core.VehTerms && core.Vehicle?.VehTerms) {
+											core.VehTerms = core.Vehicle.VehTerms;
+										}
+									}
+								}
+							}
+						} catch (xmlErr: any) {
+							console.warn(
+								"[fetch-availability] OTA XML parse failed:",
+								xmlErr?.message,
+							);
+						}
+					}
 
-        // ── Fall back: try JSON ──
-        if (!raw) {
-          if (contentType.includes("application/json") || trimmed.startsWith("{") || trimmed.startsWith("[")) {
-            try {
-              const parsedJ = JSON.parse(responseText);
-              if (parsedJ && typeof parsedJ === "object") raw = parsedJ;
-            } catch { /* not JSON */ }
-          }
-        }
+					// ── Fall back: try JSON ──
+					if (!raw) {
+						if (
+							contentType.includes("application/json") ||
+							trimmed.startsWith("{") ||
+							trimmed.startsWith("[")
+						) {
+							try {
+								const parsedJ = JSON.parse(responseText);
+								if (parsedJ && typeof parsedJ === "object") raw = parsedJ;
+							} catch {
+								/* not JSON */
+							}
+						}
+					}
 
-        // ── Fall back: try PHP var_dump ──
-        if (!raw && typeof responseText === "string" && responseText.includes("VehAvailRSCore") && responseText.includes("VehVendorAvails")) {
-          try {
-            const parsedD = convertPhpVarDumpToVehAvailRS(responseText);
-            if (parsedD && isOtaVehAvailResponse(parsedD)) raw = parsedD;
-          } catch (phpErr: any) {
-            console.warn("[fetch-availability] PHP var_dump parse failed:", phpErr?.message);
-          }
-        }
+					// ── Fall back: try PHP var_dump ──
+					if (
+						!raw &&
+						typeof responseText === "string" &&
+						responseText.includes("VehAvailRSCore") &&
+						responseText.includes("VehVendorAvails")
+					) {
+						try {
+							const parsedD = convertPhpVarDumpToVehAvailRS(responseText);
+							if (parsedD && isOtaVehAvailResponse(parsedD)) raw = parsedD;
+						} catch (phpErr: any) {
+							console.warn(
+								"[fetch-availability] PHP var_dump parse failed:",
+								phpErr?.message,
+							);
+						}
+					}
 
-        // GLORIA availability fallback (XML/JSON/var_dump tree with VehAvairsdetails.availcars)
-        if ((!raw || typeof raw !== "object" || !isOtaVehAvailResponse(raw))) {
-          let gloriaRoot: any = null;
-          if (raw && typeof raw === "object") {
-            if (raw.GLORIA_availabilityrs) gloriaRoot = raw.GLORIA_availabilityrs;
-            else if (raw.VehAvairsdetails) gloriaRoot = raw;
-          }
-          if (!gloriaRoot && trimmed.startsWith("<") && responseText.includes("GLORIA_availability")) {
-            try {
-              const { XMLParser } = await import("fast-xml-parser");
-              const xmlParser = new XMLParser({
-                ignoreAttributes: false,
-                attributesGroupName: "@attributes",
-                attributeNamePrefix: "",
-                parseAttributeValue: false,
-                trimValues: true,
-                removeNSPrefix: true,
-                // Force arrays for repeated GLORIA children so we never collapse 16 cars into one node
-                isArray: (tagName: string) => {
-                  const t = tagName.toLowerCase();
-                  // Only force arrays where siblings repeat; avoid "Item" (breaks some feeds + attribute handling)
-                  return t === "availcars" || t === "country";
-                },
-              });
-              const parsedXml = xmlParser.parse(responseText);
-              const rootKey = Object.keys(parsedXml).find((k) => k.includes("GLORIA_availabilityrs"));
-              gloriaRoot = rootKey ? parsedXml[rootKey] : parsedXml;
-            } catch { /* no-op */ }
-          }
-          if (!gloriaRoot && typeof responseText === "string" && responseText.includes("VehAvairsdetails")) {
-            try {
-              const parsedVarDump = convertPhpVarDumpToObject(responseText);
-              gloriaRoot = parsedVarDump?.GLORIA_availabilityrs || parsedVarDump;
-            } catch { /* no-op */ }
-          }
-          if (gloriaRoot) {
-            offers = parseGloriaAvailabilityOffers(gloriaRoot, sourceId, { agreement_ref: requestorId });
-            parsedPreview = {
-              type: "gloria-availability",
-              offersCount: offers.length,
-              firstOffer: offers[0] ?? null,
-            };
-          }
-        }
+					// GLORIA availability fallback (XML/JSON/var_dump tree with VehAvairsdetails.availcars)
+					if (!raw || typeof raw !== "object" || !isOtaVehAvailResponse(raw)) {
+						let gloriaRoot: any = null;
+						if (raw && typeof raw === "object") {
+							if (raw.GLORIA_availabilityrs)
+								gloriaRoot = raw.GLORIA_availabilityrs;
+							else if (raw.VehAvairsdetails) gloriaRoot = raw;
+						}
+						if (
+							!gloriaRoot &&
+							trimmed.startsWith("<") &&
+							responseText.includes("GLORIA_availability")
+						) {
+							try {
+								const { XMLParser } = await import("fast-xml-parser");
+								const xmlParser = new XMLParser({
+									ignoreAttributes: false,
+									attributesGroupName: "@attributes",
+									attributeNamePrefix: "",
+									parseAttributeValue: false,
+									trimValues: true,
+									removeNSPrefix: true,
+									// Force arrays for repeated GLORIA children so we never collapse 16 cars into one node
+									isArray: (tagName: string) => {
+										const t = tagName.toLowerCase();
+										// Only force arrays where siblings repeat; avoid "Item" (breaks some feeds + attribute handling)
+										return t === "availcars" || t === "country";
+									},
+								});
+								const parsedXml = xmlParser.parse(responseText);
+								const rootKey = Object.keys(parsedXml).find((k) =>
+									k.includes("GLORIA_availabilityrs"),
+								);
+								gloriaRoot = rootKey ? parsedXml[rootKey] : parsedXml;
+							} catch {
+								/* no-op */
+							}
+						}
+						if (
+							!gloriaRoot &&
+							typeof responseText === "string" &&
+							responseText.includes("VehAvairsdetails")
+						) {
+							try {
+								const parsedVarDump = convertPhpVarDumpToObject(responseText);
+								gloriaRoot =
+									parsedVarDump?.GLORIA_availabilityrs || parsedVarDump;
+							} catch {
+								/* no-op */
+							}
+						}
+						if (gloriaRoot) {
+							offers = parseGloriaAvailabilityOffers(gloriaRoot, sourceId, {
+								agreement_ref: requestorId,
+							});
+							parsedPreview = {
+								type: "gloria-availability",
+								offersCount: offers.length,
+								firstOffer: offers[0] ?? null,
+							};
+						}
+					}
 
-        if (!offers.length && (!raw || typeof raw !== "object" || !isOtaVehAvailResponse(raw))) {
-          return res.status(400).json({
-            error: "INVALID_FORMAT",
-            message: "Response must be OTA VehAvailRateRS or GLORIA_availabilityrs (VehAvairsdetails.availcars)",
-            rawResponsePreview,
-            details: {
-              expectedFormats: [
-                "OTA XML: <?xml ...><OTA_VehAvailRateRS ...><VehAvailRSCore>...</VehAvailRSCore><VehVendorAvails>...</VehVendorAvails></OTA_VehAvailRateRS>",
-                "GLORIA XML: <GLORIA_availabilityrs ...><VehAvairsdetails><availcars>...</availcars></VehAvairsdetails></GLORIA_availabilityrs>",
-                "JSON object with OTA keys (VehAvailRSCore/VehVendorAvails) or GLORIA key (VehAvairsdetails)",
-                "PHP var_dump text containing OTA keys or GLORIA VehAvairsdetails",
-              ],
-              help: "For XML adapter, Gloria sends GLORIA_availabilityrq (ACC/AccountID, VehAvailbody). Your endpoint can respond in OTA_VehAvailRateRS or GLORIA_availabilityrs.",
-              dataPreview: typeof responseText === "string" ? responseText.slice(0, 500) + (responseText.length > 500 ? "…" : "") : undefined,
-            },
-          });
-        }
+					if (
+						!offers.length &&
+						(!raw || typeof raw !== "object" || !isOtaVehAvailResponse(raw))
+					) {
+						return res.status(400).json({
+							error: "INVALID_FORMAT",
+							message:
+								"Response must be OTA VehAvailRateRS or GLORIA_availabilityrs (VehAvairsdetails.availcars)",
+							rawResponsePreview,
+							details: {
+								expectedFormats: [
+									"OTA XML: <?xml ...><OTA_VehAvailRateRS ...><VehAvailRSCore>...</VehAvailRSCore><VehVendorAvails>...</VehVendorAvails></OTA_VehAvailRateRS>",
+									"GLORIA XML: <GLORIA_availabilityrs ...><VehAvairsdetails><availcars>...</availcars></VehAvairsdetails></GLORIA_availabilityrs>",
+									"JSON object with OTA keys (VehAvailRSCore/VehVendorAvails) or GLORIA key (VehAvairsdetails)",
+									"PHP var_dump text containing OTA keys or GLORIA VehAvairsdetails",
+								],
+								help: "For XML adapter, Gloria sends GLORIA_availabilityrq (ACC/AccountID, VehAvailbody). Your endpoint can respond in OTA_VehAvailRateRS or GLORIA_availabilityrs.",
+								dataPreview:
+									typeof responseText === "string"
+										? responseText.slice(0, 500) +
+											(responseText.length > 500 ? "…" : "")
+										: undefined,
+							},
+						});
+					}
 
-        // Debug preview
-        try {
-          const vva0 = raw?.VehAvailRSCore?.VehVendorAvails?.VehVendorAvail?.[0] ?? raw?.VehAvailRSCore?.VehVendorAvails;
-          const vaListP = vva0?.VehAvails?.VehAvail ?? vva0?.VehAvail;
-          const va0 = Array.isArray(vaListP) ? vaListP[0] : vaListP;
-          const vc0 = va0?.VehAvailCore ?? va0;
-          parsedPreview = {
-            type: "xml",
-            VehAvailRSCoreKeys: raw?.VehAvailRSCore ? Object.keys(raw.VehAvailRSCore) : [],
-            firstVehAvailCoreKeys: vc0 ? Object.keys(vc0) : [],
-            firstVehAvailCoreAttrs: vc0?.["@attributes"] ?? null,
-            firstVehicle: vc0?.Vehicle ? {
-              attrs: vc0.Vehicle?.["@attributes"] ?? null,
-              VehMakeModelAttrs: vc0.Vehicle?.VehMakeModel?.["@attributes"] ?? null,
-            } : null,
-            firstTotalCharge: vc0?.TotalCharge?.["@attributes"] ?? null,
-          };
-          console.log("[fetch-availability] parsedPreview:", JSON.stringify(parsedPreview, null, 2));
-        } catch (e: any) {
-          console.warn("[fetch-availability] parsedPreview capture failed:", e?.message);
-        }
+					// Debug preview
+					try {
+						const vva0 =
+							raw?.VehAvailRSCore?.VehVendorAvails?.VehVendorAvail?.[0] ??
+							raw?.VehAvailRSCore?.VehVendorAvails;
+						const vaListP = vva0?.VehAvails?.VehAvail ?? vva0?.VehAvail;
+						const va0 = Array.isArray(vaListP) ? vaListP[0] : vaListP;
+						const vc0 = va0?.VehAvailCore ?? va0;
+						parsedPreview = {
+							type: "xml",
+							VehAvailRSCoreKeys: raw?.VehAvailRSCore
+								? Object.keys(raw.VehAvailRSCore)
+								: [],
+							firstVehAvailCoreKeys: vc0 ? Object.keys(vc0) : [],
+							firstVehAvailCoreAttrs: vc0?.["@attributes"] ?? null,
+							firstVehicle: vc0?.Vehicle
+								? {
+										attrs: vc0.Vehicle?.["@attributes"] ?? null,
+										VehMakeModelAttrs:
+											vc0.Vehicle?.VehMakeModel?.["@attributes"] ?? null,
+									}
+								: null,
+							firstTotalCharge: vc0?.TotalCharge?.["@attributes"] ?? null,
+						};
+						console.log(
+							"[fetch-availability] parsedPreview:",
+							JSON.stringify(parsedPreview, null, 2),
+						);
+					} catch (e: any) {
+						console.warn(
+							"[fetch-availability] parsedPreview capture failed:",
+							e?.message,
+						);
+					}
 
-        if (!offers.length) {
-          offers = parseOtaVehAvailResponse(raw, sourceId, criteria);
-        }
-      } // end else (OTA XML)
+					if (!offers.length) {
+						offers = parseOtaVehAvailResponse(raw, sourceId, criteria);
+					}
+				} // end else (OTA XML)
 
-      // ════════════════════════════════════════════════════════════════════
-      // COMMON: build offersSummary, dedup, upsert, respond
-      // (runs for all adapter types: grpc | json | xml)
-      // ════════════════════════════════════════════════════════════════════
-      const offersCount = offers.length;
+				// ════════════════════════════════════════════════════════════════════
+				// COMMON: build offersSummary, dedup, upsert, respond
+				// (runs for all adapter types: grpc | json | xml)
+				// ════════════════════════════════════════════════════════════════════
+				const offersCount = offers.length;
 
-      const offersSummary = offers.map((o) => ({
-        vehicle_class: o.vehicle_class ?? "",
-        vehicle_make_model: o.vehicle_make_model ?? "",
-        total_price: o.total_price,
-        currency: o.currency ?? "",
-        availability_status: o.availability_status ?? "",
-        picture_url: o.picture_url ?? undefined,
-        transmission_type: o.transmission_type ?? undefined,
-        vehicle_category: o.vehicle_category ?? undefined,
-        air_condition_ind: o.air_condition_ind ?? undefined,
-        veh_id: o.veh_id ?? undefined,
-        door_count: o.door_count ?? undefined,
-        baggage: o.baggage ?? undefined,
-        included: o.veh_terms_included ?? undefined,
-        not_included: o.veh_terms_not_included ?? undefined,
-        priced_equips: o.priced_equips ?? undefined,
-        gloria_pricing_attributes: o.gloria_pricing_attributes ?? undefined,
-        gloria_vehdetails_attributes: o.gloria_vehdetails_attributes ?? undefined,
-      }));
+				const offersSummary = offers.map((o) => ({
+					vehicle_class: o.vehicle_class ?? "",
+					vehicle_make_model: o.vehicle_make_model ?? "",
+					total_price: o.total_price,
+					currency: o.currency ?? "",
+					availability_status: o.availability_status ?? "",
+					picture_url: o.picture_url ?? undefined,
+					transmission_type: o.transmission_type ?? undefined,
+					vehicle_category: o.vehicle_category ?? undefined,
+					air_condition_ind: o.air_condition_ind ?? undefined,
+					veh_id: o.veh_id ?? undefined,
+					door_count: o.door_count ?? undefined,
+					baggage: o.baggage ?? undefined,
+					included: o.veh_terms_included ?? undefined,
+					not_included: o.veh_terms_not_included ?? undefined,
+					priced_equips: o.priced_equips ?? undefined,
+					gloria_pricing_attributes: o.gloria_pricing_attributes ?? undefined,
+					gloria_vehdetails_attributes:
+						o.gloria_vehdetails_attributes ?? undefined,
+				}));
 
-      const criteriaDisplay = { pickupLoc, returnLoc, pickupIso, returnIso, requestorId, driverAge, citizenCountry, adapterType };
+				const criteriaDisplay = {
+					pickupLoc,
+					returnLoc,
+					pickupIso,
+					returnIso,
+					requestorId,
+					driverAge,
+					citizenCountry,
+					adapterType,
+				};
 
-      const dedupFingerprint = offersCount > 0
-        ? { count: offersCount, v0: `${offers[0].vehicle_class}|${offers[0].vehicle_make_model}|${offers[0].total_price}` }
-        : { count: 0, v0: "" };
+				const dedupFingerprint =
+					offersCount > 0
+						? {
+								count: offersCount,
+								v0: `${offers[0].vehicle_class}|${offers[0].vehicle_make_model}|${offers[0].total_price}`,
+							}
+						: { count: 0, v0: "" };
 
-      const sampleJson = {
-        count: offersCount,
-        adapterType,
-        firstOffer: offersCount > 0
-          ? { vehicle_class: offers[0].vehicle_class, vehicle_make_model: offers[0].vehicle_make_model, total_price: offers[0].total_price }
-          : null,
-        offersSummary,
-        criteria: criteriaDisplay,
-        fetchedAt: new Date().toISOString(),
-      };
+				const sampleJson = {
+					count: offersCount,
+					adapterType,
+					firstOffer:
+						offersCount > 0
+							? {
+									vehicle_class: offers[0].vehicle_class,
+									vehicle_make_model: offers[0].vehicle_make_model,
+									total_price: offers[0].total_price,
+								}
+							: null,
+					offersSummary,
+					criteria: criteriaDisplay,
+					fetchedAt: new Date().toISOString(),
+				};
 
-      const existing = await prisma.sourceAvailabilitySample.findUnique({
-        where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
-      });
+				const existing = await prisma.sourceAvailabilitySample.findUnique({
+					where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
+				});
 
-      const existingJson = existing?.sampleJson as any ?? {};
-      const existingFingerprint = {
-        count: existingJson.count ?? existing?.offersCount,
-        v0: existingJson.firstOffer ? `${existingJson.firstOffer.vehicle_class}|${existingJson.firstOffer.vehicle_make_model}|${existingJson.firstOffer.total_price}` : "",
-      };
-      const isSameContent =
-        !body.force &&
-        existing &&
-        existing.offersCount === offersCount &&
-        JSON.stringify(existingFingerprint) === JSON.stringify(dedupFingerprint);
+				const existingJson = (existing?.sampleJson as any) ?? {};
+				const existingFingerprint = {
+					count: existingJson.count ?? existing?.offersCount,
+					v0: existingJson.firstOffer
+						? `${existingJson.firstOffer.vehicle_class}|${existingJson.firstOffer.vehicle_make_model}|${existingJson.firstOffer.total_price}`
+						: "",
+				};
+				const isSameContent =
+					!body.force &&
+					existing &&
+					existing.offersCount === offersCount &&
+					JSON.stringify(existingFingerprint) ===
+						JSON.stringify(dedupFingerprint);
 
-      if (isSameContent) {
-        return res.json({
-          message: "Data unchanged (same as existing); not stored.",
-          offersCount,
-          stored: false,
-          duplicate: true,
-          isNew: false,
-          adapterType,
-          offersSummary,
-          criteria: criteriaDisplay,
-          rawResponsePreview,
-          parsedPreview,
-        });
-      }
+				if (isSameContent) {
+					return res.json({
+						message: "Data unchanged (same as existing); not stored.",
+						offersCount,
+						stored: false,
+						duplicate: true,
+						isNew: false,
+						adapterType,
+						offersSummary,
+						criteria: criteriaDisplay,
+						rawResponsePreview,
+						parsedPreview,
+					});
+				}
 
-      await prisma.sourceAvailabilitySample.upsert({
-        where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
-        update: { pickupIso, returnIso, pickupLoc, returnLoc, offersCount, sampleJson: sampleJson as any, updatedAt: new Date() },
-        create: { sourceId, criteriaHash, pickupIso, returnIso, pickupLoc, returnLoc, offersCount, sampleJson: sampleJson as any },
-      });
+				await prisma.sourceAvailabilitySample.upsert({
+					where: { sourceId_criteriaHash: { sourceId, criteriaHash } },
+					update: {
+						pickupIso,
+						returnIso,
+						pickupLoc,
+						returnLoc,
+						offersCount,
+						sampleJson: sampleJson as any,
+						updatedAt: new Date(),
+					},
+					create: {
+						sourceId,
+						criteriaHash,
+						pickupIso,
+						returnIso,
+						pickupLoc,
+						returnLoc,
+						offersCount,
+						sampleJson: sampleJson as any,
+					},
+				});
 
-      res.json({
-        message: existing ? "Availability data updated (new data stored)" : "Availability data stored",
-        offersCount,
-        stored: true,
-        isNew: !existing,
-        duplicate: false,
-        adapterType,
-        offersSummary,
-        criteria: criteriaDisplay,
-        rawResponsePreview,
-        parsedPreview,
-      });
-    } catch (fetchError: any) {
-      clearTimeout(timeoutId);
-      if (fetchError.name === "AbortError" || fetchError.code === "ETIMEDOUT") {
-        return res.status(504).json({
-          error: "TIMEOUT",
-          message: `Availability endpoint timeout after ${FETCH_AVAILABILITY_SUPPLIER_TIMEOUT_MS / 1000}s`,
-        });
-      }
-      if (fetchError.message?.includes("fetch failed") || fetchError.code === "ECONNREFUSED" || fetchError.code === "ENOTFOUND") {
-        return res.status(503).json({
-          error: "ENDPOINT_CONNECTION_ERROR",
-          message: "Cannot connect to availability endpoint",
-          details: fetchError.message || fetchError.code,
-        });
-      }
-      throw fetchError;
-    }
-  } catch (e: any) {
-    next(e);
-  }
-});
+				res.json({
+					message: existing
+						? "Availability data updated (new data stored)"
+						: "Availability data stored",
+					offersCount,
+					stored: true,
+					isNew: !existing,
+					duplicate: false,
+					adapterType,
+					offersSummary,
+					criteria: criteriaDisplay,
+					rawResponsePreview,
+					parsedPreview,
+				});
+			} catch (fetchError: any) {
+				clearTimeout(timeoutId);
+				if (
+					fetchError.name === "AbortError" ||
+					fetchError.code === "ETIMEDOUT"
+				) {
+					return res.status(504).json({
+						error: "TIMEOUT",
+						message: `Availability endpoint timeout after ${FETCH_AVAILABILITY_SUPPLIER_TIMEOUT_MS / 1000}s`,
+					});
+				}
+				if (
+					fetchError.message?.includes("fetch failed") ||
+					fetchError.code === "ECONNREFUSED" ||
+					fetchError.code === "ENOTFOUND"
+				) {
+					return res.status(503).json({
+						error: "ENDPOINT_CONNECTION_ERROR",
+						message: "Cannot connect to availability endpoint",
+						details: fetchError.message || fetchError.code,
+					});
+				}
+				throw fetchError;
+			}
+		} catch (e: any) {
+			next(e);
+		}
+	},
+);
