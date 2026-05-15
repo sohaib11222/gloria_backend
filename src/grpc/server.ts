@@ -64,11 +64,28 @@ function normalizeBookingStatus(value: any, fallback = "REQUESTED") {
 		.trim()
 		.toUpperCase();
 	if (status === "CONFIRMED" || status === "CONFIRM") return "CONFIRMED";
-	if (status === "CANCELLED" || status === "CANCELED" || status === "CANCELLED")
-		return "CANCELLED";
+	if (status === "CANCELLED" || status === "CANCELED") return "CANCELLED";
 	if (status === "FAILED" || status === "ERROR") return "FAILED";
 	if (status === "REQUESTED" || status === "PENDING") return "REQUESTED";
 	return fallback;
+}
+
+function isBookableAvailabilityOffer(offer: any) {
+	if (!offer || typeof offer !== "object") return false;
+	if (offer.error || offer.Error) return false;
+	const coreFields = [
+		offer.supplier_offer_ref,
+		offer.SupplierOfferRef,
+		offer.vehicle_class,
+		offer.VehicleClass,
+		offer.vehicle_make_model,
+		offer.VehicleMakeModel,
+		offer.make_model,
+		offer.MakeModel,
+		offer.availability_status,
+		offer.AvailabilityStatus,
+	];
+	return coreFields.some((value) => String(value || "").trim().length > 0);
 }
 
 function getAllowedTransitions(currentStatus: string): string {
@@ -592,11 +609,15 @@ export async function startGrpcServers() {
 
 				const criteria = (job?.criteriaJson as any) || {};
 
-				// Add availability_request_id to each offer for booking context
-				const offersWithRequestId = out.new_items.map((offer: any) => ({
-					...offer,
-					availability_request_id: request_id, // Add request_id to each offer
-				}));
+				// Add availability_request_id to each real offer for booking context. Synthetic
+				// NO_RESULT/TIMEOUT/SOURCE_ERROR rows are stored for accounting only and must
+				// not be serialized through the Offer proto as blank USD 0.00 UNKNOWN cards.
+				const offersWithRequestId = out.new_items
+					.filter(isBookableAvailabilityOffer)
+					.map((offer: any) => ({
+						...offer,
+						availability_request_id: request_id, // Add request_id to each offer
+					}));
 
 				// Build OTA-compliant response structure
 				const otaResponse = await buildAvailabilityResponse(
