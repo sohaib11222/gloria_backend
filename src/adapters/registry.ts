@@ -10,6 +10,11 @@ export interface AvailabilityCriteria {
 	residency_country: string;
 	vehicle_classes: string[];
 	agreement_ref: string;
+	/** Supplier-assigned account/requester id from the offline agreement. */
+	requester_id?: string;
+	account_number?: string;
+	/** Agent markup percentage applied by Gloria after supplier response. */
+	margin_percent?: number;
 }
 
 /** Optional rich OTA fields (VehTerms, VehicleCharges, PricedEquips, etc.) - same shape as AvailabilityOffer extensions */

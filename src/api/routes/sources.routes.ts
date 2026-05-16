@@ -5586,12 +5586,10 @@ sourcesRouter.get(
 				Number.isNaN(endDate.getTime()) ||
 				endDate < startDate
 			) {
-				return res
-					.status(400)
-					.json({
-						error: "BAD_REQUEST",
-						message: "Invalid startDate/endDate range",
-					});
+				return res.status(400).json({
+					error: "BAD_REQUEST",
+					message: "Invalid startDate/endDate range",
+				});
 			}
 			const records = await prisma.sourceDailyRate.findMany({
 				where: {
@@ -5647,12 +5645,10 @@ sourcesRouter.put(
 			const sourceId = req.user.companyId;
 			const body = setDailyPricingDefaultSchema.parse(req.body);
 			if (body.dayEnd < body.dayStart) {
-				return res
-					.status(400)
-					.json({
-						error: "BAD_REQUEST",
-						message: "dayEnd must be >= dayStart",
-					});
+				return res.status(400).json({
+					error: "BAD_REQUEST",
+					message: "dayEnd must be >= dayStart",
+				});
 			}
 			const startDate = new Date(body.startDate);
 			const endDate = new Date(body.endDate);
@@ -5661,12 +5657,10 @@ sourcesRouter.put(
 				Number.isNaN(endDate.getTime()) ||
 				endDate < startDate
 			) {
-				return res
-					.status(400)
-					.json({
-						error: "BAD_REQUEST",
-						message: "Invalid startDate/endDate range",
-					});
+				return res.status(400).json({
+					error: "BAD_REQUEST",
+					message: "Invalid startDate/endDate range",
+				});
 			}
 			const dates = enumerateDatesInclusive(startDate, endDate);
 			const data = dates.flatMap((d) =>
@@ -5823,13 +5817,11 @@ sourcesRouter.post(
 		try {
 			const f = req.file as { filename?: string } | undefined;
 			if (!f?.filename) {
-				return res
-					.status(400)
-					.json({
-						error: "NO_FILE",
-						message:
-							'Send multipart field "image" (JPEG, PNG, GIF, or WEBP, max ~3 MB).',
-					});
+				return res.status(400).json({
+					error: "NO_FILE",
+					message:
+						'Send multipart field "image" (JPEG, PNG, GIF, or WEBP, max ~3 MB).',
+				});
 			}
 			const sourceId = req.user.companyId as string;
 			const relUrl = `/uploads/source-availability/${sourceId}/${f.filename}`;
@@ -5888,22 +5880,22 @@ sourcesRouter.post(
 				.toUpperCase()
 				.slice(0, 2);
 
+			const v = body.vehicle;
+			const acriss = v.acriss.trim().toUpperCase();
+			const make = v.make.trim();
+			const model = v.model.trim();
+			const name = `${make} ${model}`.trim();
+
 			const endpointUrl = "manual-entry";
 			const adapterType = "manual" as const;
 
 			const criteriaHash = crypto
 				.createHash("sha256")
 				.update(
-					`${sourceId}|${pickupIso}|${returnIso}|${pickupLoc}|${returnLoc}|${endpointUrl}|${adapterType}`,
+					`${sourceId}|${pickupIso}|${returnIso}|${pickupLoc}|${returnLoc}|${endpointUrl}|${adapterType}|${acriss}`,
 				)
 				.digest("hex")
 				.slice(0, 32);
-
-			const v = body.vehicle;
-			const acriss = v.acriss.trim().toUpperCase();
-			const make = v.make.trim();
-			const model = v.model.trim();
-			const name = `${make} ${model}`.trim();
 
 			const strOpt = (x: unknown): string | undefined => {
 				if (x === undefined || x === null) return undefined;

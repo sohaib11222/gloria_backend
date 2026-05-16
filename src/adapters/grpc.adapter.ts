@@ -418,6 +418,13 @@ export class GrpcAdapter {
 	async availability(criteria: any): Promise<any[]> {
 		try {
 			// Convert internal criteria to OTA-style format
+			const requestorId =
+				String(
+					criteria.requester_id ||
+						criteria.account_number ||
+						this.config.availabilityRequestorId ||
+						"1000097",
+				).trim() || "1000097";
 			const otaCriteria = {
 				PickupLocation: criteria.pickup_unlocode,
 				DropOffLocation: criteria.dropoff_unlocode,
@@ -426,6 +433,8 @@ export class GrpcAdapter {
 				VehicleClass: criteria.vehicle_classes?.[0] || "CDMR",
 				DriverAge: criteria.driver_age,
 				ResidencyCountry: criteria.residency_country,
+				RequestorID: requestorId,
+				AccountNumber: requestorId,
 			};
 
 			const useOtaAvailabilityXml = this.config.useOtaAvailabilityXml === true;
@@ -454,7 +463,7 @@ export class GrpcAdapter {
 						residency_country: criteria.residency_country || "US",
 						vehicle_classes: criteria.vehicle_classes,
 					},
-					this.config.availabilityRequestorId || "1000097",
+					requestorId,
 				);
 				response = await this.makeRequest("POST", path, xmlBody, true);
 				if (typeof response === "string") {

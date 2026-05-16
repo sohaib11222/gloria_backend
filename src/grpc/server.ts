@@ -256,7 +256,13 @@ export async function startGrpcServers() {
 							status: "ACTIVE",
 							agreementRef: { in: c.agreement_refs },
 						},
-						select: { id: true, agreementRef: true, sourceId: true },
+						select: {
+							id: true,
+							agreementRef: true,
+							sourceId: true,
+							accountNumber: true,
+							marginPercent: true,
+						},
 					});
 				}
 
@@ -425,6 +431,9 @@ export async function startGrpcServers() {
 						console.log(
 							`[Availability.Submit] 🔌 About to call adapter.availability() method...`,
 						);
+						const requesterId = String(
+							ag.accountNumber || ag.agreementRef || "",
+						).trim();
 						const offers = await adapter.availability({
 							pickup_unlocode: c.pickup_unlocode,
 							dropoff_unlocode: c.dropoff_unlocode,
@@ -434,12 +443,43 @@ export async function startGrpcServers() {
 							residency_country: c.residency_country,
 							vehicle_classes: c.vehicle_classes || [],
 							agreement_ref: ag.agreementRef,
+							requester_id: requesterId,
+							account_number: requesterId,
+							margin_percent: Number(ag.marginPercent || 0),
 						});
 
 						const latency = Date.now() - startTime;
 
+						const marginPercent = Math.max(0, Number(ag.marginPercent || 0));
+						const pricedOffers = marginPercent
+							? offers.map((offer: any) => {
+									const supplierPrice = Number(offer.total_price ?? 0);
+									if (!Number.isFinite(supplierPrice)) return offer;
+									const markedUp =
+										Math.round(
+											supplierPrice * (1 + marginPercent / 100) * 100,
+										) / 100;
+									return {
+										...offer,
+										supplier_total_price: supplierPrice,
+										margin_percent: marginPercent,
+										total_price: markedUp,
+										total_charge: offer.total_charge
+											? {
+													...offer.total_charge,
+													rate_total_amount: String(markedUp),
+												}
+											: offer.total_charge,
+									};
+								})
+							: offers;
+
 						console.log(
 							`[Availability.Submit] ✅ Adapter returned ${offers.length} offers for source ${ag.sourceId} (${latency}ms)`,
+							{
+								requesterId: requesterId || null,
+								marginPercent,
+							},
 						);
 
 						// Record health metrics
@@ -462,7 +502,11 @@ export async function startGrpcServers() {
 						console.log(
 							`[Availability.Submit] 💾 Storing ${offers.length} offers for source ${ag.sourceId} in job ${jobId}`,
 						);
-						await AvailabilityStore.appendPartial(jobId, ag.sourceId, offers);
+						await AvailabilityStore.appendPartial(
+							jobId,
+							ag.sourceId,
+							pricedOffers,
+						);
 						console.log(
 							`[Availability.Submit] ✅ Successfully stored offers for source ${ag.sourceId}`,
 						);

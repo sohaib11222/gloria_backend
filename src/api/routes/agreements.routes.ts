@@ -21,7 +21,7 @@ function externalManagedResponse(res: any) {
 	return res.status(403).json({
 		error: "EXTERNAL_MANAGED",
 		message:
-			"Agreements are managed externally. Contact the listed company by email, sign the agreement outside the platform, then use the registered account/agreement reference for operational calls.",
+			"Legal agreements are signed outside the platform by email or local process. Use this portal only to register the operational account/requester id, margin, and contact details.",
 	});
 }
 
@@ -29,18 +29,34 @@ function externalManagedResponse(res: any) {
 function toAgreementCamelCase(ag: any) {
 	return {
 		id: ag.id,
-		agentId: ag.agent_id,
-		sourceId: ag.source_id,
-		agreementRef: ag.agreement_ref,
+		agentId: ag.agentId ?? ag.agent_id,
+		sourceId: ag.sourceId ?? ag.source_id,
+		agreementRef: ag.agreementRef ?? ag.agreement_ref,
+		accountNumber: ag.accountNumber ?? ag.account_number ?? null,
+		marginPercent: Number(ag.marginPercent ?? ag.margin_percent ?? 0),
+		contactName: ag.contactName ?? ag.contact_name ?? null,
+		contactEmail: ag.contactEmail ?? ag.contact_email ?? null,
 		status: ag.status,
-		validFrom: ag.valid_from,
-		validTo: ag.valid_to,
+		validFrom: ag.validFrom ?? ag.valid_from,
+		validTo: ag.validTo ?? ag.valid_to,
 		createdAt: ag.createdAt,
 		updatedAt: ag.updatedAt,
 		agent: ag.agent,
 		source: ag.source,
 	};
 }
+
+const companySummarySelect = {
+	id: true,
+	companyName: true,
+	email: true,
+	type: true,
+	status: true,
+	companyCode: true,
+	companyAddress: true,
+	companyWebsiteUrl: true,
+	registrationBranchName: true,
+} as const;
 // Duplicate agreement check (GET - query params)
 agreementsRouter.get(
 	"/agreements/check-duplicate",
@@ -51,12 +67,10 @@ agreementsRouter.get(
 			const agent_id = String(req.query.agent_id || "").trim();
 			const agreement_ref = String(req.query.agreement_ref || "").trim();
 			if (!source_id || !agent_id || !agreement_ref) {
-				return res
-					.status(400)
-					.json({
-						error: "BAD_REQUEST",
-						message: "source_id, agent_id, agreement_ref are required",
-					});
+				return res.status(400).json({
+					error: "BAD_REQUEST",
+					message: "source_id, agent_id, agreement_ref are required",
+				});
 			}
 			const existing = await prisma.agreement.findFirst({
 				where: {
@@ -86,12 +100,10 @@ agreementsRouter.post(
 			const agent_id = String(agentId || "").trim();
 			const agreement_ref = String(agreementRef || "").trim();
 			if (!source_id || !agent_id || !agreement_ref) {
-				return res
-					.status(400)
-					.json({
-						error: "BAD_REQUEST",
-						message: "sourceId, agentId, agreementRef are required in body",
-					});
+				return res.status(400).json({
+					error: "BAD_REQUEST",
+					message: "sourceId, agentId, agreementRef are required in body",
+				});
 			}
 			const existing = await prisma.agreement.findFirst({
 				where: {
@@ -111,167 +123,158 @@ agreementsRouter.post(
 );
 
 const draftSchema = z.object({
-	agent_id: z.string(),
-	source_id: z.string(),
-	agreement_ref: z.string().min(2),
+	agent_id: z.string().trim().min(1),
+	source_id: z.string().trim().min(1),
+	agreement_ref: z.string().trim().min(1).optional(),
+	account_number: z.string().trim().min(1),
+	margin_percent: z.coerce.number().min(0).max(1000).default(0),
+	contact_name: z.string().trim().min(1).max(191),
+	contact_email: z.string().trim().email().max(191),
 	valid_from: z.string().optional(),
 	valid_to: z.string().optional(),
 });
+
+function parseOptionalDate(value?: string): Date | null {
+	if (!value?.trim()) return null;
+	const date = new Date(value);
+	return Number.isNaN(date.getTime()) ? null : date;
+}
 
 /**
  * @openapi
  * /agreements:
  *   post:
  *     tags: [Agreements]
- *     summary: Source creates draft agreement targeting an Agent
+ *     summary: Source registers offline supplier access for an Agent
  */
 agreementsRouter.post(
 	"/agreements",
 	requireAuth(),
 	requireCompanyType("SOURCE"),
 	async (req: any, res, next) => {
-		return externalManagedResponse(res);
 		try {
 			const body = draftSchema.parse(req.body);
-			// Guard: source can only create for itself
-			// Debug log removed
+			const sourceId = req.user.companyId as string;
 
-			if (body.source_id !== req.user.companyId) {
+			if (body.source_id !== sourceId) {
 				return res.status(403).json({
 					error: "FORBIDDEN",
 					message: "Can only create agreements for your own source company",
 				});
 			}
-			// Optional: validate both companies exist (and types) to avoid opaque gRPC errors
-			const wantAgentId = String(body.agent_id || "").trim();
-			const wantSourceId = String(body.source_id || "").trim();
-			const [agent, source] = await Promise.all([
-				prisma.company.findFirst({
-					where: { id: wantAgentId },
-					select: { id: true, type: true, status: true },
-				}),
-				prisma.company.findFirst({
-					where: { id: wantSourceId },
-					select: { id: true, type: true, status: true },
-				}),
-			]);
-			if (
-				!agent ||
-				!source ||
-				(agent?.type ?? "") !== "AGENT" ||
-				(source?.type ?? "") !== "SOURCE" ||
-				(agent?.status ?? "") !== "ACTIVE" ||
-				(source?.status ?? "") !== "ACTIVE"
-			) {
+
+			const agreementRef = (body.agreement_ref || body.account_number)
+				.trim()
+				.toUpperCase();
+			const accountNumber = body.account_number.trim();
+			const marginPercent = Number(body.margin_percent || 0);
+			const validFrom = parseOptionalDate(body.valid_from);
+			const validTo = parseOptionalDate(body.valid_to);
+			if (validFrom && validTo && validTo.getTime() <= validFrom.getTime()) {
 				return res.status(400).json({
-					error: "SCHEMA_ERROR",
-					message:
-						"Invalid agent_id or source_id - companies must exist, have correct types, and be ACTIVE",
-					details: {
-						agent_id: wantAgentId,
-						agentFound: !!agent,
-						agentType: agent?.type || "",
-						agentStatus: agent?.status || "",
-						source_id: wantSourceId,
-						sourceFound: !!source,
-						sourceType: source?.type || "",
-						sourceStatus: source?.status || "",
-					},
+					error: "BAD_REQUEST",
+					message: "Valid to must be after valid from",
 				});
 			}
-			// Check for duplicate agreement reference before creating
-			const existing = await prisma.agreement.findFirst({
-				where: {
-					sourceId: body.source_id,
-					agentId: body.agent_id,
-					agreementRef: body.agreement_ref,
-				},
-				select: { id: true, status: true },
-			});
 
-			const warnings: string[] = [];
-			if (existing) {
-				warnings.push(
-					`Duplicate agreement reference detected: "${body.agreement_ref}" already exists for this agent/source pair (existing agreement ID: ${existing?.id}, status: ${existing?.status}).`,
-				);
+			const [agent, source] = await Promise.all([
+				prisma.company.findFirst({
+					where: { id: body.agent_id },
+					select: companySummarySelect,
+				}),
+				prisma.company.findFirst({
+					where: { id: sourceId },
+					select: companySummarySelect,
+				}),
+			]);
+
+			if (!agent || agent.type !== "AGENT" || agent.status !== "ACTIVE") {
+				return res.status(400).json({
+					error: "INVALID_AGENT",
+					message: "Select an active agent company",
+				});
+			}
+			if (!source || source.type !== "SOURCE" || source.status !== "ACTIVE") {
+				return res.status(400).json({
+					error: "INVALID_SOURCE",
+					message:
+						"Your Source company must be active before registering agreements",
+				});
+			}
+
+			const existingByRef = await prisma.agreement.findFirst({
+				where: { sourceId, agreementRef },
+				select: { id: true, agentId: true },
+			});
+			if (existingByRef && existingByRef.agentId !== body.agent_id) {
+				return res.status(409).json({
+					error: "CONFLICT",
+					message:
+						"This agreement/account reference is already assigned to another agent for this Source.",
+					existingId: existingByRef.id,
+				});
 			}
 
 			const startTime = Date.now();
 			const requestId = (req as any).requestId;
-			const client = agreementClient();
-			client.CreateDraft(
-				body,
-				metaFromReq(req),
-				async (err: any, resp: any) => {
-					const duration = Date.now() - startTime;
-
-					if (err) {
-						await auditLog({
-							direction: "IN",
-							endpoint: "agreements.create",
-							requestId,
-							companyId: body.source_id,
-							sourceId: body.source_id,
-							agreementRef: body.agreement_ref,
-							grpcStatus: err.code || 13,
-							request: body,
-							response: { error: err.message },
-							durationMs: duration,
-						});
-
-						if (err.code === 3) {
-							return res.status(400).json({
-								error: "INVALID_ARGUMENT",
-								message: err.message || "Invalid agent or source",
-								agent_id: body.agent_id,
-								source_id: body.source_id,
-								requestId,
-							});
-						}
-						if (err.code === 6) {
-							return res.status(409).json({
-								error: "CONFLICT",
-								message: err.message || "Agreement already exists",
-								agent_id: body.agent_id,
-								source_id: body.source_id,
-								agreement_ref: body.agreement_ref,
-								requestId,
-							});
-						}
-						return next(err);
-					}
-
-					// Log successful agreement creation
-					await auditLog({
-						direction: "IN",
-						endpoint: "agreements.create",
-						requestId,
-						companyId: body.source_id,
-						sourceId: body.source_id,
-						agreementRef: body.agreement_ref,
-						httpStatus: 200,
-						request: body,
-						response: resp,
-						durationMs: duration,
+			const agreement = existingByRef
+				? await prisma.agreement.update({
+						where: { id: existingByRef.id },
+						data: {
+							agentId: body.agent_id,
+							accountNumber,
+							marginPercent,
+							contactName: body.contact_name,
+							contactEmail: body.contact_email,
+							validFrom,
+							validTo,
+							status: "ACTIVE",
+						},
+						include: {
+							agent: { select: companySummarySelect },
+							source: { select: companySummarySelect },
+						},
+					})
+				: await prisma.agreement.create({
+						data: {
+							agentId: body.agent_id,
+							sourceId,
+							agreementRef,
+							accountNumber,
+							marginPercent,
+							contactName: body.contact_name,
+							contactEmail: body.contact_email,
+							validFrom,
+							validTo,
+							status: "ACTIVE",
+						},
+						include: {
+							agent: { select: companySummarySelect },
+							source: { select: companySummarySelect },
+						},
 					});
 
-					// Send email notification for draft creation
-					try {
-						await notifyAgreementDrafted(resp.id);
-					} catch (emailErr) {
-						console.error("Failed to send draft notification:", emailErr);
-						// Don't fail the request if email fails
-					}
+			await auditLog({
+				direction: "IN",
+				endpoint: existingByRef
+					? "agreements.operational.update"
+					: "agreements.operational.create",
+				requestId,
+				companyId: sourceId,
+				sourceId,
+				agreementRef,
+				httpStatus: 200,
+				request: { ...body, account_number: accountNumber },
+				response: { id: agreement.id, status: agreement.status },
+				durationMs: Date.now() - startTime,
+			});
 
-					// Include warnings in response if duplicate detected
-					const response = toAgreementCamelCase(resp);
-					if (warnings.length > 0) {
-						(response as any).warnings = warnings;
-					}
-
-					res.json(response);
-				},
-			);
+			return res.json({
+				...toAgreementCamelCase(agreement),
+				message: existingByRef
+					? "Operational agreement updated"
+					: "Operational agreement registered",
+			});
 		} catch (e) {
 			next(e);
 		}
@@ -325,10 +328,9 @@ agreementsRouter.get(
 					};
 				}
 			} else if (req.user.type === "AGENT") {
-				// Agents should use /agreements/offers endpoint instead
 				return res.status(403).json({
 					error: "FORBIDDEN",
-					message: "Agents should use /agreements/offers endpoint",
+					message: "Agents should use /agreements?scope=agent",
 				});
 			}
 
@@ -340,6 +342,10 @@ agreementsRouter.get(
 					companyName: true,
 					email: true,
 					status: true,
+					companyCode: true,
+					companyAddress: true,
+					companyWebsiteUrl: true,
+					registrationBranchName: true,
 					createdAt: true,
 					updatedAt: true,
 					adapterType: true,
@@ -357,16 +363,16 @@ agreementsRouter.get(
 						select: {
 							id: true,
 							agreementRef: true,
+							accountNumber: true,
+							marginPercent: true,
+							contactName: true,
+							contactEmail: true,
 							status: true,
 							validFrom: true,
 							validTo: true,
 							sourceId: true,
 							source: {
-								select: {
-									id: true,
-									companyName: true,
-									status: true,
-								},
+								select: companySummarySelect,
 							},
 						},
 						orderBy: { createdAt: "desc" },
@@ -577,26 +583,8 @@ agreementsRouter.get(
 			const agreement = await prisma.agreement.findUnique({
 				where: { id },
 				include: {
-					agent: {
-						select: {
-							id: true,
-							companyName: true,
-							email: true,
-							type: true,
-							status: true,
-							companyCode: true,
-						},
-					},
-					source: {
-						select: {
-							id: true,
-							companyName: true,
-							email: true,
-							type: true,
-							status: true,
-							companyCode: true,
-						},
-					},
+					agent: { select: companySummarySelect },
+					source: { select: companySummarySelect },
 				},
 			});
 
@@ -944,219 +932,52 @@ agreementsRouter.get(
 				const agreements = await prisma.agreement.findMany({
 					where,
 					include: {
-						agent: {
-							select: {
-								id: true,
-								companyName: true,
-								type: true,
-								status: true,
-								email: true,
-							},
-						},
-						source: {
-							select: {
-								id: true,
-								companyName: true,
-								type: true,
-								status: true,
-								email: true,
-							},
-						},
+						agent: { select: companySummarySelect },
+						source: { select: companySummarySelect },
 					},
 					orderBy: { createdAt: "desc" },
 				});
 
 				return res.json({
-					items: agreements,
+					items: agreements.map(toAgreementCamelCase),
 					total: agreements.length,
 					scope: "all",
 					status: status || "all",
 				});
 			}
 
-			// Default behavior for non-admin users or when scope is specified
-			const defaultScope = scope || "agent";
-			const client = agreementClient();
-
+			// Default behavior for non-admin users or when scope is specified.
+			// Legal paperwork is offline; this endpoint returns the operational access rows.
+			const defaultScope =
+				scope || (req.user.type === "SOURCE" ? "source" : "agent");
+			const where: any = {};
+			if (status) where.status = status;
 			if (defaultScope === "source") {
-				// Set timeout for gRPC call (10 seconds)
-				const deadline = new Date();
-				deadline.setSeconds(deadline.getSeconds() + 10);
-
-				const call = client.ListBySource(
-					{ source_id: req.user.companyId, status },
-					metaFromReq(req),
-					{ deadline: deadline.getTime() },
-					(err: any, resp: any) => {
-						if (err) {
-							// Handle gRPC errors
-							const errorMessage = err.message || String(err);
-
-							// Check for timeout errors
-							if (
-								err.code === 4 ||
-								errorMessage.includes("DEADLINE_EXCEEDED") ||
-								errorMessage.includes("timeout")
-							) {
-								return res.status(504).json({
-									error: "GATEWAY_TIMEOUT",
-									message:
-										"Request timed out. The gRPC service did not respond in time.",
-									code: err.code || 4,
-									requestId: (req as any).requestId,
-									hint: "The backend service may be overloaded or the gRPC server is not responding.",
-								});
-							}
-
-							// Check for database configuration errors
-							if (
-								errorMessage.includes("DATABASE_URL") ||
-								errorMessage.includes("Environment variable not found")
-							) {
-								return res.status(503).json({
-									error: "DATABASE_CONFIG_ERROR",
-									message:
-										"Database configuration error: DATABASE_URL not found. Please check your .env file and restart the server.",
-									hint: "Format: mysql://username:password@host:port/database_name",
-									solution:
-										"1. Check your .env file has correct DATABASE_URL\n2. Restart the server: npm run dev\n3. Verify connection: npm run test:db",
-									requestId: (req as any).requestId,
-								});
-							}
-
-							// Check for database authentication errors
-							if (errorMessage.includes("Access denied")) {
-								return res.status(503).json({
-									error: "DATABASE_AUTH_ERROR",
-									message:
-										"Database authentication failed. Please check your DATABASE_URL in .env file and restart the server.",
-									requestId: (req as any).requestId,
-								});
-							}
-
-							// Generic gRPC error
-							return res.status(500).json({
-								error: "INTERNAL_ERROR",
-								message: errorMessage,
-								code: err.code || 13,
-								requestId: (req as any).requestId,
-							});
-						}
-						res.json({
-							items: resp.items.map(toAgreementCamelCase),
-							total: resp.items.length,
-						});
-					},
-				);
-
-				// Handle call cancellation on timeout (if call supports it)
-				const timeoutId1 = setTimeout(() => {
-					try {
-						if (call && typeof call.cancel === "function") {
-							call.cancel();
-						}
-					} catch (e) {
-						// Ignore cancellation errors
-					}
-				}, 10000);
-
-				// Clear timeout if response comes back
-				if (call && typeof call.on === "function") {
-					call.on("status", () => {
-						clearTimeout(timeoutId1);
-					});
-				}
+				if (req.user.role !== "ADMIN") where.sourceId = req.user.companyId;
+			} else if (defaultScope === "agent") {
+				if (req.user.role !== "ADMIN") where.agentId = req.user.companyId;
 			} else {
-				// Debug logging for agent agreements
-				// Set timeout for gRPC call (10 seconds)
-				const deadline = new Date();
-				deadline.setSeconds(deadline.getSeconds() + 10);
-
-				const call = client.ListByAgent(
-					{ agent_id: req.user.companyId, status },
-					metaFromReq(req),
-					{ deadline: deadline.getTime() },
-					(err: any, resp: any) => {
-						if (err) {
-							// Handle gRPC errors
-							const errorMessage = err.message || String(err);
-
-							// Check for timeout errors
-							if (
-								err.code === 4 ||
-								errorMessage.includes("DEADLINE_EXCEEDED") ||
-								errorMessage.includes("timeout")
-							) {
-								return res.status(504).json({
-									error: "GATEWAY_TIMEOUT",
-									message:
-										"Request timed out. The gRPC service did not respond in time.",
-									code: err.code || 4,
-									requestId: (req as any).requestId,
-									hint: "The backend service may be overloaded or the gRPC server is not responding.",
-								});
-							}
-
-							// Check for database configuration errors
-							if (
-								errorMessage.includes("DATABASE_URL") ||
-								errorMessage.includes("Environment variable not found")
-							) {
-								return res.status(503).json({
-									error: "DATABASE_CONFIG_ERROR",
-									message:
-										"Database configuration error: DATABASE_URL not found. Please check your .env file and restart the server.",
-									hint: "Format: mysql://username:password@host:port/database_name",
-									solution:
-										"1. Check your .env file has correct DATABASE_URL\n2. Restart the server: npm run dev\n3. Verify connection: npm run test:db",
-									requestId: (req as any).requestId,
-								});
-							}
-
-							// Check for database authentication errors
-							if (errorMessage.includes("Access denied")) {
-								return res.status(503).json({
-									error: "DATABASE_AUTH_ERROR",
-									message:
-										"Database authentication failed. Please check your DATABASE_URL in .env file and restart the server.",
-									requestId: (req as any).requestId,
-								});
-							}
-
-							// Generic gRPC error
-							return res.status(500).json({
-								error: "INTERNAL_ERROR",
-								message: errorMessage,
-								code: err.code || 13,
-								requestId: (req as any).requestId,
-							});
-						}
-
-						res.json({
-							items: resp.items.map(toAgreementCamelCase),
-							total: resp.items.length,
-						});
-					},
-				);
-
-				// Handle call cancellation on timeout (if call supports it)
-				const timeoutId2 = setTimeout(() => {
-					try {
-						if (call && typeof call.cancel === "function") {
-							call.cancel();
-						}
-					} catch (e) {
-						// Ignore cancellation errors
-					}
-				}, 10000);
-
-				// Clear timeout if response comes back
-				if (call && typeof call.on === "function") {
-					call.on("status", () => {
-						clearTimeout(timeoutId2);
-					});
-				}
+				return res.status(400).json({
+					error: "BAD_REQUEST",
+					message: "scope must be agent or source",
+				});
 			}
+
+			const agreements = await prisma.agreement.findMany({
+				where,
+				include: {
+					agent: { select: companySummarySelect },
+					source: { select: companySummarySelect },
+				},
+				orderBy: { createdAt: "desc" },
+			});
+
+			return res.json({
+				items: agreements.map(toAgreementCamelCase),
+				total: agreements.length,
+				scope: defaultScope,
+				status: status || "all",
+			});
 		} catch (e) {
 			next(e);
 		}
@@ -1180,24 +1001,22 @@ agreementsRouter.get(
 	requireCompanyType("AGENT"),
 	async (req: any, res, next) => {
 		try {
-			const status = req.query.status ? String(req.query.status) : "";
-
-			// Debug logging
-
-			const client = agreementClient();
-			client.ListByAgent(
-				{ agent_id: req.user.companyId, status },
-				metaFromReq(req),
-				(err: any, resp: any) => {
-					if (err) {
-						return next(err);
-					}
-					res.json({
-						items: resp.items.map(toAgreementCamelCase),
-						total: resp.items.length,
-					});
+			const status = req.query.status ? String(req.query.status) : "OFFERED";
+			const agreements = await prisma.agreement.findMany({
+				where: {
+					agentId: req.user.companyId,
+					...(status ? { status: status as any } : {}),
 				},
-			);
+				include: {
+					agent: { select: companySummarySelect },
+					source: { select: companySummarySelect },
+				},
+				orderBy: { createdAt: "desc" },
+			});
+			res.json({
+				items: agreements.map(toAgreementCamelCase),
+				total: agreements.length,
+			});
 		} catch (e) {
 			next(e);
 		}
@@ -1559,6 +1378,10 @@ agreementsRouter.get(
 					select: {
 						id: true,
 						agreementRef: true,
+						accountNumber: true,
+						marginPercent: true,
+						contactName: true,
+						contactEmail: true,
 						status: true,
 						validFrom: true,
 						validTo: true,
@@ -1618,6 +1441,10 @@ agreementsRouter.get(
 					acc[ag.sourceId].push({
 						id: ag.id,
 						agreementRef: ag.agreementRef,
+						accountNumber: ag.accountNumber,
+						marginPercent: ag.marginPercent,
+						contactName: ag.contactName,
+						contactEmail: ag.contactEmail,
 						status: ag.status,
 						validFrom: ag.validFrom,
 						validTo: ag.validTo,
@@ -1777,12 +1604,10 @@ agreementsRouter.post(
       LIMIT 1
     `;
 			if (exists.length > 0) {
-				return res
-					.status(409)
-					.json({
-						error: "GROUP_NAME_EXISTS",
-						message: "A group with this name already exists",
-					});
+				return res.status(409).json({
+					error: "GROUP_NAME_EXISTS",
+					message: "A group with this name already exists",
+				});
 			}
 			const id = `asg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 			await prisma.$executeRaw`
@@ -1798,12 +1623,10 @@ agreementsRouter.post(
 			return res.status(201).json(created[0]);
 		} catch (e: any) {
 			if (e?.code === "P2002") {
-				return res
-					.status(409)
-					.json({
-						error: "GROUP_NAME_EXISTS",
-						message: "A group with this name already exists",
-					});
+				return res.status(409).json({
+					error: "GROUP_NAME_EXISTS",
+					message: "A group with this name already exists",
+				});
 			}
 			next(e);
 		}
@@ -1852,12 +1675,10 @@ agreementsRouter.patch(
       LIMIT 1
     `;
 			if (dup.length > 0) {
-				return res
-					.status(409)
-					.json({
-						error: "GROUP_NAME_EXISTS",
-						message: "A group with this name already exists",
-					});
+				return res.status(409).json({
+					error: "GROUP_NAME_EXISTS",
+					message: "A group with this name already exists",
+				});
 			}
 			await prisma.$executeRaw`
       UPDATE \`AgentSourceGroup\`
@@ -1873,12 +1694,10 @@ agreementsRouter.patch(
 			return res.json(updated[0]);
 		} catch (e: any) {
 			if (e?.code === "P2002") {
-				return res
-					.status(409)
-					.json({
-						error: "GROUP_NAME_EXISTS",
-						message: "A group with this name already exists",
-					});
+				return res.status(409).json({
+					error: "GROUP_NAME_EXISTS",
+					message: "A group with this name already exists",
+				});
 			}
 			next(e);
 		}
@@ -1961,12 +1780,10 @@ agreementsRouter.post(
 				select: { id: true, agentId: true },
 			});
 			if (!agreement || agreement.agentId !== agentId) {
-				return res
-					.status(404)
-					.json({
-						error: "AGREEMENT_NOT_FOUND",
-						message: "Agreement not found for this agent",
-					});
+				return res.status(404).json({
+					error: "AGREEMENT_NOT_FOUND",
+					message: "Agreement not found for this agent",
+				});
 			}
 
 			if (sourceGroupAgreementDelegate?.create) {
@@ -1984,12 +1801,10 @@ agreementsRouter.post(
       LIMIT 1
     `;
 			if (existing.length > 0) {
-				return res
-					.status(409)
-					.json({
-						error: "AGREEMENT_ALREADY_ATTACHED",
-						message: "Agreement already attached to group",
-					});
+				return res.status(409).json({
+					error: "AGREEMENT_ALREADY_ATTACHED",
+					message: "Agreement already attached to group",
+				});
 			}
 			const id = `asga_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 			await prisma.$executeRaw`
@@ -2005,12 +1820,10 @@ agreementsRouter.post(
 			return res.status(201).json(row[0]);
 		} catch (e: any) {
 			if (e?.code === "P2002") {
-				return res
-					.status(409)
-					.json({
-						error: "AGREEMENT_ALREADY_ATTACHED",
-						message: "Agreement already attached to group",
-					});
+				return res.status(409).json({
+					error: "AGREEMENT_ALREADY_ATTACHED",
+					message: "Agreement already attached to group",
+				});
 			}
 			next(e);
 		}

@@ -310,6 +310,13 @@ model Agreement {
   agentId      String
   sourceId     String
   agreementRef String
+  /// Supplier-assigned account/requester id sent to the Source availability API as RequestorID.
+  accountNumber String?
+  /// Agent markup to add to supplier price before showing offers to agents/customers.
+  marginPercent Float           @default(0)
+  /// Commercial contact for the offline legal agreement.
+  contactName   String?
+  contactEmail  String?
   status       AgreementStatus @default(DRAFT)
   validFrom    DateTime?
   validTo      DateTime?
@@ -322,6 +329,7 @@ model Agreement {
   groupMemberships  AgentSourceGroupAgreement[]
 
   @@unique([sourceId, agreementRef])
+  @@index([sourceId, accountNumber])
   @@index([agentId, status, createdAt])
   @@index([sourceId, status, createdAt])
 }
