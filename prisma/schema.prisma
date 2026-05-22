@@ -317,6 +317,7 @@ model Agreement {
   /// Commercial contact for the offline legal agreement.
   contactName   String?
   contactEmail  String?
+  contactPhone  String?
   status       AgreementStatus @default(DRAFT)
   validFrom    DateTime?
   validTo      DateTime?
