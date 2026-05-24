@@ -195,6 +195,7 @@ model Company {
   sourceSubscriptions SourceSubscription[]
   availabilitySamples SourceAvailabilitySample[]
   sourceDailyRates SourceDailyRate[]
+  sourceFleets         SourceFleet[]
   sourceGroups AgentSourceGroup[] @relation("AgentSourceGroups")
   agentSubscription AgentSubscription?
 
@@ -616,12 +617,47 @@ model Branch {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  source Company @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  source     Company             @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  fleetLinks SourceFleetBranch[]
 
   @@unique([sourceId, branchCode])
   @@index([sourceId])
   @@index([agreementId])
   @@index([natoLocode])
+}
+
+/// Logical vehicle pool for a rental company (e.g. airport fleet, economy cars).
+model SourceFleet {
+  id          String   @id @default(cuid())
+  sourceId    String
+  fleetCode   String
+  name        String
+  description String?  @db.Text
+  status      String   @default("ACTIVE")
+  /// Typical ACRISS categories on this fleet — JSON string array
+  acrissCodes Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  source   Company             @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  branches SourceFleetBranch[]
+
+  @@unique([sourceId, fleetCode])
+  @@index([sourceId])
+}
+
+/// Branches where a fleet is offered (many branches per fleet).
+model SourceFleetBranch {
+  id       String @id @default(cuid())
+  fleetId  String
+  branchId String
+
+  fleet  SourceFleet @relation(fields: [fleetId], references: [id], onDelete: Cascade)
+  branch Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([fleetId, branchId])
+  @@index([fleetId])
+  @@index([branchId])
 }
 
 // Echo PoC models for Submit+Poll pattern

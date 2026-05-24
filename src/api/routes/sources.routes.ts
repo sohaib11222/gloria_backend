@@ -1689,6 +1689,259 @@ sourcesRouter.get(
 	},
 );
 
+const fleetInclude = {
+	branches: {
+		include: {
+			branch: {
+				select: {
+					id: true,
+					branchCode: true,
+					name: true,
+					status: true,
+				},
+			},
+		},
+	},
+} as const;
+
+function serializeSourceFleet(row: {
+	id: string;
+	fleetCode: string;
+	name: string;
+	description: string | null;
+	status: string;
+	acrissCodes: unknown;
+	createdAt: Date;
+	updatedAt: Date;
+	branches: Array<{
+		branch: {
+			id: string;
+			branchCode: string;
+			name: string;
+			status: string | null;
+		};
+	}>;
+}) {
+	const acrissRaw = row.acrissCodes;
+	const acrissCodes = Array.isArray(acrissRaw)
+		? acrissRaw.map((c) => String(c).trim().toUpperCase()).filter(Boolean)
+		: [];
+	return {
+		id: row.id,
+		fleetCode: row.fleetCode,
+		name: row.name,
+		description: row.description,
+		status: row.status,
+		acrissCodes,
+		branches: row.branches.map((b) => ({
+			id: b.branch.id,
+			branchCode: b.branch.branchCode,
+			name: b.branch.name,
+			status: b.branch.status,
+		})),
+		createdAt: row.createdAt,
+		updatedAt: row.updatedAt,
+	};
+}
+
+const createFleetSchema = z.object({
+	fleetCode: z
+		.string()
+		.trim()
+		.min(1)
+		.max(32)
+		.transform((s) => s.toUpperCase()),
+	name: z.string().trim().min(1).max(120),
+	description: z.string().max(2000).optional(),
+	acrissCodes: z.array(z.string().trim().min(1).max(16)).max(50).optional(),
+	branchIds: z.array(z.string().trim().min(1)).max(500).optional(),
+});
+
+const updateFleetSchema = z.object({
+	name: z.string().trim().min(1).max(120).optional(),
+	description: z.string().max(2000).nullable().optional(),
+	status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+	acrissCodes: z.array(z.string().trim().min(1).max(16)).max(50).optional(),
+	branchIds: z.array(z.string().trim().min(1)).max(500).optional(),
+});
+
+async function replaceFleetBranches(
+	fleetId: string,
+	sourceId: string,
+	branchIds: string[],
+) {
+	const uniqueIds = [...new Set(branchIds)];
+	if (uniqueIds.length === 0) {
+		await prisma.sourceFleetBranch.deleteMany({ where: { fleetId } });
+		return;
+	}
+	const branches = await prisma.branch.findMany({
+		where: { sourceId, id: { in: uniqueIds } },
+		select: { id: true },
+	});
+	if (branches.length !== uniqueIds.length) {
+		throw Object.assign(new Error("One or more branches not found"), {
+			statusCode: 400,
+			code: "INVALID_BRANCH_IDS",
+		});
+	}
+	await prisma.$transaction([
+		prisma.sourceFleetBranch.deleteMany({ where: { fleetId } }),
+		prisma.sourceFleetBranch.createMany({
+			data: uniqueIds.map((branchId) => ({ fleetId, branchId })),
+		}),
+	]);
+}
+
+sourcesRouter.get(
+	"/sources/fleets",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const rows = await prisma.sourceFleet.findMany({
+				where: { sourceId },
+				orderBy: { name: "asc" },
+				include: fleetInclude,
+			});
+			res.json({
+				items: rows.map(serializeSourceFleet),
+				total: rows.length,
+			});
+		} catch (e) {
+			next(e);
+		}
+	},
+);
+
+sourcesRouter.post(
+	"/sources/fleets",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const body = createFleetSchema.parse(req.body ?? {});
+			const acrissCodes = (body.acrissCodes ?? []).map((c) =>
+				c.trim().toUpperCase(),
+			);
+			const created = await prisma.sourceFleet.create({
+				data: {
+					sourceId,
+					fleetCode: body.fleetCode,
+					name: body.name,
+					description: body.description?.trim() || null,
+					acrissCodes: acrissCodes.length ? acrissCodes : undefined,
+				},
+				include: fleetInclude,
+			});
+			if (body.branchIds?.length) {
+				await replaceFleetBranches(created.id, sourceId, body.branchIds);
+			}
+			const full = await prisma.sourceFleet.findUniqueOrThrow({
+				where: { id: created.id },
+				include: fleetInclude,
+			});
+			res.status(201).json(serializeSourceFleet(full));
+		} catch (e: any) {
+			if (e?.code === "P2002") {
+				return res.status(409).json({
+					error: "FLEET_CODE_EXISTS",
+					message: "A fleet with this code already exists",
+				});
+			}
+			if (e?.code === "INVALID_BRANCH_IDS") {
+				return res.status(400).json({
+					error: e.code,
+					message: e.message,
+				});
+			}
+			next(e);
+		}
+	},
+);
+
+sourcesRouter.patch(
+	"/sources/fleets/:id",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const { id } = req.params;
+			const body = updateFleetSchema.parse(req.body ?? {});
+			const existing = await prisma.sourceFleet.findFirst({
+				where: { id, sourceId },
+			});
+			if (!existing) {
+				return res.status(404).json({
+					error: "FLEET_NOT_FOUND",
+					message: "Fleet not found",
+				});
+			}
+			const acrissCodes =
+				body.acrissCodes !== undefined
+					? body.acrissCodes.map((c) => c.trim().toUpperCase())
+					: undefined;
+			await prisma.sourceFleet.update({
+				where: { id },
+				data: {
+					...(body.name !== undefined ? { name: body.name } : {}),
+					...(body.description !== undefined
+						? { description: body.description?.trim() || null }
+						: {}),
+					...(body.status !== undefined ? { status: body.status } : {}),
+					...(acrissCodes !== undefined
+						? { acrissCodes: acrissCodes.length ? acrissCodes : [] }
+						: {}),
+				},
+			});
+			if (body.branchIds !== undefined) {
+				await replaceFleetBranches(id, sourceId, body.branchIds);
+			}
+			const full = await prisma.sourceFleet.findUniqueOrThrow({
+				where: { id },
+				include: fleetInclude,
+			});
+			res.json(serializeSourceFleet(full));
+		} catch (e: any) {
+			if (e?.code === "INVALID_BRANCH_IDS") {
+				return res.status(400).json({
+					error: e.code,
+					message: e.message,
+				});
+			}
+			next(e);
+		}
+	},
+);
+
+sourcesRouter.delete(
+	"/sources/fleets/:id",
+	requireAuth(),
+	requireCompanyType("SOURCE"),
+	async (req: any, res, next) => {
+		try {
+			const sourceId = req.user.companyId;
+			const { id } = req.params;
+			const existing = await prisma.sourceFleet.findFirst({
+				where: { id, sourceId },
+			});
+			if (!existing) {
+				return res.status(404).json({
+					error: "FLEET_NOT_FOUND",
+					message: "Fleet not found",
+				});
+			}
+			await prisma.sourceFleet.delete({ where: { id } });
+			res.json({ message: "Fleet deleted" });
+		} catch (e) {
+			next(e);
+		}
+	},
+);
+
 /**
  * @openapi
  * /sources/import-branches:
@@ -5536,6 +5789,9 @@ const manualAvailabilityBodySchema = z
 		/** Terms.Item[] — stored as JSON (nested structures preserved) */
 		terms: z.array(z.any()).max(200).optional(),
 		force: z.boolean().optional(),
+		fleet_id: z.string().trim().min(1).optional(),
+		fleet_code: z.string().trim().max(32).optional(),
+		fleet_branch_codes: z.array(z.string().trim().min(1).max(32)).max(500).optional(),
 	})
 	.superRefine((data, ctx) => {
 		const pg = data.pricing;
@@ -5869,6 +6125,32 @@ sourcesRouter.post(
 			const returnLoc = body.returnLoc.trim().toUpperCase();
 			const pickupIso = body.pickupIso.trim();
 			const returnIso = body.returnIso.trim();
+
+			if (body.fleet_id) {
+				const fleet = await prisma.sourceFleet.findFirst({
+					where: { id: body.fleet_id, sourceId },
+					include: fleetInclude,
+				});
+				if (!fleet) {
+					return res.status(400).json({
+						error: "FLEET_NOT_FOUND",
+						message: "Selected fleet was not found",
+					});
+				}
+				const fleetCodes = fleet.branches.map((b) =>
+					b.branch.branchCode.toUpperCase(),
+				);
+				if (fleetCodes.length > 0) {
+					if (!fleetCodes.includes(pickupLoc) || !fleetCodes.includes(returnLoc)) {
+						return res.status(400).json({
+							error: "BRANCH_NOT_IN_FLEET",
+							message:
+								"Pick-up and return branches must be attached to the selected fleet",
+							details: { fleetBranchCodes: fleetCodes },
+						});
+					}
+				}
+			}
 			const requestorId = (
 				body.requestorId ||
 				source.locationListAccountId ||
@@ -6129,6 +6411,15 @@ sourcesRouter.post(
 				driverAge,
 				citizenCountry,
 				adapterType,
+				...(body.fleet_id
+					? {
+							fleetId: body.fleet_id,
+							fleetCode: body.fleet_code?.trim().toUpperCase(),
+							fleetBranchCodes: body.fleet_branch_codes?.map((c) =>
+								c.trim().toUpperCase(),
+							),
+						}
+					: {}),
 			};
 
 			const manualPayloadSnapshot = {
@@ -6144,6 +6435,9 @@ sourcesRouter.post(
 				extras: body.extras ?? null,
 				terms: body.terms ?? null,
 				response_meta: body.response_meta ?? null,
+				fleet_id: body.fleet_id ?? null,
+				fleet_code: body.fleet_code ?? null,
+				fleet_branch_codes: body.fleet_branch_codes ?? null,
 			};
 			const manualDataFingerprint = crypto
 				.createHash("sha256")
