@@ -65,16 +65,16 @@ enum SubscriptionStatus {
 }
 
 model Plan {
-  id                   String        @id @default(cuid())
-  name                 String        // e.g. "Weekly", "Monthly", "Yearly"
-  interval             PlanInterval
-  stripePriceId        String?       // Stripe Price ID for checkout (per-branch price)
-  amountCents          Int           // Base price in cents (legacy; can be 0)
-  pricePerBranchCents  Int           // Price per branch per interval (cents)
-  branchLimit          Int           // 0 = unlimited / use subscription quantity
-  active               Boolean       @default(true)
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  id                  String       @id @default(cuid())
+  name                String // e.g. "Weekly", "Monthly", "Yearly"
+  interval            PlanInterval
+  stripePriceId       String? // Stripe Price ID for checkout (per-branch price)
+  amountCents         Int // Base price in cents (legacy; can be 0)
+  pricePerBranchCents Int // Price per branch per interval (cents)
+  branchLimit         Int // 0 = unlimited / use subscription quantity
+  active              Boolean      @default(true)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
   sourceSubscriptions SourceSubscription[]
 
@@ -83,14 +83,14 @@ model Plan {
 
 model SourceSubscription {
   id                    String             @id @default(cuid())
-  sourceId              String             // Company (type SOURCE)
+  sourceId              String // Company (type SOURCE)
   planId                String
   stripeCustomerId      String?
   stripeSubscriptionId  String?
   subscribedBranchCount Int                @default(1) // Synced from Stripe subscription item quantity
   status                SubscriptionStatus @default(active)
   currentPeriodStart    DateTime?
-  currentPeriodEnd      DateTime?          // Expiry
+  currentPeriodEnd      DateTime? // Expiry
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 
@@ -105,14 +105,14 @@ model SourceSubscription {
 
 /// Admin-created referral slug; companies created via /auth/register may reference one.
 model ReferralLink {
-  id             String        @id @default(cuid())
-  slug           String        @unique
-  label          String?       @db.VarChar(255)
+  id             String       @id @default(cuid())
+  slug           String       @unique
+  label          String?      @db.VarChar(255)
   /// When set, only that company type may register with this link; when null, both AGENT and SOURCE are allowed.
   restrictToType CompanyType?
-  active         Boolean       @default(true)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
   companies      Company[]
 
   @@index([slug])
@@ -120,22 +120,22 @@ model ReferralLink {
 }
 
 model Company {
-  id           String        @id @default(cuid())
-  companyName  String
+  id                     String        @id @default(cuid())
+  companyName            String
   /// Primary / flagship branch name at SOURCE self-registration (admin review)
   registrationBranchName String?
   /// Postal / street address from SOURCE registration
-  companyAddress        String? @db.Text
+  companyAddress         String?       @db.Text
   /// Public company website (https://…), from SOURCE registration
-  companyWebsiteUrl     String?
+  companyWebsiteUrl      String?
   /// Optional photo uploaded at SOURCE self-registration (stored under uploads/, path like /uploads/registration-photos/…)
-  registrationPhotoUrl String?
-  type         CompanyType
-  email        String        @unique
-  passwordHash String
-  status       CompanyStatus @default(PENDING_VERIFICATION)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  registrationPhotoUrl   String?
+  type                   CompanyType
+  email                  String        @unique
+  passwordHash           String
+  status                 CompanyStatus @default(PENDING_VERIFICATION)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
 
   // Email verification fields
   emailVerified   Boolean   @default(false)
@@ -152,18 +152,18 @@ model Company {
   whitelistedDomains String? @db.Text // Comma-separated domains/IPs
 
   // Adapter configuration for Sources
-  adapterType  String? // "mock" | "grpc" (or future "http") - must be explicitly set, no default
-  grpcEndpoint String?
-  httpEndpoint String? // Optional HTTP endpoint for JSON fallback/test
-  branchEndpointUrl String? // Branch import endpoint URL (supports XML, JSON, PHP, CSV, Excel)
-  branchEndpointFormat String? // "XML" | "JSON" | "PHP" | "CSV" | "EXCEL" - response/upload format
+  adapterType              String? // "mock" | "grpc" (or future "http") - must be explicitly set, no default
+  grpcEndpoint             String?
+  httpEndpoint             String? // Optional HTTP endpoint for JSON fallback/test
+  branchEndpointUrl        String? // Branch import endpoint URL (supports XML, JSON, PHP, CSV, Excel)
+  branchEndpointFormat     String? // "XML" | "JSON" | "PHP" | "CSV" | "EXCEL" - response/upload format
   branchDefaultCountryCode String? // ISO country code (e.g. AE, US) for mapping branches to countries
-  locationEndpointUrl String? // Location import endpoint URL (supports XML and JSON)
-  locationListEndpointUrl String? // Location list endpoint URL (POST XML with configurable root, e.g. GLORIA_locationlistrq)
-  locationListRequestRoot String? // Request root element name (e.g. GLORIA_locationlistrq); response root derived as ...rs
-  locationListAccountId String? // Account ID for request template (e.g. 1000097)
-  locationListTransport   String? // "http" | "grpc" — Location & Branches import: POST XML vs SourceProviderService.GetLocations
-  availabilityEndpointUrl String? // Availability/pricing endpoint URL (OTA VehAvailRS JSON)
+  locationEndpointUrl      String? // Location import endpoint URL (supports XML and JSON)
+  locationListEndpointUrl  String? // Location list endpoint URL (POST XML with configurable root, e.g. GLORIA_locationlistrq)
+  locationListRequestRoot  String? // Request root element name (e.g. GLORIA_locationlistrq); response root derived as ...rs
+  locationListAccountId    String? // Account ID for request template (e.g. 1000097)
+  locationListTransport    String? // "http" | "grpc" — Location & Branches import: POST XML vs SourceProviderService.GetLocations
+  availabilityEndpointUrl  String? // Availability/pricing endpoint URL (OTA VehAvailRS JSON)
 
   // TLS/mTLS configuration for gRPC (JSON)
   tlsProfile Json?
@@ -184,35 +184,35 @@ model Company {
   referralLinkId String?
   referralLink   ReferralLink? @relation(fields: [referralLinkId], references: [id], onDelete: SetNull)
 
-  users            User[]
-  agentAgreements  Agreement[]       @relation("AgentAgreements")
-  sourceAgreements Agreement[]       @relation("SourceAgreements")
-  sourceLocations  SourceLocation[]
-  branches         Branch[]
-  echoJobs         EchoJob[]
-  locationRequests LocationRequest[]
-  createdTickets   SupportTicket[]   @relation("CreatedTickets")
+  users               User[]
+  agentAgreements     Agreement[]                @relation("AgentAgreements")
+  sourceAgreements    Agreement[]                @relation("SourceAgreements")
+  sourceLocations     SourceLocation[]
+  branches            Branch[]
+  echoJobs            EchoJob[]
+  locationRequests    LocationRequest[]
+  createdTickets      SupportTicket[]            @relation("CreatedTickets")
   sourceSubscriptions SourceSubscription[]
   availabilitySamples SourceAvailabilitySample[]
-  sourceDailyRates SourceDailyRate[]
-  sourceFleets         SourceFleet[]
-  sourceGroups AgentSourceGroup[] @relation("AgentSourceGroups")
-  agentSubscription AgentSubscription?
+  sourceDailyRates    SourceDailyRate[]
+  sourceFleets        SourceFleet[]
+  sourceGroups        AgentSourceGroup[]         @relation("AgentSourceGroups")
+  agentSubscription   AgentSubscription?
 
   @@index([referralLinkId])
 }
 
 model AgentPlan {
-  id                   String   @id @default(cuid())
-  name                 String
-  interval             PlanInterval
-  branchLimit          Int      @default(0) // 0 = unlimited
-  defaultPriceCents    Int      @default(0) // fallback when no country override
-  active               Boolean  @default(true)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id                String       @id @default(cuid())
+  name              String
+  interval          PlanInterval
+  branchLimit       Int          @default(0) // 0 = unlimited
+  defaultPriceCents Int          @default(0) // fallback when no country override
+  active            Boolean      @default(true)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
-  countryPrices   AgentPlanCountryPrice[]
+  countryPrices      AgentPlanCountryPrice[]
   agentSubscriptions AgentSubscription[]
 
   @@index([active])
@@ -221,7 +221,7 @@ model AgentPlan {
 model AgentPlanCountryPrice {
   id                  String   @id @default(cuid())
   agentPlanId         String
-  countryCode         String   // e.g. IN, US
+  countryCode         String // e.g. IN, US
   pricePerBranchCents Int
   stripePriceId       String?
   createdAt           DateTime @default(now())
@@ -246,7 +246,7 @@ model AgentSubscription {
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 
-  agent    Company    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent     Company   @relation(fields: [agentId], references: [id], onDelete: Cascade)
   agentPlan AgentPlan @relation(fields: [agentPlanId], references: [id], onDelete: Restrict)
 
   @@unique([agentId])
@@ -256,17 +256,17 @@ model AgentSubscription {
 }
 
 model SourceAvailabilitySample {
-  id          String   @id @default(cuid())
-  sourceId    String
-  criteriaHash String  // hash of pickup+return+locations for dedupe
-  pickupIso   String?
-  returnIso   String?
-  pickupLoc   String?
-  returnLoc   String?
-  offersCount Int      @default(0)
-  sampleJson  Json?    // parsed offers summary or raw response snippet
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(cuid())
+  sourceId     String
+  criteriaHash String // hash of pickup+return+locations for dedupe
+  pickupIso    String?
+  returnIso    String?
+  pickupLoc    String?
+  returnLoc    String?
+  offersCount  Int      @default(0)
+  sampleJson   Json? // parsed offers summary or raw response snippet
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   source Company @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 
@@ -307,10 +307,10 @@ model User {
 }
 
 model Agreement {
-  id           String          @id @default(cuid())
-  agentId      String
-  sourceId     String
-  agreementRef String
+  id            String          @id @default(cuid())
+  agentId       String
+  sourceId      String
+  agreementRef  String
   /// Supplier-assigned account/requester id sent to the Source availability API as RequestorID.
   accountNumber String?
   /// Agent markup to add to supplier price before showing offers to agents/customers.
@@ -319,11 +319,11 @@ model Agreement {
   contactName   String?
   contactEmail  String?
   contactPhone  String?
-  status       AgreementStatus @default(DRAFT)
-  validFrom    DateTime?
-  validTo      DateTime?
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  status        AgreementStatus @default(DRAFT)
+  validFrom     DateTime?
+  validTo       DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 
   agent             Company                     @relation("AgentAgreements", fields: [agentId], references: [id], onDelete: Cascade)
   source            Company                     @relation("SourceAgreements", fields: [sourceId], references: [id], onDelete: Cascade)
@@ -343,7 +343,7 @@ model AgentSourceGroup {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  agent      Company                    @relation("AgentSourceGroups", fields: [agentId], references: [id], onDelete: Cascade)
+  agent      Company                     @relation("AgentSourceGroups", fields: [agentId], references: [id], onDelete: Cascade)
   agreements AgentSourceGroupAgreement[]
 
   @@unique([agentId, name])
@@ -379,7 +379,7 @@ model UNLocode {
 }
 
 model SourceLocation {
-  id       String @id @default(cuid())
+  id       String  @id @default(cuid())
   sourceId String
   unlocode String
   isMock   Boolean @default(false) // Indicates if location was synced from a mock adapter (test data)
@@ -432,38 +432,38 @@ model AvailabilityResult {
 }
 
 model Booking {
-  id                     String        @id @default(cuid())
-  agentId                String
-  sourceId               String
-  agreementRef           String
-  supplierBookingRef     String?
-  agentBookingRef        String?
-  idempotencyKey         String?
-  status                 BookingStatus @default(REQUESTED)
-  payloadJson            Json?
-  
+  id                 String        @id @default(cuid())
+  agentId            String
+  sourceId           String
+  agreementRef       String
+  supplierBookingRef String?
+  agentBookingRef    String?
+  idempotencyKey     String?
+  status             BookingStatus @default(REQUESTED)
+  payloadJson        Json?
+
   // Availability context (links booking to original search)
-  availabilityRequestId  String?       // Links to AvailabilityJob.requestId
-  
+  availabilityRequestId String? // Links to AvailabilityJob.requestId
+
   // Location details (from availability search)
-  pickupUnlocode         String?
-  dropoffUnlocode        String?
-  pickupDateTime         DateTime?
-  dropoffDateTime        DateTime?
-  
+  pickupUnlocode  String?
+  dropoffUnlocode String?
+  pickupDateTime  DateTime?
+  dropoffDateTime DateTime?
+
   // Vehicle and driver details (from availability search/offer)
-  vehicleClass           String?
-  vehicleMakeModel       String?
-  ratePlanCode           String?
-  driverAge              Int?
-  residencyCountry       String?       // ISO 3166-1 alpha-2
-  
+  vehicleClass     String?
+  vehicleMakeModel String?
+  ratePlanCode     String?
+  driverAge        Int?
+  residencyCountry String? // ISO 3166-1 alpha-2
+
   // Customer and payment information (JSON fields for flexibility)
-  customerInfoJson       Json?         // Customer name, contact details, etc.
-  paymentInfoJson        Json?         // Payment details, card info, etc.
-  
-  createdAt              DateTime      @default(now())
-  updatedAt              DateTime      @updatedAt
+  customerInfoJson Json? // Customer name, contact details, etc.
+  paymentInfoJson  Json? // Payment details, card info, etc.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([agentId, idempotencyKey])
   @@index([agentId, agreementRef, createdAt])
@@ -472,16 +472,16 @@ model Booking {
 }
 
 model BookingHistory {
-  id            String   @id @default(cuid())
-  bookingId     String
-  eventType     String   // CREATED, MODIFIED, CANCELLED, STATUS_CHANGED
-  changes       Json?    // Field-level changes: { field: { before, after } }
-  beforeState   Json?    // Snapshot of booking before change
-  afterState    Json?    // Snapshot of booking after change
-  userId        String?  // User/company ID who made the change
-  source        String?  // Source of change: AGENT, SOURCE, SYSTEM, ADMIN
-  metadata      Json?    // Additional metadata (reason, notes, etc.)
-  timestamp     DateTime @default(now())
+  id          String   @id @default(cuid())
+  bookingId   String
+  eventType   String // CREATED, MODIFIED, CANCELLED, STATUS_CHANGED
+  changes     Json? // Field-level changes: { field: { before, after } }
+  beforeState Json? // Snapshot of booking before change
+  afterState  Json? // Snapshot of booking after change
+  userId      String? // User/company ID who made the change
+  source      String? // Source of change: AGENT, SOURCE, SYSTEM, ADMIN
+  metadata    Json? // Additional metadata (reason, notes, etc.)
+  timestamp   DateTime @default(now())
 
   @@index([bookingId, timestamp])
   @@index([bookingId, eventType])
@@ -727,7 +727,7 @@ model SmtpConfig {
   port      Int      @default(587)
   secure    Boolean  @default(false) // true for TLS/SSL (port 465), false for STARTTLS (port 587)
   user      String
-  password  String   // Encrypted or plain (admin's choice)
+  password  String // Encrypted or plain (admin's choice)
   fromEmail String   @default("no-reply@carhire.local")
   fromName  String?  @default("Car Hire Middleware")
   enabled   Boolean  @default(true)
@@ -755,9 +755,9 @@ model SupportTicket {
   id          String              @id @default(cuid())
   title       String
   status      SupportTicketStatus @default(OPEN)
-  createdById String              // Company ID of creator (Agent or Source)
+  createdById String // Company ID of creator (Agent or Source)
   createdBy   Company             @relation("CreatedTickets", fields: [createdById], references: [id], onDelete: Cascade)
-  assignedTo  String?             // Admin user ID (optional)
+  assignedTo  String? // Admin user ID (optional)
   createdAt   DateTime            @default(now())
   updatedAt   DateTime            @updatedAt
   messages    SupportMessage[]
@@ -768,15 +768,15 @@ model SupportTicket {
 }
 
 model SupportMessage {
-  id          String            @id @default(cuid())
-  ticketId    String
-  ticket      SupportTicket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  senderId    String            // Company ID or Admin user ID
-  senderType  MessageSenderType
-  content     String?           @db.Text
-  imageUrl    String?           @db.LongText // Base64 data URLs exceed MySQL TEXT (64KB); multer allows up to 5MB files
-  readAt      DateTime?
-  createdAt   DateTime          @default(now())
+  id         String            @id @default(cuid())
+  ticketId   String
+  ticket     SupportTicket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderId   String // Company ID or Admin user ID
+  senderType MessageSenderType
+  content    String?           @db.Text
+  imageUrl   String?           @db.LongText // Base64 data URLs exceed MySQL TEXT (64KB); multer allows up to 5MB files
+  readAt     DateTime?
+  createdAt  DateTime          @default(now())
 
   @@index([ticketId, createdAt])
   @@index([senderId, createdAt])
