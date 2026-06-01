@@ -44,7 +44,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
-    "nodemailer": "^7.0.9",
+    "nodemailer": "^8.0.9",
     "p-limit": "^7.1.1",
     "pino": "^9.3.2",
     "pino-http": "^11.0.0",
@@ -52,7 +52,7 @@
     "stripe": "^17.7.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "uuid": "^9.0.1",
+    "uuid": "^14.0.0",
     "xlsx": "^0.18.5",
     "xmlbuilder2": "^4.0.3",
     "zod": "^3.23.8"
