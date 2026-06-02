@@ -206,6 +206,45 @@ export function convertPhpVarDumpToVehAvailRS(phpText: string): any {
  * Parse PHP var_dump text into a generic JS object.
  * Useful for non-OTA trees (e.g. GLORIA_availabilityrs with VehAvairsdetails/availcars).
  */
+/**
+ * av.php and similar endpoints often return `var_dump($xmlString)` — a PHP string dump
+ * wrapping raw XML, not a parsed array tree. Extract inner XML (or return text unchanged).
+ *
+ * Important: inner XML contains many `"` characters, so we cannot use parsePhpString for
+ * multiline GLORIA documents — locate <?xml / <GLORIA_availabilityrs> … </GLORIA_availabilityrs> instead.
+ */
+export function extractXmlFromSupplierResponse(text: string): string {
+	if (!text || typeof text !== "string") return text;
+	let trimmed = text.trim().replace(/^\uFEFF/, "");
+
+	const preMatch = trimmed.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+	if (preMatch?.[1]) trimmed = preMatch[1].trim();
+
+	const xmlStart = trimmed.search(/<\?xml|<GLORIA_availability|<OTA_VehAvailRateRS/i);
+	if (xmlStart >= 0) {
+		const slice = trimmed.slice(xmlStart);
+		const gloriaClose = "</GLORIA_availabilityrs>";
+		const gloriaEnd = slice.indexOf(gloriaClose);
+		if (gloriaEnd >= 0) {
+			return slice.slice(0, gloriaEnd + gloriaClose.length).trim();
+		}
+		const otaClose = "</OTA_VehAvailRateRS>";
+		const otaEnd = slice.indexOf(otaClose);
+		if (otaEnd >= 0) {
+			return slice.slice(0, otaEnd + otaClose.length).trim();
+		}
+		return slice.trim();
+	}
+
+	// Short PHP string dumps without XML markers (rare)
+	if (/^string\s*\(\s*\d+\s*\)\s*"/.test(trimmed)) {
+		const parsed = parsePhpString(trimmed, 0);
+		if (parsed?.value) trimmed = parsed.value.trim();
+	}
+
+	return trimmed;
+}
+
 export function convertPhpVarDumpToObject(phpText: string): any {
   if (!phpText || typeof phpText !== "string") {
     throw new Error("Invalid input: expected string");

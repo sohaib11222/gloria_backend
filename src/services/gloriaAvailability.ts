@@ -104,6 +104,9 @@ function readElementAttrs(node: any): Record<string, string> {
   };
   const n = unwrapOne(node);
   if (!n || typeof n !== "object") return out;
+  // PHP var_dump trees use ["attr"]=> { ... } instead of @attributes
+  const phpAttr = (n as any).attr;
+  if (phpAttr && typeof phpAttr === "object") add(phpAttr as any);
   // fast-xml-parser may expose internal attr map as ":@"
   const internalAttrs = (n as any)[":@"];
   if (internalAttrs && typeof internalAttrs === "object") {
@@ -191,6 +194,22 @@ function toNum(v: any): number {
   if (typeof v !== "string") return 0;
   const n = Number(v.replace(/,/g, "."));
   return Number.isFinite(n) ? n : 0;
+}
+
+function uniqueTermsByCode<T extends { code?: string }>(rows: T[]): T[] {
+	const out: T[] = [];
+	const seen = new Set<string>();
+	for (const row of rows) {
+		const code = (row.code || "").trim().toUpperCase();
+		if (!code) {
+			out.push(row);
+			continue;
+		}
+		if (seen.has(code)) continue;
+		seen.add(code);
+		out.push(row);
+	}
+	return out;
 }
 
 function stringifyAttrRecord(a: Record<string, any>): Record<string, string> {
@@ -286,8 +305,31 @@ export function parseGloriaAvailabilityOffers(
         mandatory: "No",
       };
     });
-    const included = includedRaw.filter((x) => x.header || x.code);
-    const notIncluded = notIncludedRaw.filter((x) => x.header || x.code);
+    const included = uniqueTermsByCode(
+      includedRaw.filter((x) => x.header || x.code),
+    );
+    const notIncluded = uniqueTermsByCode(
+      notIncludedRaw.filter((x) => x.header || x.code),
+    );
+
+    const termsBlock = unwrapOne(pickChildCI(car, "Terms", "terms"));
+    const termItemRaw = termsBlock?.Item ?? termsBlock?.item ?? termsBlock;
+    const gloria_terms = asArray(termItemRaw)
+      .map((x: any) => {
+        const a = readElementAttrs(unwrapOne(x));
+        const code = bagGet(a, "Code", "code") || "";
+        const name = bagGet(a, "Name", "name") || "";
+        const description = bagGet(a, "Description", "description") || "";
+        if (!code && !name && !description) return null;
+        return {
+          "@attributes": {
+            ...(code ? { Code: code } : {}),
+            ...(name ? { Name: name } : {}),
+            ...(description ? { Description: description } : {}),
+          },
+        };
+      })
+      .filter(Boolean) as Array<{ "@attributes": Record<string, string> }>;
 
     const ox = pickChildCI(car, "OptionalExtras", "optionalextras", "optionalExtras");
     const extraItems = asArray(ox?.Item ?? ox?.item ?? ox);
@@ -305,7 +347,9 @@ export function parseGloriaAvailabilityOffers(
           equip_type: bagGet(a, "Code", "EquipType") || undefined,
           vendor_equip_id: bagGet(a, "Code", "EquipType") || undefined,
           currency: bagGet(a, "Currency", "currency") || undefined,
-          long_description: bagGet(a, "LongDescription", "Description") || undefined,
+          long_description:
+            bagGet(a, "Description", "LongDescription", "long_description") ||
+            undefined,
           charge: { Amount: amount },
         };
       })
@@ -350,6 +394,7 @@ export function parseGloriaAvailabilityOffers(
         Object.keys(gloria_pricing_attributes).length > 0 ? gloria_pricing_attributes : undefined,
       gloria_vehdetails_attributes:
         Object.keys(gloria_vehdetails_attributes).length > 0 ? gloria_vehdetails_attributes : undefined,
+      gloria_terms: gloria_terms.length ? gloria_terms : undefined,
     });
   }
 

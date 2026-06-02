@@ -75,6 +75,8 @@ export interface Offer {
 	gloria_pricing_attributes?: Record<string, string>;
 	/** Flat copy of GLORIA vehdetails @attributes */
 	gloria_vehdetails_attributes?: Record<string, string>;
+	/** GLORIA Terms.Item[] when present on availcars */
+	gloria_terms?: unknown[];
 }
 
 export interface CreateBookingInput {

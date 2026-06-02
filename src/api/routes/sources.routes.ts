@@ -20,10 +20,12 @@ import {
 import {
 	convertPhpVarDumpToObject,
 	convertPhpVarDumpToVehAvailRS,
+	extractXmlFromSupplierResponse,
 } from "../../services/phpVarDumpVehAvail.js";
 import { buildGloriaAvailabilityRq } from "../../services/otaXmlBuilder.js";
 import { makeGrpcSourceAdapter } from "../../adapters/grpcSourceAdapter.js";
 import { parseGloriaAvailabilityOffers } from "../../services/gloriaAvailability.js";
+import { parseGloriaAvailabilityFromResponseText } from "../../services/gloriaXmlParse.js";
 import { ensureUnlocodeRowForBranch } from "../../services/ensureUnlocodeForBranch.js";
 
 const SOURCE_AVAILABILITY_UPLOAD_ROOT = path.join(
@@ -6840,12 +6842,13 @@ sourcesRouter.post(
 						});
 					}
 
-					const responseText = await fetchResponse.text();
+					const responseTextRaw = await fetchResponse.text();
+					const responseText = extractXmlFromSupplierResponse(responseTextRaw);
 					const contentType = fetchResponse.headers.get("content-type") || "";
 					let raw: any = null;
 
 					console.log(
-						`[fetch-availability] OTA XML contentType="${contentType}" length=${responseText.length}`,
+						`[fetch-availability] OTA XML contentType="${contentType}" length=${responseText.length} (raw=${responseTextRaw.length})`,
 					);
 					console.log(
 						`[fetch-availability] responseText (first 800):`,
@@ -6853,15 +6856,40 @@ sourcesRouter.post(
 					);
 					rawResponsePreview = responseText.slice(0, 3000);
 
+					// ── GLORIA av.php style: string(N) "…xml…" or plain GLORIA_availabilityrs XML ──
+					const isGloriaAvailabilityResponse =
+						responseText.includes("GLORIA_availability") ||
+						responseText.includes("VehAvairsdetails") ||
+						responseText.includes("vehavailmaindet") ||
+						responseTextRaw.includes("GLORIA_availabilityrs") ||
+						responseTextRaw.includes("VehAvairsdetails");
+					if (isGloriaAvailabilityResponse) {
+						offers = await parseGloriaAvailabilityFromResponseText(
+							responseTextRaw,
+							sourceId,
+							{ agreement_ref: requestorId },
+						);
+						if (offers.length) {
+							parsedPreview = {
+								type: "gloria-availability",
+								format: responseTextRaw.includes('string(')
+									? "php-var-dump-xml-string"
+									: "gloria-xml",
+								offersCount: offers.length,
+								firstOffer: offers[0] ?? null,
+							};
+						}
+					}
+
 					// ── Try OTA XML parsing (OTA_VehAvailRateRS) ──
 					const trimmed = responseText.trim();
 					// GLORIA_availabilityrs must use the Gloria parser only — OTA pre-parse can mis-detect
 					// (e.g. VehAvailRSCore mentioned in prose) or build a partial tree and skip Gloria extraction.
 					const skipOtaXmlPreparse =
-						trimmed.includes("GLORIA_availability") ||
-						trimmed.includes("VehAvairsdetails") ||
-						trimmed.includes("vehavailmaindet");
+						isGloriaAvailabilityResponse ||
+						offers.length > 0;
 					if (
+						!offers.length &&
 						!skipOtaXmlPreparse &&
 						(trimmed.startsWith("<?xml") ||
 							trimmed.startsWith("<OTA_VehAvailRateRS") ||
@@ -6972,8 +7000,11 @@ sourcesRouter.post(
 						}
 					}
 
-					// GLORIA availability fallback (XML/JSON/var_dump tree with VehAvairsdetails.availcars)
-					if (!raw || typeof raw !== "object" || !isOtaVehAvailResponse(raw)) {
+					// GLORIA availability fallback (JSON / PHP array var_dump tree)
+					if (
+						!offers.length &&
+						(!raw || typeof raw !== "object" || !isOtaVehAvailResponse(raw))
+					) {
 						let gloriaRoot: any = null;
 						if (raw && typeof raw === "object") {
 							if (raw.GLORIA_availabilityrs)
@@ -6982,41 +7013,12 @@ sourcesRouter.post(
 						}
 						if (
 							!gloriaRoot &&
-							trimmed.startsWith("<") &&
-							responseText.includes("GLORIA_availability")
-						) {
-							try {
-								const { XMLParser } = await import("fast-xml-parser");
-								const xmlParser = new XMLParser({
-									ignoreAttributes: false,
-									attributesGroupName: "@attributes",
-									attributeNamePrefix: "",
-									parseAttributeValue: false,
-									trimValues: true,
-									removeNSPrefix: true,
-									// Force arrays for repeated GLORIA children so we never collapse 16 cars into one node
-									isArray: (tagName: string) => {
-										const t = tagName.toLowerCase();
-										// Only force arrays where siblings repeat; avoid "Item" (breaks some feeds + attribute handling)
-										return t === "availcars" || t === "country";
-									},
-								});
-								const parsedXml = xmlParser.parse(responseText);
-								const rootKey = Object.keys(parsedXml).find((k) =>
-									k.includes("GLORIA_availabilityrs"),
-								);
-								gloriaRoot = rootKey ? parsedXml[rootKey] : parsedXml;
-							} catch {
-								/* no-op */
-							}
-						}
-						if (
-							!gloriaRoot &&
 							typeof responseText === "string" &&
-							responseText.includes("VehAvairsdetails")
+							responseText.includes("VehAvairsdetails") &&
+							responseText.includes("array(")
 						) {
 							try {
-								const parsedVarDump = convertPhpVarDumpToObject(responseText);
+								const parsedVarDump = convertPhpVarDumpToObject(responseTextRaw);
 								gloriaRoot =
 									parsedVarDump?.GLORIA_availabilityrs || parsedVarDump;
 							} catch {
@@ -7029,6 +7031,7 @@ sourcesRouter.post(
 							});
 							parsedPreview = {
 								type: "gloria-availability",
+								format: "php-array-var-dump",
 								offersCount: offers.length,
 								firstOffer: offers[0] ?? null,
 							};
@@ -7126,6 +7129,7 @@ sourcesRouter.post(
 					gloria_pricing_attributes: o.gloria_pricing_attributes ?? undefined,
 					gloria_vehdetails_attributes:
 						o.gloria_vehdetails_attributes ?? undefined,
+					gloria_terms: o.gloria_terms ?? undefined,
 				}));
 
 				const criteriaDisplay = {
